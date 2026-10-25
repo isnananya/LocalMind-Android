@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "packId": "dev.localmind.stickers.demo",
+  "packName": "图片表情包（示例）",
+  "author": "LocalMind",
+  "description": "6 张图片表情，用来演示图片梗图链路。图片在 assets/ 里，emoji.json 里用文件名引用。",
+  "license": "示例图片由本项目生成，MIT。你自己的表情包请自行确认素材授权。",
+  "home": "",
+  "promptHint": "标签要挑一个最贴近你此刻语气的。发出来是一张小图，别在正文里解释它。",
+  "keywords": {
+    "哈哈": "开心", "笑死": "开心", "嘿嘿": "开心",
+    "无语": "无语", "服了": "无语", "算了": "无语", "麻了": "无语",
+    "呜呜": "难过", "难受": "难过", "委屈": "难过",
+    "什么": "惊讶", "真的假的": "惊讶", "居然": "惊讶", "天啊": "惊讶",
+    "嗯": "思考", "让我想想": "思考", "想想": "思考",
+    "喜欢": "喜欢", "爱你": "喜欢", "抱抱": "喜欢"
+  },
+  "stickers": [
+    {
+      "emotion": "开心",
+      "image": "happy.png",
+      "char": "😄",
+      "description": "开心的大笑",
+      "aliases": ["高兴", "快乐", "笑"],
+      "weight": 3
+    },
+    {
+      "emotion": "无语",
+      "image": "speechless.png",
+      "char": "😐",
+      "description": "面无表情的无语",
+      "aliases": ["服了", "麻了", "无奈"],
+      "weight": 3
+    },
+    {
+      "emotion": "难过",
+      "image": "cry.png",
+      "char": "😢",
+      "description": "有点难过",
+      "aliases": ["伤心", "委屈", "呜呜"],
+      "weight": 2
+    },
+    {
+      "emotion": "惊讶",
+      "image": "wow.png",
+      "char": "😮",
+      "description": "意外的发现",
+      "aliases": ["震惊", "吃惊", "不敢相信"],
+      "weight": 2
+    },
+    {
+      "emotion": "思考",
+      "image": "think.png",
+      "char": "🤔",
+      "description": "困惑的思考",
+      "aliases": ["想想", "考虑", "琢磨"],
+      "weight": 3
+    },
+    {
+      "emotion": "喜欢",
+      "image": "like.png",
+      "char": "🥰",
+      "description": "心里暖暖的",
+      "aliases": ["亲昵", "爱你", "心动"],
+      "weight": 3
+    }
+  ]
+}

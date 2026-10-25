@@ -1,0 +1,12 @@
+{
+  "id": "com.localmind.pipeline.staged",
+  "name": "分步流水线",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "把长任务拆成能单独跑的小步：长文拆句逐句合成、长文拆块逐块理解，最后聚合。手机装不下的大模型靠这个用。",
+  "abilities": [
+    "pipeline"
+  ],
+  "requires": [],
+  "manifestVersion": 1
+}

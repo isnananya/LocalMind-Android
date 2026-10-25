@@ -1,0 +1,12 @@
+{
+  "id": "com.localmind.layout.card",
+  "name": "卡片首页",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "把首页换成卡片流，底栏换成 首页/对话/语音/我的",
+  "abilities": [
+    "ui_layout"
+  ],
+  "requires": [],
+  "manifestVersion": 1
+}

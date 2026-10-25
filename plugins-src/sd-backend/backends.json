@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "packId": "dev.localmind.backend.sd",
+  "packName": "本地生图后端（通用版 · arm64 + x86_64）",
+  "author": "LocalMind",
+  "description": "离线图片生成所需的推理后端。通用版支持步数、线程数、flash attention、采样器/调度器覆盖与逐帧进度；包内同时带 arm64-v8a 和 x86_64，安装时按本机 ABI 自动选一份。",
+  "license": "stable-diffusion.cpp 为 MIT；其内置 ggml 为 MIT",
+  "home": "https://github.com/leejet/stable-diffusion.cpp",
+  "note": "这个插件不含模型权重。模型（.gguf）另外下载，见模型库插件。32 位 armeabi-v7a 不支持：扩散推理需要 64 位地址空间。",
+  "backends": [
+    {
+      "id": "stable-diffusion-cpu-arm64",
+      "label": "Stable Diffusion（CPU · arm64）",
+      "description": "stable-diffusion.cpp，纯 CPU 推理，通用版入口。支持 SD1.5 / SDXL / SD-Turbo / Flux 等 gguf checkpoint。手机用这一份。",
+      "deployment": "LOCAL",
+      "abi": "arm64-v8a",
+      "file": "liblocalmind-sd.so",
+      "sizeBytes": 36876280,
+      "url": "",
+      "mirrors": []
+    },
+    {
+      "id": "stable-diffusion-cpu-x86_64",
+      "label": "Stable Diffusion（CPU · x86_64）",
+      "description": "stable-diffusion.cpp，纯 CPU 推理，通用版入口。模拟器 / Intel 平板用这一份。",
+      "deployment": "LOCAL",
+      "abi": "x86_64",
+      "file": "liblocalmind-sd.so",
+      "sizeBytes": 40079520,
+      "url": "",
+      "mirrors": []
+    }
+  ]
+}

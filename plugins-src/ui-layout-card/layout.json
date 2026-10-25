@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "packId": "com.localmind.layout.card",
+  "packName": "卡片首页",
+  "author": "LocalMind",
+  "description": "首页换成卡片流：问候卡 + 快捷入口 + 最近对话 + 本机状态；底栏换成 首页/对话/语音/我的。",
+  "appName": "LocalMind",
+  "subtitle": "模型跑在这台手机上",
+  "tabs": [
+    {
+      "id": "home",
+      "label": "首页",
+      "icon": "home"
+    },
+    {
+      "id": "chat",
+      "label": "对话",
+      "icon": "bubble"
+    },
+    {
+      "id": "breeze",
+      "label": "语音",
+      "icon": "breeze"
+    },
+    {
+      "id": "me",
+      "label": "我的",
+      "icon": "person"
+    }
+  ],
+  "startTab": "home",
+  "home": [
+    {
+      "type": "hero",
+      "title": "今天想说点什么？",
+      "text": "模型、语音、生图都在本机跑，断网也能用。",
+      "icon": "sparkle"
+    },
+    {
+      "type": "actions",
+      "items": [
+        {
+          "label": "新建对话",
+          "icon": "bubble",
+          "open": "new"
+        },
+        {
+          "label": "模型",
+          "icon": "memory",
+          "open": "models"
+        },
+        {
+          "label": "语音",
+          "icon": "voice",
+          "open": "voice"
+        },
+        {
+          "label": "插件",
+          "icon": "extension",
+          "open": "plugins"
+        }
+      ]
+    },
+    {
+      "type": "recent",
+      "title": "最近",
+      "limit": 3
+    },
+    {
+      "type": "status",
+      "title": "本机状态"
+    }
+  ],
+  "tokens": {
+    "accent": "#0FA3A3",
+    "cardCorner": "16",
+    "controlCorner": "14",
+    "tabStyle": "glass"
+  }
+}

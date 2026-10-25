@@ -1,0 +1,105 @@
+name: Build native prebuilt (stable-diffusion)
+
+# ---------------------------------------------------------------------------
+# 为什么单独一个工作流
+# ---------------------------------------------------------------------------
+# stable-diffusion.cpp 有 476 个 C/C++ 文件，加上它自带的 ggml 一起，
+# 干净构建要为每个 ABI 编上一两百个编译单元。这个成本放在开发者本机是纯浪费：
+# 同一份源码、同一个 NDK、同一组开关，编出来的东西每次都一样。
+#
+# 所以交给 CI 编一次、发成 Release 附件，本机用
+#   ./gradlew :app:fetchStableDiffusion
+# 拉下来直接用（见 app/build.gradle.kts）。这样日常改 Kotlin 是秒级构建，
+# 只有真的要改 sd.cpp 相关的东西时才需要在本机编。
+#
+# 手动触发，因为它的产物要发 Release；不需要每次 push 都跑。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号（会成为 Release 的 tag）'
+        required: true
+        default: 'sd-1.0.0'
+
+jobs:
+  build-sd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch stable-diffusion.cpp
+        run: |
+          git clone --depth 1 https://github.com/leejet/stable-diffusion.cpp.git third_party/stable-diffusion.cpp
+          # ggml 是子模块；Android 构建必须有它，否则 src/ 里的 ggml 调用编不过。
+          git -C third_party/stable-diffusion.cpp submodule update --init --depth 1 ggml
+          git -C third_party/stable-diffusion.cpp log -1 --oneline
+          ls third_party/stable-diffusion.cpp/src | head
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK / CMake
+        run: |
+          sdkmanager --install "ndk;27.0.12077973" "cmake;3.22.1"
+          yes | sdkmanager --licenses || true
+
+      - name: Build libstable-diffusion.a for each ABI
+        run: |
+          set -e
+          NDK="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          TC="$NDK/build/cmake/android.toolchain.cmake"
+          CMAKE="$ANDROID_SDK_ROOT/cmake/3.22.1/bin/cmake"
+          NINJA="$ANDROID_SDK_ROOT/cmake/3.22.1/bin/ninja"
+
+          mkdir -p out
+          for ABI in arm64-v8a armeabi-v7a x86_64; do
+            echo "===== $ABI ====="
+            "$CMAKE" -S app/src/main/cpp/sd-alone -B "b/$ABI" -G Ninja \
+              -DCMAKE_MAKE_PROGRAM="$NINJA" \
+              -DCMAKE_TOOLCHAIN_FILE="$TC" \
+              -DANDROID_ABI="$ABI" \
+              -DANDROID_PLATFORM=android-26 \
+              -DANDROID_STL=c++_shared \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSD_DIR="$PWD/third_party/stable-diffusion.cpp"
+            "$CMAKE" --build "b/$ABI" --target stable-diffusion -j 4
+
+            LIB=$(find "b/$ABI" -name 'libstable-diffusion.a' | head -1)
+            test -n "$LIB" || { echo "找不到 $ABI 的产物"; exit 1; }
+            mkdir -p "out/$ABI"
+            cp "$LIB" "out/$ABI/libstable-diffusion.a"
+            ls -la "out/$ABI"
+          done
+
+      - name: Pack
+        run: |
+          # 一起带上 sd.cpp 的 commit，方便排查"这个 .a 是基于哪一版编的"。
+          git -C third_party/stable-diffusion.cpp rev-parse HEAD > out/COMMIT.txt
+          cd out && zip -r ../localmind-sd-prebuilt.zip . && cd ..
+          ls -la localmind-sd-prebuilt.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-prebuilt
+          path: localmind-sd-prebuilt.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: 生图后端预编译库 ${{ inputs.version }}
+          body: |
+            stable-diffusion.cpp 的 Android 静态库，供 `./gradlew :app:fetchStableDiffusion` 使用。
+
+            包含 ABI：arm64-v8a、armeabi-v7a、x86_64。
+            构建基于的 sd.cpp commit 见包内 `COMMIT.txt`。
+
+            **本机不需要再编译这个库** —— 拉下来直接用，日常构建回到秒级。
+          files: localmind-sd-prebuilt.zip

@@ -1,0 +1,11 @@
+{
+  "id": "dev.localmind.stickers.demo",
+  "name": "图片表情包（示例）",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "6 张图片表情，演示图片梗图链路。把你的图片丢进 assets/ 再改 emoji.json 就能做自己的。",
+  "abilities": ["emoji_pack"],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

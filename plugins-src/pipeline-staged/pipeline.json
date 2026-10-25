@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "packId": "com.localmind.pipeline.staged",
+  "packName": "分步流水线",
+  "author": "LocalMind",
+  "description": "两条流程：Breeze 分步合成（拆句→逐句→拼接）、长文分段理解（拆块→逐块→聚合）。",
+  "pipelines": [
+    {
+      "id": "breeze-staged",
+      "name": "Breeze 分步合成",
+      "description": "长文拆成句子级分片，逐片调用语音引擎合成，最后拼成一个 wav。每片内存占用与文本长度无关 —— 这就是 Breeze 这类 3.47B 模型在手机上唯一可行的用法：本机跑不动，但可以逐片交给能跑的机器。",
+      "inputHint": "要朗读的文本。会在句号/问号/换行处切开，每片不超过 120 字",
+      "inputLines": 5,
+      "stages": [
+        {
+          "id": "probe",
+          "type": "probe",
+          "label": "本机体检"
+        },
+        {
+          "id": "split",
+          "type": "split_text",
+          "label": "拆句",
+          "maxChars": 120
+        },
+        {
+          "id": "tts",
+          "type": "tts",
+          "label": "逐句合成",
+          "engine": "auto",
+          "instruction": ""
+        },
+        {
+          "id": "merge",
+          "type": "concat_audio",
+          "label": "拼成一个 wav",
+          "silenceMs": 250
+        }
+      ]
+    },
+    {
+      "id": "llm-longdoc",
+      "name": "长文分段理解",
+      "description": "把长文切成块，逐块让本机模型处理（每次只装一块进上下文），再把各块结论拼起来。上下文装不下一整篇的小模型，靠这个读长文。",
+      "inputHint": "粘一段长文（几千字也行）。会按 800 字左右切块",
+      "inputLines": 8,
+      "stages": [
+        {
+          "id": "split",
+          "type": "split_text",
+          "label": "切块",
+          "maxChars": 800
+        },
+        {
+          "id": "llm",
+          "type": "llm",
+          "label": "逐块生成",
+          "prompt": "请用两三句话概括下面这一段，只讲重点，不要复述原文：\n\n{{chunk}}",
+          "maxTokens": 220
+        },
+        {
+          "id": "join",
+          "type": "join_text",
+          "label": "聚合"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    自适应图标（Android 8+）。图案是「꒰ঌ愛して໒꒱」捐的那张
+    （见「我的 → 关于 → 应用图标捐赠」）。
+
+    ⚠️ 1.0.3 的第一版把整张图当**背景层**全出血铺满 108dp，结果启动器一遮罩
+    就把四角和「Lmd」签名切掉了 —— 用户的原话是「这个图标显示不全」。
+
+    现在改回标准做法：
+      * 背景层 = 纯色 #FFCE65（就是原图底色）；
+      * 前景层 = 原图缩到 70% 居中（302/432 画布）。正方形的角到中心约 0.495，
+        小于遮罩半径 0.5，所以**整张图连签名都在圆形遮罩内**；
+        多出来的那圈与底色同色，肉眼看不出边界。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

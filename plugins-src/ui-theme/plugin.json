@@ -1,0 +1,11 @@
+{
+  "id": "dev.localmind.theme.warm",
+  "name": "暖橙主题",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "示例界面插件：换主色、加大圆角。改 ui.json 就能做出你自己的主题。",
+  "abilities": ["ui_theme"],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="models" path="models/" />
+    <files-path name="images" path="images/" />
+    <files-path name="shared" path="shared/" />
+    <!-- 聊天附件（用户发的图 / AI 画的图）。分享和"保存到相册"都要通过
+         FileProvider 授权，所以必须在白名单里，否则分享会抛
+         IllegalArgumentException: Failed to find configured root。 -->
+    <files-path name="chat_images" path="chat_images/" />
+    <cache-path name="cache" path="." />
+</paths>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        自适应图标的背景色 = 捐赠图标本身的底色（#FFCE65，从原图边缘采的）。
+
+        为什么用这个颜色：前景层是**那张图缩到 70% 居中**，外面那一圈必须和它
+        自己的底色一模一样 —— 启动器的圆形/方圆遮罩切掉四角时才看不出「被裁过」。
+    -->
+    <color name="ic_launcher_background">#FFCE65</color>
+</resources>

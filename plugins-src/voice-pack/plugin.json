@@ -1,0 +1,11 @@
+{
+  "id": "dev.localmind.voices.sherpa",
+  "name": "神经语音音色",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "8 个离线神经语音音色（小雅 / aishell3 / 6 个角色音色）。装完在「我的 → 语音与音色」里下载并使用。",
+  "abilities": ["tts_voice"],
+  "requires": ["network"],
+  "config": {},
+  "manifestVersion": 1
+}

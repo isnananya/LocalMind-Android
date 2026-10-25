@@ -1,0 +1,11 @@
+{
+  "id": "dev.localmind.stickers.zh",
+  "name": "中文表情包",
+  "version": "1.1.0",
+  "author": "LocalMind",
+  "description": "让 AI 能在回复里发表情包。30 个表情、16 个情感标签，支持同义词与关键词匹配。",
+  "abilities": ["emoji_pack"],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

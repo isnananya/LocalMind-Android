@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "packId": "dev.localmind.theme.warm",
+  "packName": "暖橙主题",
+  "author": "LocalMind",
+  "description": "示例界面插件：把主色换成暖橙、卡片圆角放大到 18、隐藏标签栏文字。",
+  "license": "MIT",
+  "home": "",
+  "tokens": {
+    "accent": "#FF6B35",
+    "danger": "#E5484D",
+    "success": "#30A46C",
+    "groupedBackground": "#FDF9F6",
+    "cardBackground": "#FFFFFF",
+    "cardCorner": "18",
+    "controlCorner": "12",
+    "sheetCorner": "22",
+    "fontScale": "1.0",
+    "showTabBarLabels": "true",
+    "navTitleAlign": "center"
+  },
+  "darkTokens": {
+    "accent": "#FF8A5C",
+    "groupedBackground": "#0A0A0C",
+    "cardBackground": "#16161A"
+  },
+  "appName": ""
+}

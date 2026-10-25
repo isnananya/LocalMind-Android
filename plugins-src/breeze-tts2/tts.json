@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "packId": "com.breezeblue.tts2",
+  "packName": "Breeze TTS 2",
+  "author": "BreezeBlue",
+  "description": "把 Breeze TTS 2 的语音能力接进 LocalMind。手机跑不动这个模型（3.47B / CUDA），需要在 PC 或 GPU 服务器上自建服务，手机当客户端。",
+  "note": "端点在「我的 → 更多 → Breeze 语音」里填，改成你服务器的局域网地址。",
+  "engines": [
+    {
+      "id": "breeze-tts-2",
+      "label": "Breeze TTS 2",
+      "kind": "breeze",
+      "baseUrl": "http://127.0.0.1:7860",
+      "apiKey": "",
+      "model": "BreezeBlue/breeze-tts-2",
+      "defaultVoice": "S0",
+      "defaultInstruction": "",
+      "cfgScale": 4,
+      "sampleRate": 24000,
+      "format": "pcm_s16le",
+      "notes": "24 kHz 单声道；中英双语、自然语言演技指导；声音克隆需要参考音频 + 精确文字稿。",
+      "voices": [
+        {
+          "id": "S0",
+          "label": "默认说话人",
+          "note": "声音由 instruction 决定，槽位只有一个"
+        }
+      ]
+    }
+  ]
+}

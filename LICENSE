@@ -1,0 +1,39 @@
+MIT License
+
+Copyright (c) 2025 LocalMind contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Third-party components
+
+| Component | License | How it is used |
+| --- | --- | --- |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) | MIT | vendored source, compiled into `liblocalmind.so` (clone it into `third_party/llama.cpp`) |
+| [AirLLM](https://github.com/lyogavin/airllm) | Apache-2.0 | **idea only** — memory-budget planning and disk-streamed weight loading reimplemented natively for Android; see `docs/AIRLLM.md` and `third_party/airllm-reference/` |
+| [liuran001/WeChat-LiquidGlass](https://github.com/liuran001/WeChat-LiquidGlass) | see upstream | **technique reference only** — the liquid-glass bottom bar in this app (floating pill, backdrop capture + stack blur, spring-driven indicator) is an independent Kotlin/Compose reimplementation inspired by its approach. No code copied. |
+| [xiaojiaenen/liquid-glass](https://github.com/xiaojiaenen/liquid-glass) | see upstream | **design reference only** — Apple "Liquid Glass" parameters (tint layering, specular highlight). React/SVG source, not usable on Android. |
+| AndroidX / Jetpack Compose | Apache-2.0 | UI |
+| OkHttp | Apache-2.0 | model downloads |
+| kotlinx.serialization / coroutines | Apache-2.0 | persistence / async |
+
+Model weights are **not** distributed with this project. Every catalogue entry links to its
+original repository and lists its license (Apache-2.0, Llama-3.2-Community, Gemma, MIT, …);
+downloading a model means accepting that model's own license.

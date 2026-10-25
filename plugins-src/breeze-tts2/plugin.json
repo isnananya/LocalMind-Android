@@ -1,0 +1,14 @@
+{
+  "id": "com.breezeblue.tts2",
+  "name": "Breeze TTS 2",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "接入 Breeze TTS 2 的语音合成服务（手机跑不动 3.47B，需要在别的机器上跑）",
+  "abilities": [
+    "tts_engine"
+  ],
+  "requires": [
+    "network"
+  ],
+  "manifestVersion": 1
+}

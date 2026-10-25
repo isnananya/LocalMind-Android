@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LocalMind</string>
+    <string name="api_service_channel">Local API server</string>
+    <string name="api_service_title">LocalMind API running</string>
+</resources>

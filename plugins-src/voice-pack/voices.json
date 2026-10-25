@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "packId": "dev.localmind.voices.sherpa",
+  "packName": "神经语音音色",
+  "author": "LocalMind",
+  "license": "音色模型来自 k2-fsa/sherpa-onnx 官方 Release，各自遵循其原始许可（多为 Apache-2.0；角色音色为社区模型，仅供个人非商业使用）",
+  "home": "https://github.com/k2-fsa/sherpa-onnx",
+  "note": "id 就是官方 tarball 的名字。下载地址留空会自动按官方 Release 约定拼；直连 GitHub 会随机超时，主程序会自动回退到 gh-proxy 代理。",
+  "voices": [
+    {
+      "id": "vits-piper-zh_CN-xiao_ya-medium-int8",
+      "label": "小雅（女声 · 普通话）",
+      "description": "Piper 中文女声，体积小、离线、比系统音自然",
+      "badge": "轻量",
+      "sizeBytes": 14016124,
+      "sampleText": "你好，我是小雅。今天想聊点什么？"
+    },
+    {
+      "id": "vits-icefall-zh-aishell3",
+      "label": "aishell3 多说话人",
+      "description": "中文通用多说话人数据集音色，可切换说话人",
+      "badge": "",
+      "sizeBytes": 31559701,
+      "sampleText": "这是一段用来试听的普通话。"
+    },
+    {
+      "id": "vits-zh-hf-theresa",
+      "label": "特蕾莎（女声）",
+      "description": "游戏角色音色，情感丰富",
+      "badge": "角色",
+      "sizeBytes": 120596617,
+      "sampleText": "唔……找我有什么事吗？"
+    },
+    {
+      "id": "vits-zh-hf-eula",
+      "label": "优菈（女声）",
+      "description": "游戏角色音色，清冷",
+      "badge": "角色",
+      "sizeBytes": 120562119,
+      "sampleText": "记住，这个仇，我记下了。"
+    },
+    {
+      "id": "vits-zh-hf-keqing",
+      "label": "刻晴（女声）",
+      "description": "游戏角色音色，清亮",
+      "badge": "角色",
+      "sizeBytes": 120592220,
+      "sampleText": "效率，是衡量一切的标准。"
+    },
+    {
+      "id": "vits-zh-hf-zenyatta",
+      "label": "禅雅塔（男声）",
+      "description": "游戏角色音色，男声",
+      "badge": "角色",
+      "sizeBytes": 120588994,
+      "sampleText": "体验宁静。"
+    },
+    {
+      "id": "vits-zh-hf-bronya",
+      "label": "布洛妮娅（女声）",
+      "description": "游戏角色音色，804 个说话人",
+      "badge": "角色",
+      "sizeBytes": 120595102,
+      "sampleText": "任务完成。"
+    },
+    {
+      "id": "vits-zh-hf-fanchen-C",
+      "label": "泛尘（通用男声）",
+      "description": "中文男声，稳定",
+      "badge": "",
+      "sizeBytes": 119326431,
+      "sampleText": "你好，我是泛尘。"
+    }
+  ]
+}
