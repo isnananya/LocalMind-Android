@@ -34,6 +34,7 @@ import com.localmind.ui.Tab
 import com.localmind.ui.components.IosCard
 import com.localmind.ui.components.IosDivider
 import com.localmind.ui.components.IosIconBadge
+import com.localmind.ui.components.pressScale
 import com.localmind.ui.components.IosPill
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.theme.IosTheme
@@ -208,12 +209,18 @@ private fun ActionsBlock(block: LayoutBlock, onOpen: (String) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             rowItems.forEach { item ->
+                val interaction = androidx.compose.runtime.remember {
+                    androidx.compose.foundation.interaction.MutableInteractionSource()
+                }
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .pressScale(interaction)
                         .clip(RoundedCornerShape(IosTheme.metrics.cardCorner))
                         .background(ios.secondaryGroupedBackground)
-                        .clickable { onOpen(item.open.ifBlank { item.label }) }
+                        .clickable(interactionSource = interaction, indication = null) {
+                            onOpen(item.open.ifBlank { item.label })
+                        }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                 ) {
                     IosIconBadge(icon = iconOf(item.icon, AppIcons.AutoAwesome), tint = ios.blue, size = 30)

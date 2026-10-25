@@ -274,6 +274,22 @@ fun LocalMindRoot(
                     onSelect = { viewModel.selectTab(it) },
                     bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                     items = tabs,
+                    // 布局插件能给入口改名、换图标：名字来自 tabs[].label，
+                    // 图标来自 tabs[].icon（只认内置名单里的那几种）。
+                    labels = uiLayout?.tabs
+                        ?.mapNotNull { spec ->
+                            val t = Tab.fromId(spec.target) ?: return@mapNotNull null
+                            spec.label.takeIf { it.isNotBlank() }?.let { t to it }
+                        }
+                        ?.toMap()
+                        .orEmpty(),
+                    icons = uiLayout?.tabs
+                        ?.mapNotNull { spec ->
+                            val t = Tab.fromId(spec.target) ?: return@mapNotNull null
+                            com.localmind.ui.icons.LayoutIcons.of(spec.icon)?.let { t to it }
+                        }
+                        ?.toMap()
+                        .orEmpty(),
                     showLabels = showLabels,
                     style = tabStyle,
                 )

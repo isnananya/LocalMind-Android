@@ -1,0 +1,12 @@
+{
+  "id": "com.localmind.layout.clean",
+  "name": "简约",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "极简版界面：底栏三个入口（首页/消息/我的）+ 语音入口，整体走黑白灰、大留白、大圆角。演示「插件可以换掉整个 UI」：名字、图标、入口、首页块、外观令牌全部由这份 JSON 决定。",
+  "abilities": [
+    "ui_layout"
+  ],
+  "requires": [],
+  "manifestVersion": 1
+}

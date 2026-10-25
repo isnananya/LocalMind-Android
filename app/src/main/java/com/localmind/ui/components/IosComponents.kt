@@ -140,6 +140,8 @@ fun IosCell(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // 按下的形变和 clickable 共用同一个 interaction —— 各建一个就"点了不动"。
+            .pressScale(interaction, enabled = onClick != null && enabled)
             .then(
                 if (onClick != null && enabled) {
                     Modifier.clickable(interactionSource = interaction, indication = ripple(color = ios.gray), onClick = onClick)

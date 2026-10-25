@@ -110,6 +110,8 @@ fun LiquidGlassTabBar(
      * 「消息」，都是合理的产品决定。图标仍然由页面决定（见 [tabIconOf]）。
      */
     labels: Map<Tab, String> = emptyMap(),
+    /** 插件指定的图标（id → 图形）。没给就用页面自带的（见 [tabIconOf]）。 */
+    icons: Map<Tab, androidx.compose.ui.graphics.vector.ImageVector> = emptyMap(),
     showLabels: Boolean = true,
     style: String = "glass",
 ) {
@@ -117,8 +119,9 @@ fun LiquidGlassTabBar(
     val view = LocalView.current
 
     // 插件给的顺序生效，但认不出的已经在调用方过滤掉了。
-    val tabSpecs = items.mapNotNull { t -> tabIconOf[t]?.let { GlassTabSpec(t, it) } }
-        .ifEmpty { glassTabs.map { GlassTabSpec(it, tabIconOf.getValue(it)) } }
+    val tabSpecs = items.mapNotNull { t ->
+        (icons[t] ?: tabIconOf[t])?.let { GlassTabSpec(t, it) }
+    }.ifEmpty { glassTabs.map { GlassTabSpec(it, tabIconOf.getValue(it)) } }
 
     // ---- state ------------------------------------------------------------
     var backdrop by remember { mutableStateOf<Bitmap?>(null) }
@@ -299,6 +302,8 @@ fun LiquidGlassTabBar(
                         spec = spec,
                         selected = spec.tab == selected,
                         onClick = { onSelect(spec.tab) },
+                        label = labels[spec.tab] ?: spec.tab.title,
+                        showLabel = showLabels,
                     )
                 }
             }
@@ -311,6 +316,8 @@ private fun androidx.compose.foundation.layout.RowScope.LiquidGlassTabItem(
     spec: GlassTabSpec,
     selected: Boolean,
     onClick: () -> Unit,
+    /** 显示的文字。调用方已经按插件的 `label` 覆盖过了。 */
+    label: String = "",
     showLabel: Boolean = true,
 ) {
     val ios = IosTheme.palette
@@ -341,7 +348,7 @@ private fun androidx.compose.foundation.layout.RowScope.LiquidGlassTabItem(
     ) {
         Icon(
             imageVector = spec.icon,
-            contentDescription = spec.tab.title,
+            contentDescription = label.ifBlank { spec.tab.title },
             tint = tint,
             modifier = Modifier
                 .size(IosTheme.metrics.tabIconSize)
@@ -356,7 +363,7 @@ private fun androidx.compose.foundation.layout.RowScope.LiquidGlassTabItem(
         if (showLabel) {
             Spacer(Modifier.height(1.dp))
             Text(
-                text = spec.tab.title,
+                text = label.ifBlank { spec.tab.title },
                 style = IosTheme.typography.caption2.copy(fontSize = 10.sp),
                 color = tint,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
