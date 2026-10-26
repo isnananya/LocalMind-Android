@@ -123,36 +123,13 @@ fun LiquidGlassTabBar(
     var srcRect by remember { mutableStateOf(Rect.Zero) }
     val decorView = remember(view) { GlassBackdrop.findDecor(view) }
 
-    LaunchedEffect(selected, ios.isDark, style, blurPct) {
-        GlassBackdrop.invalidate()
-        while (isActive) {
-            GlassBackdrop.capturing = true
-            val bmp = try { GlassBackdrop.capture(decorView) } finally { GlassBackdrop.capturing = false }
-            if (bmp != null && decorView != null && barSize.width > 0) {
-                val decorW = decorView.width.coerceAtLeast(1)
-                val decorLoc = IntArray(2).also { decorView.getLocationInWindow(it) }
-                val viewLoc = IntArray(2).also { view.getLocationInWindow(it) }
-                val left = (viewLoc[0] - decorLoc[0]) + barPos.x
-                // 采样栏体上方的区域：decor 截图里已经包含底栏自己，直接采样会把自己的图标
-                // 再画一遍（重影）。往上挪一栏高度，取到的仍是栏后内容的近似。
-                val top = (viewLoc[1] - decorLoc[1]) + barPos.y - barSize.height
-                val scale = bmp.width.toFloat() / decorW.toFloat()
-                val x = (left * scale).coerceIn(0f, (bmp.width - 1).toFloat())
-                val y = (top * scale).coerceIn(0f, (bmp.height - 1).toFloat())
-                val w = (barSize.width * scale).coerceIn(1f, bmp.width - x)
-                val h = (barSize.height * scale).coerceIn(1f, bmp.height - y)
-                srcRect = Rect(x, y, x + w, y + h)
-                backdrop = bmp
-            }
-            kotlinx.coroutines.delay(150)
-        }
-    }
-
     val count = specs.size
     val selectedIndex = specs.indexOfFirst { it.tab == selected }.coerceAtLeast(0)
     var widthPx by remember { mutableStateOf(0f) }
     val pillX = remember { Animatable(0f) }
     var dragging by remember { mutableStateOf(false) }
+    var dragVelocity by remember { mutableFloatStateOf(0f) }
+    val tilt = rememberTiltX()
     val scope = rememberCoroutineScope()
     LaunchedEffect(selectedIndex, widthPx, count) {
         if (widthPx > 0f && count > 0) {
@@ -173,22 +150,6 @@ fun LiquidGlassTabBar(
     val compactWidth = minOf(360, 72 * count + 24).dp
     var dragY by remember { mutableFloatStateOf(0f) }
     val cornerPx = with(density) { corner.toPx() }
-
-    val shader = remember(backdrop, srcRect, barSize, cornerPx, tint, ios.isDark, blurPct, style) {
-        val bmp = backdrop ?: return@remember null
-        if (style == "plain" || blurPct <= 1f) return@remember null
-        GlassShader.create(
-            bitmap = bmp,
-            src = if (srcRect.width > 1f) srcRect else Rect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat()),
-            width = barSize.width,
-            height = barSize.height,
-            radius = cornerPx,
-            refraction = 8f + 6f * (blurPct / 100f),
-            tint = (tint.value shr 32).toInt(),
-            tintAlpha = if (ios.isDark) 0.46f else 0.55f,
-            highlight = if (ios.isDark) 0.10f else 0.35f,
-        )
-    }
 
     Box(
         modifier = Modifier
@@ -273,45 +234,12 @@ fun LiquidGlassTabBar(
                         .background(ios.blue),
                 )
                 "none" -> Unit
-                else -> Box(
-                    modifier = Modifier
-                        .graphicsLayer {
-                            translationX = pillX.value - 27.dp.toPx()
-                            alpha = if (pillX.value > 0f) 1f else 0f
-                            val stretch = if (dragging) 1.45f else 1f
-                            scaleX = stretch
-                            scaleY = if (dragging) 0.82f else 1f
-                        }
-                        .width(54.dp)
-                        .height(54.dp)
-                        .align(Alignment.CenterStart)
-                        .shadow(
-                            10.dp,
-                            RoundedCornerShape(999.dp),
-                            ambientColor = Color.Black.copy(alpha = 0.10f),
-                            spotColor = Color.Black.copy(alpha = 0.12f),
-                        )
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(
-                                    Color.White.copy(alpha = if (ios.isDark) 0.26f else 0.92f),
-                                    (if (ios.isDark) Color(0xFF6C9BFF) else Color(0xFFDCE9FF)).copy(alpha = 0.55f),
-                                    Color.White.copy(alpha = if (ios.isDark) 0.10f else 0.62f),
-                                )
-                            )
-                        )
-                        .border(
-                            1.dp,
-                            Brush.linearGradient(
-                                listOf(
-                                    Color.White.copy(alpha = 0.95f),
-                                    Color.White.copy(alpha = 0.25f),
-                                    Color.Black.copy(alpha = 0.10f),
-                                )
-                            ),
-                            RoundedCornerShape(999.dp),
-                        )
+                else -> LiquidIndicator(
+                    x = pillX.value,
+                    velocity = if (dragging) dragVelocity else pillX.velocity,
+                    dragging = dragging,
+                    tiltX = tilt,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
 
@@ -320,24 +248,28 @@ fun LiquidGlassTabBar(
                     .fillMaxSize()
                     .pointerInput(count, widthPx, indicator) {
                         if (indicator != "capsule") return@pointerInput
+                        val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                         detectDragGestures(
                             onDragStart = {
+                                tracker.resetTracking()
                                 dragging = true
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             },
                             onDrag = { change: androidx.compose.ui.input.pointer.PointerInputChange, amount: androidx.compose.ui.geometry.Offset ->
                                 change.consume()
+                                tracker.addPosition(change.uptimeMillis, change.position)
                                 val slot = widthPx / count
                                 scope.launch {
                                     pillX.snapTo((pillX.value + amount.x).coerceIn(slot / 2f, widthPx - slot / 2f))
                                 }
                             },
                             onDragEnd = {
+                                dragVelocity = tracker.calculateVelocity().x
                                 val slot = widthPx / count
                                 val target = ((pillX.value / slot).toInt()).coerceIn(0, count - 1)
                                 specs.getOrNull(target)?.let { if (it.tab != selected) onSelect(it.tab) }
                                 scope.launch {
-                                    pillX.animateTo(slot * (target + 0.5f), Motion.bouncy())
+                                    pillX.animateTo(slot * (target + 0.5f), Motion.bouncy(), initialVelocity = dragVelocity)
                                 }
                                 dragging = false
                             },
