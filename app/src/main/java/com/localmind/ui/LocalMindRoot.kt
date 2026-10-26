@@ -23,11 +23,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.localmind.ui.components.LiquidGlassTabBar
@@ -100,11 +104,10 @@ fun LocalMindRoot(
         return
     }
 
-    androidx.activity.compose.BackHandler(
-        enabled = showSettings || showImageStudio || showVoiceScreen || showBreeze || showPlugins ||
-            showPluginDocs || showConversationDetail || showDebug || (tab == Tab.CHAT && inChat) ||
-            (tab != Tab.CHAT && tab != Tab.MODELS && tab != Tab.ME && tab != Tab.HOME)
-    ) {
+    val canGoBack = showSettings || showImageStudio || showVoiceScreen || showBreeze || showPlugins ||
+        showPluginDocs || showConversationDetail || showDebug || (tab == Tab.CHAT && inChat) ||
+        (tab != Tab.CHAT && tab != Tab.MODELS && tab != Tab.ME && tab != Tab.HOME)
+    val goBack: () -> Unit = {
         when {
             showDebug -> viewModel.openDebug(false)
             showSettings -> viewModel.openSettings(false)
@@ -118,6 +121,20 @@ fun LocalMindRoot(
             else -> viewModel.leaveConversation()
         }
     }
+    androidx.activity.compose.BackHandler(enabled = canGoBack) { goBack() }
+
+    // 预返回：系统手势拖动时按 progress 缩放/位移，松手才真正返回。
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    androidx.activity.compose.PredictiveBackHandler(enabled = canGoBack) { progress ->
+        try {
+            progress.collect { backProgress = it.progress }
+            backProgress = 0f
+            goBack()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            backProgress = 0f
+            throw e
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         AuroraBackground {
@@ -127,7 +144,18 @@ fun LocalMindRoot(
                     (showImageStudio && tab == Tab.MODELS)
                 val immersiveChat = tab == Tab.CHAT && inChat
 
-                Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            if (backProgress > 0f) {
+                                translationX = backProgress * size.width * 0.30f
+                                scaleX = 1f - 0.05f * backProgress
+                                scaleY = 1f - 0.05f * backProgress
+                                alpha = 1f - 0.18f * backProgress
+                            }
+                        }
+                ) {
                     AnimatedContent(
                         targetState = when {
                             showDebug -> "debug"

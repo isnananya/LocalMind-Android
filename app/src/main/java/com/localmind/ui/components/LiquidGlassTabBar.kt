@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -119,7 +120,8 @@ fun LiquidGlassTabBar(
     LaunchedEffect(selected, ios.isDark, style, blurPct) {
         GlassBackdrop.invalidate()
         while (isActive) {
-            val bmp = GlassBackdrop.capture(decorView)
+            GlassBackdrop.capturing = true
+            val bmp = try { GlassBackdrop.capture(decorView) } finally { GlassBackdrop.capturing = false }
             if (bmp != null && decorView != null && barSize.width > 0) {
                 val decorW = decorView.width.coerceAtLeast(1)
                 val decorLoc = IntArray(2).also { decorView.getLocationInWindow(it) }
@@ -201,13 +203,51 @@ fun LiquidGlassTabBar(
                 .onGloballyPositioned { coords ->
                     val p = coords.positionInRoot()
                     barPos = IntOffset(p.x.toInt(), p.y.toInt())
-                },
+                }
+                .drawWithContent { if (!GlassBackdrop.capturing) drawContent() },
         ) {
-            // 半透明染色：悬浮栏不采样窗口内容，避免把自己的图标画成重影。
+            // 真折射：采样时不画底栏自己（见 capturing 开关），所以不会重影。
+            if (shader != null) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().apply {
+                            this.shader = shader
+                            isAntiAlias = true
+                        }
+                        val r = corner.toPx()
+                        canvas.nativeCanvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
+                    }
+                }
+            } else {
+                backdrop?.let { bmp ->
+                    Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = if (ios.isDark) 0.55f else 0.65f }
+                    ) {
+                        val src = if (srcRect.width > 1f) srcRect else Rect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat())
+                        drawImage(
+                            image = bmp.asImageBitmap(),
+                            srcOffset = IntOffset(src.left.toInt().coerceAtLeast(0), src.top.toInt().coerceAtLeast(0)),
+                            srcSize = IntSize(
+                                src.width.toInt().coerceIn(1, bmp.width),
+                                src.height.toInt().coerceIn(1, bmp.height),
+                            ),
+                            dstOffset = IntOffset(-3, -3),
+                            dstSize = IntSize(
+                                size.width.toInt().coerceAtLeast(1) + 6,
+                                size.height.toInt().coerceAtLeast(1) + 6,
+                            ),
+                            filterQuality = FilterQuality.Low,
+                        )
+                    }
+                }
+            }
+            // 极淡染色，给玻璃一点乳感，不遮住折射。
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(tint.copy(alpha = if (ios.isDark) 0.88f else 0.93f))
+                    .background(tint.copy(alpha = if (ios.isDark) 0.10f else 0.14f))
             )
 
             Box(

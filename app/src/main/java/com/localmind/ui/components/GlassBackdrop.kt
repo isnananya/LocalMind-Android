@@ -27,6 +27,11 @@ import android.view.ViewGroup
  */
 object GlassBackdrop {
 
+    /** 采窗口缩略图时临时藏掉底栏，避免把上一帧的自己画进玻璃。 */
+    @Volatile
+    var capturing = false
+
+
     /** Capture scale. 6 => ~1/36 the pixels to blur. */
     private const val SAMPLE = 6
 
