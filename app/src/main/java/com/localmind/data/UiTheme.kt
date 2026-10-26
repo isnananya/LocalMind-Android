@@ -224,7 +224,7 @@ object UiTokens {
     )
 
     /** 合法的标签页 id。 */
-    val tabIds: Set<String> = setOf("chat", "models", "me")
+    val tabIds: Set<String> = setOf("chat", "models", "me", "home", "voice", "breeze", "plugins", "image", "pipeline")
 }
 
 /** 界面插件的解析与校验。 */

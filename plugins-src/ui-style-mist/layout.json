@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "packId": "com.localmind.style.mist",
+  "packName": "雾海 · 今日",
+  "author": "LocalMind",
+  "description": "第一个标签是「今日」：问候卡、快捷入口、最近对话与本机状态都由插件排版。",
+  "appName": "LocalMind",
+  "subtitle": "全部在本机运行",
+  "tabs": [
+    {
+      "id": "home",
+      "label": "今日",
+      "icon": "sparkle"
+    },
+    {
+      "id": "chat",
+      "label": "对话",
+      "icon": "bubble"
+    },
+    {
+      "id": "models",
+      "label": "模型",
+      "icon": "memory"
+    },
+    {
+      "id": "me",
+      "label": "我的",
+      "icon": "person"
+    }
+  ],
+  "startTab": "home",
+  "overrides": {
+    "home": "today"
+  },
+  "screens": {
+    "today": {
+      "title": "今日",
+      "subtitle": "断网也能用",
+      "blocks": [
+        {
+          "type": "hero",
+          "title": "今天，想聊点什么？",
+          "text": "模型、语音、生图都在这台手机上",
+          "icon": "sparkle"
+        },
+        {
+          "type": "actions",
+          "title": "开始",
+          "items": [
+            {
+              "label": "新对话",
+              "icon": "bubble",
+              "open": "new"
+            },
+            {
+              "label": "模型",
+              "icon": "memory",
+              "open": "models"
+            },
+            {
+              "label": "语音",
+              "icon": "mic",
+              "open": "voice"
+            },
+            {
+              "label": "插件",
+              "icon": "extension",
+              "open": "plugins"
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "title": "常用",
+          "items": [
+            {
+              "label": "设置",
+              "icon": "tune",
+              "open": "settings"
+            },
+            {
+              "label": "我的",
+              "icon": "person",
+              "open": "me"
+            }
+          ]
+        },
+        {
+          "type": "recent",
+          "title": "最近的对话",
+          "limit": 3
+        },
+        {
+          "type": "status",
+          "title": "本机状态"
+        }
+      ]
+    }
+  }
+}

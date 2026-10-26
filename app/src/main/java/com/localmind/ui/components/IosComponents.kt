@@ -2,6 +2,8 @@ package com.localmind.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -84,13 +86,14 @@ fun IosSection(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val ios = IosTheme.palette
+    val shape = RoundedCornerShape(22.dp)
     Column(modifier = modifier.fillMaxWidth()) {
         if (header != null) {
             Text(
-                text = header.uppercase(),
-                style = IosTheme.typography.footnote,
+                text = header,
+                style = IosTheme.typography.footnote.copy(fontWeight = FontWeight.Medium),
                 color = ios.secondaryLabel,
-                modifier = Modifier.padding(start = 32.dp, end = 16.dp, top = 22.dp, bottom = 7.dp),
+                modifier = Modifier.padding(start = 24.dp, end = 16.dp, top = 22.dp, bottom = 8.dp),
             )
         } else {
             Spacer(Modifier.height(22.dp))
@@ -98,8 +101,18 @@ fun IosSection(
         Column(
             modifier = Modifier
                 .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(IosTheme.metrics.cardCorner))
-                .background(ios.secondaryGroupedBackground),
+                .then(
+                    if (ios.isDark) Modifier
+                    else Modifier.shadow(
+                        elevation = 10.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = 0.05f),
+                        spotColor = Color.Black.copy(alpha = 0.06f),
+                    )
+                )
+                .clip(shape)
+                .background(ios.secondaryGroupedBackground)
+                .border(0.5.dp, ios.barBorder, shape),
             content = content,
         )
         if (footer != null) {
@@ -107,7 +120,7 @@ fun IosSection(
                 text = footer,
                 style = IosTheme.typography.footnote,
                 color = ios.secondaryLabel,
-                modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 7.dp),
+                modifier = Modifier.padding(start = 24.dp, end = 32.dp, top = 8.dp),
             )
         }
     }
@@ -445,10 +458,21 @@ fun IosCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val ios = IosTheme.palette
+    val shape = RoundedCornerShape(22.dp)
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(IosTheme.metrics.cardCorner))
+            .then(
+                if (ios.isDark) Modifier
+                else Modifier.shadow(
+                    elevation = 10.dp,
+                    shape = shape,
+                    ambientColor = Color.Black.copy(alpha = 0.05f),
+                    spotColor = Color.Black.copy(alpha = 0.06f),
+                )
+            )
+            .clip(shape)
             .background(ios.secondaryGroupedBackground)
+            .border(0.5.dp, ios.barBorder, shape)
             .padding(padding),
         content = content,
     )

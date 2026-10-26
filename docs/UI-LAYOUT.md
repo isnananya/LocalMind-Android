@@ -85,7 +85,7 @@
 | --- | --- | --- |
 | `hero` | 顶部大卡 | title / text / icon |
 | `actions` | 两列快捷入口 | title / items[] |
-| `list` | 分组列表 | title / items[] |
+| `list` | 分组列表（每项可带 subtitle / 图标） | title / items[] |
 | `recent` | 最近对话 | title / limit（1–8） |
 | `status` | 本机状态（模型 / 上下文 / 速度 / 对话数） | title |
 | `text` | 一段说明 | title / text |
@@ -109,6 +109,9 @@
 | `debug` | 打开诊断页 |
 | `screens` 里的另一个 id | 在同一标签内推入那一页（返回键可回） |
 | `http://` / `https://` | 用系统浏览器打开 |
+| `prompt:文本` | 新建对话并把这段文字填进输入框（用户可继续改） |
+| `send:文本` | 新建对话并立刻发送这段文字 |
+| `copy:文本` | 复制到剪贴板并 toast |
 
 未识别的目标会在**安装时**被拒绝，并指出是哪个块、哪个值。
 

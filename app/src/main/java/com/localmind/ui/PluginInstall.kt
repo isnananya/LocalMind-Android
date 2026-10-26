@@ -209,6 +209,17 @@ object PluginInstall {
             }
         }
 
+        var chatActionPack: com.localmind.data.ChatActionPack? = null
+        contents.text("actions.json")?.let { text ->
+            when (val r = com.localmind.data.ChatActions.parse(text)) {
+                is com.localmind.data.ChatActions.ParseResult.Failed -> report += "聊天动作：" + r.reason
+                is com.localmind.data.ChatActions.ParseResult.Ok -> {
+                    chatActionPack = r.pack
+                    report += "聊天动作 " + r.pack.packName + "（" + r.pack.actions.size + " 个）"
+                }
+            }
+        }
+
         var pipelinePack: com.localmind.data.PipelinePackFile? = null
         contents.text("pipeline.json")?.let { text ->
             when (val r = com.localmind.data.PipelinePacks.parse(text)) {
@@ -227,6 +238,7 @@ object PluginInstall {
         val engines = ttsPack
         val layout = uiLayout
         val pipes = pipelinePack
+        val actions = chatActionPack
 
         // ---- 第三步：合成清单（没写的话）----
         val manifest = manifestFromFile ?: run {
@@ -238,12 +250,13 @@ object PluginInstall {
                 if (theme != null) add(PluginAbilities.UI_THEME.id)
                 if (layout != null) add(PluginAbilities.UI_LAYOUT.id)
                 if (pipes != null) add(PluginAbilities.PIPELINE.id)
+                if (actions != null) add(PluginAbilities.CHAT_ACTION.id)
                 if (isEmpty()) {
                     return Outcome.Failed(
                         "压缩包里没有可识别的内容。要有 plugin.json，" +
                             "或 emoji.json（表情包）/ models.json（模型库）/" +
                             "voices.json（语音音色）/ ui.json（界面主题）/" +
-                            "tts.json（语音引擎）/ layout.json（界面布局）"
+                            "tts.json（语音引擎）/ layout.json（界面布局）/ actions.json（聊天动作）"
                     )
                 }
             }
@@ -270,6 +283,7 @@ object PluginInstall {
             if (engines != null) add("语音引擎 ${engines.engines.size}")
             if (layout != null) add("布局 ${layout.home.size} 块")
             if (pipes != null) add("流水线 ${pipes.pipelines.size}")
+            if (actions != null) add("动作 ${actions.actions.size}")
             if (contents.assets.isNotEmpty()) add("图片 ${contents.assets.size}")
         }
         storage.savePlugins(
@@ -310,6 +324,9 @@ object PluginInstall {
         }
         pipes?.let { pack ->
             storage.savePipelinePacks(storage.loadPipelinePacks() + (manifest.id to pack.copy(packId = manifest.id)))
+        }
+        actions?.let { pack ->
+            storage.saveChatActionPacks(storage.loadChatActionPacks() + (manifest.id to pack.copy(packId = manifest.id)))
         }
 
         val skipped = if (contents.skipped.isEmpty()) "" else "（忽略了 ${contents.skipped.size} 个无关文件）"

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -84,6 +85,7 @@ fun ModelsPage(viewModel: AppViewModel) {
     var pickedSegment by remember { mutableStateOf(-1) }
     val segment = if (pickedSegment >= 0) pickedSegment else if (downloaded.isEmpty()) 1 else 0
     var query by remember { mutableStateOf("") }
+    var tag by remember { mutableStateOf("") }
     var detail by remember { mutableStateOf<LocalModel?>(null) }
     var linking by remember { mutableStateOf(false) }
     var linkText by remember { mutableStateOf("") }
@@ -109,11 +111,19 @@ fun ModelsPage(viewModel: AppViewModel) {
         }
     }
 
+    val allTags = remember(models) {
+        models.flatMap { it.tags }
+            .filter { it.isNotBlank() }
+            .groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }
+            .take(10)
+    }
     val shown = (if (segment == 0) downloaded else available).filter { m ->
-        query.isBlank() ||
-            m.name.contains(query, true) ||
-            m.family.contains(query, true) ||
-            m.tags.any { it.contains(query, true) }
+        (tag.isBlank() || m.tags.contains(tag)) &&
+            (query.isBlank() ||
+                m.name.contains(query, true) ||
+                m.family.contains(query, true) ||
+                m.tags.any { it.contains(query, true) })
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -144,6 +154,20 @@ fun ModelsPage(viewModel: AppViewModel) {
                 selected = segment,
                 onSelect = { pickedSegment = it },
             )
+            if (allTags.isNotEmpty()) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = Aurora.PagePadding),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    item { TagChip("全部", tag.isBlank()) { tag = "" } }
+                    items(allTags) { entry ->
+                        TagChip(entry.key, tag == entry.key) {
+                            tag = if (tag == entry.key) "" else entry.key
+                        }
+                    }
+                }
+            }
             AuroraSearchField(
                 value = query,
                 onValueChange = { query = it },
@@ -397,6 +421,25 @@ private fun ModelRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (model.tags.isNotEmpty()) {
+                Spacer(Modifier.height(5.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    model.tags.take(3).forEach { tg ->
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(ios.fillSecondary)
+                                .padding(horizontal = 7.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                tg,
+                                style = IosTheme.typography.caption2,
+                                color = ios.secondaryLabel,
+                            )
+                        }
+                    }
+                }
+            }
             if (running) {
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -613,4 +656,26 @@ private fun queryName(context: android.content.Context, uri: android.net.Uri): S
             if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
         } ?: uri.lastPathSegment ?: fallback
     }.getOrDefault(fallback).ifBlank { fallback }
+}
+
+@Composable
+private fun TagChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    val ios = IosTheme.palette
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) ios.blue else ios.fillSecondary)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 11.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text,
+            style = IosTheme.typography.caption1,
+            color = if (selected) ios.onAccent else ios.secondaryLabel,
+        )
+    }
 }

@@ -16,6 +16,8 @@ third_party/stable-diffusion.cpp/
 # GitHub zip 解开的目录名（带 -master 后缀），含它下面 vendored 的 ggml 子模块
 # （leejet/ggml 分支 sd.cpp，两千多个文件）。两者都不进版本库。
 third_party/stable-diffusion.cpp-master/
+# KleidiAI 由 ggml 的 FetchContent 拉取；离线时放这里（见 BUILD.md）
+third_party/kleidiai/
 
 # --- 生图后端预编译静态库（由 :app:fetchStableDiffusion 拉取，不提交）---
 # 每个 ABI 一个，arm64 那个几十 MB。来源见 .github/workflows/prebuilt-sd.yml。

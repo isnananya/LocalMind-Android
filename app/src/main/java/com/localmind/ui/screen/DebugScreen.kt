@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.localmind.data.Diagnostics
 import com.localmind.ui.AppViewModel
 import com.localmind.ui.components.IosNavigationBar
@@ -100,34 +104,25 @@ fun DebugScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val crashes = remember(tick) { Diagnostics.crashes(ctx) }
     val actions = remember(tick) { Diagnostics.actions(ctx, 60) }
 
+    // ---- 完整 logcat ----
+    // 只读**本进程**的日志（Android 4.1 起 READ_LOGS 是系统权限，读别人的日志会失败）。
+    // 这一块是给内测反馈用的：出问题时把整段日志复制/分享出去，比"它闪退了"有用得多。
+    var logLevel by remember { mutableStateOf("V") }
+    var logText by remember { mutableStateOf("") }
+    var logLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        logLoading = true
+        logText = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { readLogcat() }
+        logLoading = false
+    }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+
     val selfTestText = report?.let { r ->
         r.checks.joinToString("\n") { c -> (if (c.ok) "[OK] " else "[!!] ") + c.name + ": " + c.detail }
     }
 
     Column(Modifier.fillMaxSize().background(ios.groupedBackground)) {
-        IosNavigationBar(
-            title = "测试模式",
-            collapsed = true,
-            topInset = statusBarTopPadding(),
-            leading = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onBack)
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                ) {
-                    Icon(
-                        AppIconsAutoMirrored.ArrowBack,
-                        contentDescription = "返回",
-                        tint = ios.blue,
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text("关于", style = IosTheme.typography.body, color = ios.blue)
-                }
-            },
-        )
+        com.localmind.ui.design.AuroraNavBar(title = "测试模式", onBack = onBack)
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -154,6 +149,66 @@ fun DebugScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         // "上下文" + "线程"）时 distinctBy 也去不掉，界面会重复两行。
                         // 界面看到的和导出报告里的必须是同一份来源。
                         viewModel.diagnosticsExtra().forEach { (k, v) -> InfoRow(k, v) }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------- 完整日志
+            item {
+                IosSection(
+                    header = "完整日志",
+                    footer = "本应用进程的 logcat，最多 800 行。反馈问题时直接复制或分享这一段。",
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            listOf("V", "D", "I", "W", "E").forEach { level ->
+                                LevelChip(level, logLevel == level) { logLevel = level }
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Spacer(Modifier.weight(1f))
+                            if (logLoading) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = ios.blue,
+                                )
+                            } else {
+                                Btn("刷新", ios.blue) { tick++ }
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        val shown = remember(logText, logLevel) { filterLog(logText, logLevel) }
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(340.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(ios.codeBackground)
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                text = shown.ifBlank { "（没有日志）" },
+                                style = IosTheme.typography.caption2.copy(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp,
+                                ),
+                                color = ios.secondaryLabel,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(
+                                        androidx.compose.foundation.rememberScrollState()
+                                    ),
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Btn("复制日志", ios.green) {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(shown))
+                                viewModel.toast("日志已复制（" + shown.length + " 字）")
+                            }
+                            Btn("刷新一次", ios.purple) { tick++ }
+                        }
                     }
                 }
             }
@@ -473,6 +528,24 @@ private fun shareReport(ctx: Context, text: String): String {
 }
 
 @Composable
+private fun LevelChip(level: String, selected: Boolean, onClick: () -> Unit) {
+    val ios = IosTheme.palette
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (selected) ios.blue else ios.fillSecondary)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 4.dp)
+    ) {
+        Text(
+            level,
+            style = IosTheme.typography.caption2,
+            color = if (selected) ios.onAccent else ios.secondaryLabel,
+        )
+    }
+}
+
+@Composable
 private fun InfoRow(label: String, value: String) {
     val ios = IosTheme.palette
     Row(
@@ -510,4 +583,22 @@ private fun Btn(label: String, tint: Color, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     )
+}
+
+/** 读本进程最近的 logcat；读不到就返回空串，不抛。 */
+private fun readLogcat(): String = runCatching {
+    val pid = android.os.Process.myPid()
+    val proc = Runtime.getRuntime().exec(
+        arrayOf("logcat", "-d", "-v", "time", "--pid=" + pid)
+    )
+    val text = proc.inputStream.bufferedReader().use { it.readText() }
+    proc.destroy()
+    val lines = text.lines()
+    lines.takeLast(800).joinToString("\n")
+}.getOrDefault("")
+
+/** 按级别过滤；V 表示全部。 */
+private fun filterLog(text: String, level: String): String {
+    if (text.isBlank() || level == "V") return text
+    return text.lines().filter { it.contains(" " + level + "/") }.joinToString("\n")
 }

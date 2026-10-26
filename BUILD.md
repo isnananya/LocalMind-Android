@@ -40,6 +40,23 @@ git clone --depth 1 --branch v0.6.0 https://github.com/ggml-org/llama.cpp.git th
 > 另有一个坑：`codeload` **会忽略 `Range`**，用 `curl -r 0-1023` 试探会真的下全量。
 > 完整实测记录、子模块补取方式与复测命令见 [docs/DOWNLOAD.md](docs/DOWNLOAD.md)。
 
+### 1.1 KleidiAI：arm64 构建会额外拉一份源码
+
+ggml 在 arm64 上通过 FetchContent 拉取 `KleidiAI`（约 2.4 MB）。网络不通时
+`configureCMakeRelease[arm64-v8a]` 会在下载阶段失败。
+
+两种处理：
+
+```bash
+# 方式 A：手动下载后放到固定位置（推荐，构建不再联网）
+curl -L -o kleidiai.tar.gz https://gh-proxy.com/https://github.com/ARM-software/kleidiai/releases/download/v1.24.0/kleidiai-v1.24.0-src.tar.gz
+mkdir -p third_party/kleidiai && tar -xzf kleidiai.tar.gz -C third_party/kleidiai --strip-components=1
+```
+
+Gradle 检测到 `third_party/kleidiai/` 会自动加
+`-DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=<绝对路径>`，跳过下载。
+该目录已在 `.gitignore` 里，不进版本库。
+
 CMake 配置时会校验 `third_party/llama.cpp/include/llama.h`，缺失会直接报错并提示这行命令。
 
 `local.properties` 里的 `sdk.dir` 指向本机 SDK：

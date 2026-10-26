@@ -196,7 +196,21 @@ object PluginAbilities {
         description = "一次导入多个人设",
     )
 
-    /**
+        /**
+     * 聊天快捷动作：在输入框上方加几个一键提示词。
+     *
+     * 内容文件 actions.json。动作只有两种语义（直接发送 / 填进输入框），
+     * 所以它仍然是可以完整校验的数据，而不是脚本。
+     */
+    val CHAT_ACTION = PluginAbility(
+        id = "chat_action",
+        label = "聊天动作",
+        description = "在输入框上方加一键提示词动作",
+        contentFiles = setOf("actions.json"),
+        implemented = true,
+    )
+
+/**
      * 界面插件：改整个应用的外观与导航。
      *
      * 能力形态是**声明式令牌**（`ui.json`），不是代码 —— 原因见 [UiTheme]。
@@ -254,7 +268,7 @@ object PluginAbilities {
     val ALL: List<PluginAbility> = listOf(
         EMOJI_PACK, MODEL_LIBRARY, MODEL_SOURCE, TTS_VOICE, TTS_ENGINE,
         NATIVE_BACKEND, REMOTE_PROVIDER, IMAGE_BACKEND, WEB_TOOL, MCP_SERVER,
-        PERSONA_PACK, UI_THEME, UI_LAYOUT, PIPELINE, API_ENDPOINT,
+        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, PIPELINE, API_ENDPOINT,
     )
 
     fun fromId(id: String): PluginAbility? = ALL.firstOrNull { it.id == id }

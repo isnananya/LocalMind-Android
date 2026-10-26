@@ -578,6 +578,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 和 [_activeUiTheme] 并存：主题管颜色，布局管结构。布局也能带外观令牌，
      * 优先级见 [refreshUiTheme]。
      */
+    private val _chatActions = MutableStateFlow<List<com.localmind.data.ChatAction>>(emptyList())
+
+    /** 插件提供的聊天快捷动作（输入框上方那一排）。 */
+    val chatActions: StateFlow<List<com.localmind.data.ChatAction>> get() = _chatActions.asStateFlow()
+
     private val _uiLayout = MutableStateFlow<com.localmind.data.UiLayout?>(null)
 
     /** 已安装的布局包（key = 插件 id），给设置页列出来用。 */
@@ -3700,6 +3705,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }.getOrElse { "写出失败：${it.message?.take(70)}" }
 
     /** 写出界面主题插件骨架。改完压 zip 就能换掉整个应用的外观。 */
+    /** 写出聊天动作插件骨架。 */
+    fun saveSampleChatActions(): String = runCatching {
+        val dir = java.io.File(storage.pluginsDir, "示例-聊天动作")
+        dir.mkdirs()
+        java.io.File(dir, "actions.json").writeText(com.localmind.data.ChatActions.SAMPLE)
+        java.io.File(dir, "plugin.json").writeText(
+            """{"id":"com.example.quickactions","name":"示例：快捷动作","version":"1.0.0","abilities":["chat_action"],"manifestVersion":1}"""
+        )
+        "已写到 " + dir.absolutePath
+    }.getOrElse { "写出失败：" + (it.message?.take(70) ?: "") }
+
     fun saveSampleUiTheme(): String = runCatching {
         val dir = java.io.File(storage.pluginsDir, "示例-界面主题")
         dir.mkdirs()
@@ -3796,6 +3812,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 不自动挑"最后一个启用的"：布局会换掉整个导航结构，属于用户必须自己
      * 决定的事（和颜色不一样 —— 颜色选错了看着难受，导航选错了会找不到功能）。
      */
+    /**
+     * 重建插件聊天动作。插件启用/停用、装/卸之后都会调它。
+     */
+    fun refreshChatActions() {
+        val enabled = activePluginsFor(com.localmind.data.PluginAbilities.CHAT_ACTION)
+            .map { it.manifest.id }.toSet()
+        val packs = storage.loadChatActionPacks()
+        _chatActions.value = packs.filterKeys { it in enabled }.values
+            .flatMap { it.actions }
+            .filter { it.placement == "composer" }
+            .distinctBy { it.id }
+            .take(6)
+    }
+
     fun useLayout(packId: String) {
         storage.saveActiveLayoutId(packId)
         refreshUiTheme()
@@ -3844,6 +3874,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _appTitleOverride.value = layout?.appName?.takeIf { it.isNotBlank() } ?: theme?.appName.orEmpty()
         _startTab.value = layout?.startTab?.takeIf { it.isNotBlank() } ?: theme?.startTab.orEmpty()
         _themeOverrides.value = overrides
+        refreshChatActions()
         _installedUiThemes.value = packs
         // 界面真正收集的那一份。放在最后，保证它和上面几个字段是同一次刷新算出来的。
         _uiThemeState.value = com.localmind.ui.theme.ThemeState(

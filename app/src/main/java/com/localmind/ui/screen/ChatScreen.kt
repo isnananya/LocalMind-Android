@@ -478,6 +478,7 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
     val canSend = engineState.canChat || remote != null
     val clarification by viewModel.clarification.collectAsState()
     val pendingImage by viewModel.pendingImage.collectAsState()
+    val chatActions by viewModel.chatActions.collectAsState()
 
     // 全屏看图。状态放在**列表外面**（这一层），因为查看器要盖住整页，
     // 而不是被某一行的布局裁掉；也保证列表里所有图共用同一个查看器。
@@ -615,6 +616,18 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
                 path = path,
                 canSee = viewModel.canSeeImages,
                 onRemove = { viewModel.clearPendingImage() },
+            )
+        }
+
+        if (!chatState.streaming && chatActions.isNotEmpty()) {
+            com.localmind.ui.design.PluginActionBar(
+                actions = chatActions,
+                draft = chatState.draft,
+                onRun = { action ->
+                    val rendered = com.localmind.data.ChatActions.render(action.prompt, chatState.draft)
+                    if (action.mode == "insert") viewModel.setDraft(rendered)
+                    else viewModel.send(rendered)
+                },
             )
         }
 

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packId": "com.localmind.style.mist.actions",
+  "packName": "雾海 · 快捷动作",
+  "author": "LocalMind",
+  "description": "两个动作：翻译当前输入、把这段话变短。",
+  "actions": [
+    {
+      "id": "translate",
+      "label": "译成英文",
+      "icon": "language",
+      "prompt": "把下面这段话翻译成自然、地道的英文，只输出译文：\n{{input}}",
+      "mode": "send"
+    },
+    {
+      "id": "shorten",
+      "label": "说短一点",
+      "icon": "bolt",
+      "prompt": "把下面这段话压缩到一半长度，保留所有关键信息：\n{{input}}",
+      "mode": "send"
+    }
+  ]
+}

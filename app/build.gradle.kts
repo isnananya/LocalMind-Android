@@ -31,8 +31,8 @@ android {
         //
         // ⚠️ 版本号按**发布批次**走，不是按我改了几轮走：这一批对外就叫 1.0.4（内测）。
         // 上一批 1.0.3 是 2026-10-17 发的那份。
-        versionCode = 6
-        versionName = "1.0.5(内测)"
+        versionCode = 7
+        versionName = "1.0.6(内测)"
 
         vectorDrawables.useSupportLibrary = true
 
@@ -54,6 +54,11 @@ android {
                     "-DLLAMA_ALL_WARNINGS=OFF",
                     "-DLLAMA_FATAL_WARNINGS=OFF"
                 )
+                // 离线/网络受限时直接用本地 KleidiAI 源码，避免 configure 阶段去 GitHub 拉取。
+                val kleidiDir = rootProject.file("third_party/kleidiai")
+                if (kleidiDir.isDirectory) {
+                    arguments += "-DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=" + kleidiDir.absolutePath
+                }
                 cppFlags += listOf("-O3", "-fexceptions", "-frtti")
             }
         }

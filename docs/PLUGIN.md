@@ -1,6 +1,6 @@
 # LocalMind 插件开发指南
 
-> 版本：1.0.5 起。界面布局（screens / overrides / 首页块）另见 [UI-LAYOUT.md](UI-LAYOUT.md)；
+> 版本：1.0.6 起。界面布局（screens / overrides / 首页块）另见 [UI-LAYOUT.md](UI-LAYOUT.md)；
 > 外观令牌参考见 [UI-PLUGIN.md](UI-PLUGIN.md)。
 
 > 一个插件 = **一个 zip + 几份 JSON**。
@@ -234,10 +234,15 @@
 | `abilities` id | 中文名 | 需要哪个内容文件 | 消费端已接好？ | 装上了会发生什么 |
 | --- | --- | --- | --- | --- |
 | `emoji_pack` | 表情包 | `emoji.json` + `assets/` | ✅ 是 | AI 能按 `[[emoji: 标签]]` 发表情（图片或 emoji） |
-| `model_library` | 模型库 | `models.json` | ✅ 是 | 模型页出现这些条目，可直接下载 |
+| `model_library` | 模型库 | `models.json` | ✅ 是 | 模型页出现这些条目（含标签筛选），可直接下载 |
 | `model_source` | 模型下载源 | 无（读 `config`） | ✅ 是 | 给所有模型下载多加一个镜像地址 |
 | `tts_voice` | 语音音色 | `voices.json` | ✅ 是 | 语音页出现可下载的神经音色 |
-| `ui_theme` | 界面主题 | `ui.json` | ✅ 是 | 换主色/圆角/字号缩放等外观令牌 |
+| `tts_engine` | 语音引擎 | `tts.json` | ✅ 是 | 接入 Breeze TTS 2 这类外部合成服务 |
+| `native_backend` | 推理后端 | `backends.json` + `lib/` | ✅ 是 | 提供可 `System.load` 的原生库（生图/语音） |
+| `ui_theme` | 界面主题 | `ui.json` | ✅ 是 | 换主色/圆角/字号/导航外观 |
+| `ui_layout` | 界面布局 | `layout.json` | ✅ 是 | 换底栏入口、首页块；`screens`/`overrides` 可整页替换内置页面 |
+| `chat_action` | 聊天动作 | `actions.json` | ✅ 是 | 输入框上方出现一键提示词动作 |
+| `pipeline` | 分步流水线 | `pipeline.json` | ✅ 是 | 把长任务拆成小步逐段跑 |
 | `remote_provider` | 云端服务 | 无 | ❌ 否（仅声明） | 目前只有界面标签，没有行为 |
 | `image_backend` | 生图后端 | 无 | ❌ 否（仅声明） | 同上 |
 | `web_tool` | 联网工具 | 无 | ❌ 否（仅声明） | 同上 |
@@ -780,6 +785,46 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 | 什么都没改 | `ui.json 什么都没改（tokens / darkTokens / tabs / appName 都是空的）` |
 
 安装结果里的前缀是 `界面主题：<原因>`。
+
+---
+
+## 8.9 `actions.json` —— 聊天快捷动作
+
+装好之后，输入框上方会出现一排胶囊按钮。点一下就：
+
+* `send` —— 直接把 `prompt` 发出去；
+* `insert` —— 把 `prompt` 填进输入框，让你接着改。
+
+`prompt` 里可以写 `{{input}}`，它会被替换成你**当前输入框里的文字**，
+所以"翻译/润色/总结"这类动作不需要额外做输入框。
+
+```json
+{
+  "version": 1,
+  "packId": "com.example.quick",
+  "packName": "快捷动作",
+  "actions": [
+    {
+      "id": "translate",
+      "label": "译成英文",
+      "icon": "language",
+      "prompt": "把下面这段话翻译成自然英文，只输出译文：\n{{input}}",
+      "mode": "send"
+    },
+    {
+      "id": "weekly",
+      "label": "写周报",
+      "icon": "bolt",
+      "prompt": "帮我写一段本周工作总结：",
+      "mode": "insert"
+    }
+  ]
+}
+```
+
+字段：`id` / `label` / `prompt` 必填；`mode` 只能是 send/insert；`placement`
+暂时只支持 `composer`。最多 12 个动作，应用只展示前 6 个（按安装顺序）。
+校验失败会在**安装时**报出具体是哪一个动作错了。
 
 ---
 

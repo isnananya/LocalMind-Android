@@ -85,21 +85,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             .fillMaxSize()
             .background(ios.groupedBackground)
     ) {
-        IosNavigationBar(
-            title = "主题",
-            collapsed = true,
-            topInset = statusBarTopPaddingSafe(),
-            leading = {
-                Icon(
-                    AppIcons.ArrowBack,
-                    contentDescription = "返回",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(23.dp)
-                        .clickable(onClick = onBack),
-                )
-            },
-        )
+        com.localmind.ui.design.AuroraNavBar(title = "外观", onBack = onBack)
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -119,11 +105,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 Column {
                     val layouts by viewModel.installedLayouts.collectAsState()
                     val currentLayout by viewModel.uiLayout.collectAsState()
-                    SectionHeader(
-                        "界面布局",
-                        "换的是整个应用的结构：底栏有哪几个入口、每个入口进哪一页、首页由哪些块组成。" +
-                            "布局插件也能顺带带一套配色。",
-                    )
+                    SectionHeader("界面布局", null)
                     Spacer(Modifier.height(10.dp))
                     IosCard(padding = PaddingValues(0.dp)) {
                         LayoutChoiceRow(
@@ -166,7 +148,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             // 五个元素就把一套配色的性格交代清楚了。
             item {
                 Column {
-                    SectionHeader("快捷风格", "点一下换整套配色，不用装任何插件。")
+                    SectionHeader("风格", null)
                     Spacer(Modifier.height(10.dp))
 
                     val rows = com.localmind.data.UiPresets.ALL.chunked(2)
@@ -198,7 +180,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             // ---- 微调 ----
             item {
                 Column {
-                    SectionHeader("微调", "改一项只影响一项，其余继续跟随当前风格。")
+                    SectionHeader("微调", null)
                     Spacer(Modifier.height(10.dp))
                     IosCard(padding = PaddingValues(0.dp)) {
                         TunerRow(
@@ -273,14 +255,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             // ---- 插件主题 ----
             item {
                 Column {
-                    SectionHeader(
-                        "插件主题",
-                        if (overrides.isNotEmpty()) {
-                            "你的手动覆盖会盖过插件主题里的同名项。"
-                        } else {
-                            "主题也可以由插件提供，装新的去「我的 → 插件」。"
-                        },
-                    )
+                    SectionHeader("插件主题", null)
                     Spacer(Modifier.height(10.dp))
                     IosCard(padding = PaddingValues(0.dp)) {
                         BuiltinThemeRow(
@@ -362,7 +337,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             active?.let { t ->
                 item {
                     Column {
-                        SectionHeader("「${t.packName}」改了什么", "按当前深浅色解析并夹取之后的值。")
+                        SectionHeader("「" + t.packName + "」的令牌", null)
                         Spacer(Modifier.height(10.dp))
                         IosCard(padding = PaddingValues(0.dp)) { ThemeTokenDiff(t) }
                     }

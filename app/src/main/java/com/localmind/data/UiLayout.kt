@@ -201,7 +201,8 @@ object Layouts {
         }
         fun targetOk(target: String): Boolean =
             target.isBlank() || target in SCREENS || target in ACTIONS || target in layout.screens ||
-                target == "back" || target.startsWith("http://") || target.startsWith("https://")
+                target == "back" || target.startsWith("http://") || target.startsWith("https://") ||
+                target.startsWith("prompt:") || target.startsWith("send:") || target.startsWith("copy:")
 
         for (block in layout.home) {
             val badActions = block.items.filterNot { targetOk(it.open) }

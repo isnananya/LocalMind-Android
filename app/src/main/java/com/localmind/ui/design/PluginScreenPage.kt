@@ -73,6 +73,21 @@ fun PluginScreenPage(
                     )
                 }
             }
+            target.startsWith("prompt:") -> {
+                viewModel.newConversation(com.localmind.data.ChatMode.AI)
+                viewModel.selectTab(Tab.CHAT)
+                viewModel.setDraft(target.removePrefix("prompt:"))
+            }
+            target.startsWith("send:") -> {
+                viewModel.newConversation(com.localmind.data.ChatMode.AI)
+                viewModel.selectTab(Tab.CHAT)
+                viewModel.send(target.removePrefix("send:"))
+            }
+            target.startsWith("copy:") -> {
+                val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("LocalMind", target.removePrefix("copy:")))
+                viewModel.toast("已复制")
+            }
             target == "new" -> {
                 viewModel.newConversation(com.localmind.data.ChatMode.AI)
                 viewModel.selectTab(Tab.CHAT)

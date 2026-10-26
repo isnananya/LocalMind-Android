@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,308 +30,260 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.localmind.data.InstalledPlugin
 import com.localmind.data.PluginAbilities
 import com.localmind.data.PluginState
 import com.localmind.ui.AppViewModel
-import com.localmind.ui.components.IosNavigationBar
-import com.localmind.ui.components.IosPill
-import com.localmind.ui.components.IosSection
 import com.localmind.ui.components.IosSwitch
-import com.localmind.ui.components.statusBarTopPadding
+import com.localmind.ui.design.Aurora
+import com.localmind.ui.design.AuroraButton
+import com.localmind.ui.design.AuroraCircleButton
+import com.localmind.ui.design.AuroraDivider
+import com.localmind.ui.design.AuroraEmpty
+import com.localmind.ui.design.AuroraGroup
+import com.localmind.ui.design.AuroraIcon
+import com.localmind.ui.design.AuroraNavBar
+import com.localmind.ui.design.AuroraRow
+import com.localmind.ui.design.AuroraSectionLabel
 import com.localmind.ui.icons.AppIcons
-import com.localmind.ui.motion.Motion
-import com.localmind.ui.motion.appearIn
-import com.localmind.ui.components.pressScale
 import com.localmind.ui.theme.IosTheme
 
 /**
- * 插件页 —— **骨架式**。
+ * 插件页。
  *
- * ## 为什么做得这么素
- *
- * 这里曾经有一大堆东西：能力清单表、"这是什么"的长篇说明、四个并列的安装入口
- * （导入 zip / 新建表情包 / 新建模型库 / 粘贴清单）。
- *
- * 问题是**那些都不是插件页该干的事**：
- *
- *  * 能力清单表是**开发文档**，用户不需要知道主程序认识哪些 ability id；
- *  * 四个安装入口逼用户先判断"我手上这个是什么包" —— 而类型本来就该由程序认；
- *  * 长篇说明在用户每次打开这一页时都要读一遍，而他一辈子可能只装两个插件。
- *
- * 现在只剩三件事：**导入 zip、看已装了什么、开关它**。
- * 每个插件自己的说明由它 zip 里的 `README.md` 提供 —— 谁的功能谁解释。
+ * 只做三件事：导入、看已装了什么、开关它。能力标签用彩色小胶囊，
+ * 不写"这个能力是什么" —— 那是开发文档的事。
  */
 @Composable
 fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val ios = IosTheme.palette
     val plugins by viewModel.plugins.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    var pendingDelete by remember { mutableStateOf<InstalledPlugin?>(null) }
+    var showDev by remember { mutableStateOf(false) }
 
-    // 唯一的安装入口。类型由程序从 zip 内容判断，用户不需要选。
     val pickZip = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
-            // 先落到应用私有目录再解析：ZipInputStream 要能随机读，
-            // 直接读 content:// 流在部分 ROM 上会失败。
-            val tmp = java.io.File(viewModel.storage.pluginsDir, "import-${System.currentTimeMillis()}")
+            val tmp = java.io.File(viewModel.storage.pluginsDir, "import-" + System.currentTimeMillis())
             context.contentResolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { out -> input.copyTo(out) }
             } ?: return@runCatching
             val msg = viewModel.installPluginZip(tmp)
             tmp.delete()
             viewModel.toast(msg)
-        }.onFailure { viewModel.toast("导入失败：${it.message?.take(80)}") }
+        }.onFailure { viewModel.toast("导入失败：" + (it.message?.take(80) ?: "")) }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(ios.groupedBackground)
-    ) {
-        IosNavigationBar(
+    fun openPicker() {
+        pickZip.launch(
+            arrayOf(
+                "application/zip",
+                "application/x-zip-compressed",
+                "application/octet-stream",
+                "*/*",
+            )
+        )
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        AuroraNavBar(
             title = "插件",
-            collapsed = true,
-            topInset = statusBarTopPadding(),
-            leading = {
-                Icon(
-                    AppIcons.ArrowBack,
-                    contentDescription = "返回",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(23.dp)
-                        .clickable(onClick = onBack),
-                )
-            },
+            onBack = onBack,
             trailing = {
-                Icon(
-                    AppIcons.Add,
+                AuroraCircleButton(
+                    icon = AppIcons.Add,
                     contentDescription = "导入插件",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable {
-                            pickZip.launch(
-                                arrayOf(
-                                    "application/zip",
-                                    "application/x-zip-compressed",
-                                    "application/octet-stream",
-                                    "*/*",
-                                )
-                            )
-                        },
+                    onClick = { openPicker() },
                 )
             },
         )
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 32.dp),
+            contentPadding = PaddingValues(bottom = 40.dp),
         ) {
-            // -------------------------------------------------- 导入
             item {
                 Row(
-                    modifier = Modifier
+                    Modifier
+                        .padding(horizontal = Aurora.PagePadding, vertical = 12.dp)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(ios.secondaryGroupedBackground)
-                        .clickable {
-                            pickZip.launch(
-                                arrayOf(
-                                    "application/zip",
-                                    "application/x-zip-compressed",
-                                    "application/octet-stream",
-                                    "*/*",
-                                )
-                            )
-                        }
-                        .padding(horizontal = 16.dp, vertical = 15.dp),
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(ios.blue.copy(alpha = if (ios.isDark) 0.18f else 0.09f))
+                        .clickable { openPicker() }
+                        .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        AppIcons.Download,
-                        contentDescription = null,
-                        tint = ios.blue,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    AuroraIcon(AppIcons.CloudDownload, ios.blue, size = 38.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("导入插件 zip", style = IosTheme.typography.body, color = ios.label)
                         Text(
-                            "选一个 zip 就行，类型会自动识别",
-                            style = IosTheme.typography.caption1,
+                            "导入插件 zip",
+                            style = IosTheme.typography.headline,
+                            color = ios.label,
+                        )
+                        Text(
+                            "类型自动识别，不用选",
+                            style = IosTheme.typography.footnote,
                             color = ios.secondaryLabel,
                         )
                     }
                     Icon(
                         AppIcons.ChevronRight,
                         contentDescription = null,
-                        tint = ios.tertiaryLabel,
+                        tint = ios.blue,
                         modifier = Modifier.size(16.dp),
                     )
                 }
             }
 
-            // -------------------------------------------------- 已安装
             if (plugins.isEmpty()) {
                 item {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 32.dp, vertical = 40.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text("还没有插件", style = IosTheme.typography.headline, color = ios.secondaryLabel)
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "模型库、表情包、语音音色都从这里装。",
-                            style = IosTheme.typography.footnote,
-                            color = ios.tertiaryLabel,
-                        )
-                    }
+                    AuroraEmpty(
+                        icon = AppIcons.Extension,
+                        title = "还没有插件",
+                        message = "模型库、表情包、语音音色都从这里装",
+                    )
                 }
             } else {
+                item { AuroraSectionLabel("已安装 " + plugins.size + " 个") }
                 item {
-                    IosSection(header = "已安装 ${plugins.size} 个") {
-                        plugins.values.sortedBy { it.installedAt }.forEachIndexed { i, p ->
-                            if (i > 0) Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp)
-                                    .height(0.5.dp)
-                                    .background(ios.separator)
-                            )
+                    AuroraGroup {
+                        val list = plugins.values.sortedBy { it.installedAt }
+                        list.forEachIndexed { index, plugin ->
+                            if (index > 0) AuroraDivider(indent = 62.dp)
                             PluginRow(
-                                plugin = p,
-                                index = i,
-                                onToggle = { on -> viewModel.setPluginEnabled(p.manifest.id, on) },
-                                onRemove = { viewModel.uninstallPlugin(p.manifest.id) },
+                                plugin = plugin,
+                                onToggle = { on -> viewModel.setPluginEnabled(plugin.manifest.id, on) },
+                                onLongPress = { pendingDelete = plugin },
                             )
                         }
                     }
                 }
             }
 
-            // -------------------------------------------------- 开发文档（整页）
             item {
-                IosSection {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.openPluginDocs(true) }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("开发文档", style = IosTheme.typography.body, color = ios.label)
-                            Text(
-                                "字段表、能力清单、路由判据、最小示例",
-                                style = IosTheme.typography.caption1,
-                                color = ios.secondaryLabel,
-                            )
-                        }
-                        Icon(
-                            AppIcons.ChevronRight,
-                            contentDescription = null,
-                            tint = ios.tertiaryLabel,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                }
-            }
-
-            // -------------------------------------------------- 写插件（折叠）
-            item {
-                var showDev by remember { mutableStateOf(false) }
-                IosSection {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showDev = !showDev }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (showDev) "收起" else "自己写插件",
-                            style = IosTheme.typography.body,
-                            color = ios.blue,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                AuroraSectionLabel("开发")
+                AuroraGroup {
+                    AuroraRow(
+                        title = "开发文档",
+                        subtitle = "字段表、能力清单、示例",
+                        leading = { AuroraIcon(AppIcons.HelpOutline, ios.purple) },
+                        onClick = { viewModel.openPluginDocs(true) },
+                    )
+                    AuroraDivider(indent = 58.dp)
+                    AuroraRow(
+                        title = "自己写插件",
+                        subtitle = if (showDev) "收起" else "一个 zip + 几份 JSON",
+                        leading = { AuroraIcon(AppIcons.Psychology, ios.orange) },
+                        onClick = { showDev = !showDev },
+                    )
                     if (showDev) {
-                        Column(Modifier.padding(horizontal = 16.dp)) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(0.5.dp)
-                                    .background(ios.separator)
-                            )
-                        }
-                        Column(Modifier.padding(16.dp)) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(
-                                "一个插件就是一个 zip，里面是 JSON，不需要写代码。\n" +
-                                    "完整格式、能力清单、路由判据都在上面的「开发文档」里 —— " +
-                                    "手机上就能看，不用去翻仓库。",
+                                "不需要写代码。写出示例后直接改 JSON，压成 zip 再导入。",
                                 style = IosTheme.typography.footnote,
                                 color = ios.secondaryLabel,
                             )
                             Spacer(Modifier.height(10.dp))
-                            DevAction("写出表情包示例") { viewModel.toast(viewModel.saveSampleStickerPack()) }
-                            DevAction("写出模型库示例") { viewModel.toast(viewModel.saveSampleModelLibrary()) }
-                            DevAction("写出语音音色示例") { viewModel.toast(viewModel.saveSampleVoicePack()) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                AuroraButton(
+                                    "表情包示例",
+                                    onClick = { viewModel.toast(viewModel.saveSampleStickerPack()) },
+                                    color = ios.fill,
+                                )
+                                AuroraButton(
+                                    "模型库示例",
+                                    onClick = { viewModel.toast(viewModel.saveSampleModelLibrary()) },
+                                    color = ios.fill,
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            AuroraButton(
+                                "语音音色示例",
+                                onClick = { viewModel.toast(viewModel.saveSampleVoicePack()) },
+                                color = ios.fill,
+                            )
                         }
                     }
                 }
             }
         }
     }
+
+    pendingDelete?.let { plugin ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除插件？", style = IosTheme.typography.headline) },
+            text = {
+                Text(
+                    plugin.manifest.name + " 会被卸载，它提供的模型 / 主题 / 界面会恢复默认。",
+                    style = IosTheme.typography.subheadline,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.uninstallPlugin(plugin.manifest.id)
+                    pendingDelete = null
+                }) { Text("删除", color = ios.red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
+    }
 }
 
-@Composable
-private fun DevAction(label: String, onClick: () -> Unit) {
-    val ios = IosTheme.palette
-    Text(
-        label,
-        style = IosTheme.typography.footnote,
-        color = ios.blue,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-    )
-}
-
-/**
- * 一个已安装插件。
- *
- * 只显示**它自己声明的东西**：名字、作者、它提供了哪些能力、占了什么内容。
- * 主程序不替它解释 —— 那是它 README 的活。
- */
 @Composable
 private fun PluginRow(
     plugin: InstalledPlugin,
-    index: Int,
     onToggle: (Boolean) -> Unit,
-    onRemove: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val ios = IosTheme.palette
     val m = plugin.manifest
-    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val primary = m.abilities.firstOrNull()
+    val color = when (primary) {
+        PluginAbilities.UI_THEME.id, PluginAbilities.UI_LAYOUT.id -> ios.purple
+        PluginAbilities.MODEL_LIBRARY.id -> ios.blue
+        PluginAbilities.EMOJI_PACK.id -> ios.orange
+        PluginAbilities.TTS_VOICE.id, PluginAbilities.TTS_ENGINE.id -> ios.green
+        PluginAbilities.PIPELINE.id -> ios.yellow
+        else -> ios.gray
+    }
+    val icon = when (primary) {
+        PluginAbilities.UI_THEME.id, PluginAbilities.UI_LAYOUT.id -> AppIcons.Brush
+        PluginAbilities.MODEL_LIBRARY.id -> AppIcons.Memory
+        PluginAbilities.EMOJI_PACK.id -> AppIcons.AutoAwesome
+        PluginAbilities.TTS_VOICE.id, PluginAbilities.TTS_ENGINE.id -> AppIcons.Mic
+        PluginAbilities.PIPELINE.id -> AppIcons.Bolt
+        else -> AppIcons.Extension
+    }
 
     Row(
-        modifier = Modifier
+        Modifier
             .fillMaxWidth()
-            .appearIn(index = index)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onLongPress,
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        AuroraIcon(icon, color, size = 34.dp)
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(m.name, style = IosTheme.typography.body, color = ios.label)
+            Text(
+                m.name,
+                style = IosTheme.typography.body.copy(fontWeight = FontWeight.Medium),
+                color = ios.label,
+                maxLines = 1,
+            )
             Spacer(Modifier.height(2.dp))
             Text(
                 buildString {
@@ -339,44 +293,56 @@ private fun PluginRow(
                         append(" · ").append(plugin.contents.joinToString("、"))
                     }
                 },
-                style = IosTheme.typography.caption1,
+                style = IosTheme.typography.caption2,
                 color = ios.secondaryLabel,
+                maxLines = 1,
             )
-            if (plugin.state == PluginState.FAILED && plugin.lastError.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(plugin.lastError, style = IosTheme.typography.caption1, color = ios.red)
-            }
             Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                m.abilities.forEach { id ->
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                m.abilities.take(3).forEach { id ->
                     val ability = PluginAbilities.fromId(id)
-                    IosPill(
-                        ability?.label ?: id,
-                        when {
-                            ability == null -> ios.gray
-                            ability.implemented -> ios.blue
-                            else -> ios.gray
-                        },
+                    AbilityChip(
+                        label = ability?.label ?: id,
+                        enabled = ability?.implemented == true,
+                        color = color,
                     )
                 }
+                if (m.abilities.size > 3) {
+                    AbilityChip(label = "+" + (m.abilities.size - 3), enabled = true, color = ios.gray)
+                }
+            }
+            if (plugin.state == PluginState.FAILED && plugin.lastError.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    plugin.lastError,
+                    style = IosTheme.typography.caption2,
+                    color = ios.red,
+                    maxLines = 2,
+                )
             }
         }
-        Spacer(Modifier.width(10.dp))
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            IosSwitch(
-                checked = plugin.state == PluginState.ENABLED,
-                onCheckedChange = onToggle,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "删除",
-                style = IosTheme.typography.caption2,
-                color = ios.red,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onRemove)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
+        Spacer(Modifier.width(8.dp))
+        IosSwitch(
+            checked = plugin.state == PluginState.ENABLED,
+            onCheckedChange = onToggle,
+        )
+    }
+}
+
+@Composable
+private fun AbilityChip(label: String, enabled: Boolean, color: Color) {
+    val tint = if (enabled) color else IosTheme.palette.gray
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(tint.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = label,
+            style = IosTheme.typography.caption2,
+            color = tint,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }

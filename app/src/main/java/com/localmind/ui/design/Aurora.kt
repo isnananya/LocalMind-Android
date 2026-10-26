@@ -112,6 +112,51 @@ fun AuroraBackground(
 }
 
 /**
+ * 子页顶栏：圆形返回 + 居中标题 + 可选右侧按钮。
+ *
+ * 和 AuroraTitle 分工：标签根页用大标题，被推入的子页用这条，
+ * 一眼就能看出这是压在上面的，不是标签。
+ */
+@Composable
+fun AuroraNavBar(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val ios = IosTheme.palette
+    Column(modifier.fillMaxWidth().background(ios.groupedBackground.copy(alpha = 0.94f))) {
+        Spacer(Modifier.height(com.localmind.ui.components.statusBarTopPadding()))
+        Row(
+            Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AuroraCircleButton(
+                icon = com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
+                contentDescription = "返回",
+                onClick = onBack,
+                size = 36.dp,
+                tint = ios.label,
+            )
+            Text(
+                text = title,
+                style = IosTheme.typography.headline,
+                color = ios.label,
+                maxLines = 1,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+            )
+            if (trailing != null) {
+                trailing()
+            } else {
+                Spacer(Modifier.size(36.dp))
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(ios.separator))
+    }
+}
+
+/**
  * 页面大标题。
  *
  * [trailing] 放一个圆形操作按钮（新对话 / 刷新），圆按钮比文字按钮更像 iOS。

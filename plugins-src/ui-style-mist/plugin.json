@@ -1,0 +1,13 @@
+{
+  "id": "com.localmind.style.mist",
+  "name": "雾海 · 今日",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "一套偏冷的雾蓝外观 + 首页换成「今日」页 + 两个聊天快捷动作。演示一个插件同时提供外观、布局与动作。",
+  "abilities": [
+    "ui_theme",
+    "ui_layout",
+    "chat_action"
+  ],
+  "requires": []
+}

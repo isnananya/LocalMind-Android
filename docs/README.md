@@ -26,6 +26,7 @@
 | [IMAGE_ENGINE.md](IMAGE_ENGINE.md) | 生图后端：程序化渲染与 stable-diffusion 接入 |
 | [AIRLLM.md](AIRLLM.md) | 磁盘流式加载（大模型跑在小内存设备上） |
 | [DOWNLOAD.md](DOWNLOAD.md) | 模型与二进制的下载源、镜像策略 |
+| [OPEN-SOURCE.md](OPEN-SOURCE.md) | 开源许可清单与第三方致谢 |
 
 ## 归档
 

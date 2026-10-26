@@ -315,6 +315,19 @@ fun AboutScreen(onBack: () -> Unit, onOpenDebug: () -> Unit = {}) {
                     )
                     Divider(ios.separator)
                     LicenseRow(
+                        name = "Material Icons",
+                        license = "Apache-2.0",
+                        note = "内置图标（只打包用到的子集）",
+                    )
+                    Divider(ios.separator)
+                    LicenseRow(
+                        name = "Liquid Glass 视觉参考",
+                        license = "设计参考",
+                        note = "iOS 26 Liquid Glass 与 liuran001/WeChat-LiquidGlass 的公开做法；" +
+                            "底栏为独立 Kotlin 实现，未复制代码",
+                    )
+                    Divider(ios.separator)
+                    LicenseRow(
                         name = "OkHttp / Okio",
                         license = "Apache-2.0",
                         note = "HTTP 下载与本地 API 服务",

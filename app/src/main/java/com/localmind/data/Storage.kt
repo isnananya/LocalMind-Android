@@ -245,6 +245,9 @@ class Storage(private val context: Context) {
     }
 
     /** 已安装的**分步流水线包**（`pipeline.json`）。key 是插件 id。 */
+    fun loadChatActionPacks(): Map<String, ChatActionPack> = read("chat_actions", emptyMap())
+    fun saveChatActionPacks(map: Map<String, ChatActionPack>) = write("chat_actions", map)
+
     fun loadPipelinePacks(): Map<String, PipelinePackFile> = read("pipeline_packs", emptyMap())
     fun savePipelinePacks(map: Map<String, PipelinePackFile>) = write("pipeline_packs", map)
 
