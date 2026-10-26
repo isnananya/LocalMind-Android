@@ -121,13 +121,13 @@ fun LocalMindRoot(
 
     Box(Modifier.fillMaxSize()) {
         AuroraBackground {
-            Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
                 val subPage = showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
                     showPluginDocs || showDebug || showSettings || meFullPage ||
                     (showImageStudio && tab == Tab.MODELS)
                 val immersiveChat = tab == Tab.CHAT && inChat
 
-                Box(Modifier.weight(1f)) {
+                Box(Modifier.fillMaxSize()) {
                     AnimatedContent(
                         targetState = when {
                             showDebug -> "debug"
@@ -232,6 +232,7 @@ fun LocalMindRoot(
                 val canHideTabBar = tabs.size > 1
                 AnimatedVisibility(
                     visible = !subPage && !immersiveChat && !(tabStyle == "hidden" && canHideTabBar),
+                    modifier = Modifier.align(Alignment.BottomCenter),
                     enter = fadeIn(Motion.smooth(200)) + slideInVertically(
                         animationSpec = Motion.gentle(),
                         initialOffsetY = { it / 2 },

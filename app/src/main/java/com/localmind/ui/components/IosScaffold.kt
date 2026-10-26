@@ -72,7 +72,7 @@ fun IosNavigationBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(if (glassSupported) Color.Transparent else ios.barBackground)
+                .background(Color.Transparent)
         ) {
             Spacer(Modifier.height(topInset))
             Row(
@@ -109,7 +109,7 @@ fun IosNavigationBar(
                     Modifier
                         .fillMaxWidth()
                         .height(metrics.barBorderWidth)
-                        .background(if (collapsed) ios.barBorder else Color.Transparent)
+                        .background(Color.Transparent)
                 )
             }
         }

@@ -39,6 +39,22 @@
 
 ---
 
+## 悬浮底栏（1.0.4 测试）
+
+- 底栏改为**覆盖在内容之上**的悬浮胶囊，不再占据布局、也没有整条底色遮挡；内容可以从它下面滚过。
+- 页面底色改成大色团渐变（蓝/紫/青），卡片改成半透明玻璃（白 74% + 1px 高光边），导航栏去掉整条实色。
+- 底栏不再采样窗口缩略图：采样会把上一帧的自己画进来，产生重影；当前用高不透明度的磨砂染色保证可读性。
+
+## 液态玻璃组件库（已评估，默认关闭）
+
+已把 [AndroidLiquidGlassView](https://liquidglass.qmdeve.com/zh/)（MIT）源码引入工程评估：
+
+- 它只提供一个玻璃 View，不是完整 UI 组件库；且 1.1.0 要求 compileSdk 37（当前 35），1.0.2 可用。
+- **不能直接放进 Compose 树**：它把采样源 draw 进 RenderNode，而 Compose 单 View 树里玻璃自己也在采样源中，
+  Android 会抛 `Recording currently in progress - missing #endRecording()`，启动即崩（GPU 模拟器已复现）。
+- 正确接法是把玻璃层放到 ComposeView 之外（Activity 根布局 + 原生底栏），这项改造还没做。
+- `uiKit` 令牌保留（auto / library / compose），等原生 host 接入后再启用。
+
 ## 二、编译
 
 环境要求：**JDK 17**、Android SDK（platform 35、build-tools 34/35）、

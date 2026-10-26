@@ -125,7 +125,9 @@ fun LiquidGlassTabBar(
                 val decorLoc = IntArray(2).also { decorView.getLocationInWindow(it) }
                 val viewLoc = IntArray(2).also { view.getLocationInWindow(it) }
                 val left = (viewLoc[0] - decorLoc[0]) + barPos.x
-                val top = (viewLoc[1] - decorLoc[1]) + barPos.y
+                // 采样栏体上方的区域：decor 截图里已经包含底栏自己，直接采样会把自己的图标
+                // 再画一遍（重影）。往上挪一栏高度，取到的仍是栏后内容的近似。
+                val top = (viewLoc[1] - decorLoc[1]) + barPos.y - barSize.height
                 val scale = bmp.width.toFloat() / decorW.toFloat()
                 val x = (left * scale).coerceIn(0f, (bmp.width - 1).toFloat())
                 val y = (top * scale).coerceIn(0f, (bmp.height - 1).toFloat())
@@ -169,7 +171,7 @@ fun LiquidGlassTabBar(
             radius = cornerPx,
             refraction = 8f + 6f * (blurPct / 100f),
             tint = (tint.value shr 32).toInt(),
-            tintAlpha = if (ios.isDark) 0.26f else 0.30f,
+            tintAlpha = if (ios.isDark) 0.46f else 0.55f,
             highlight = if (ios.isDark) 0.10f else 0.35f,
         )
     }
@@ -201,68 +203,19 @@ fun LiquidGlassTabBar(
                     barPos = IntOffset(p.x.toInt(), p.y.toInt())
                 },
         ) {
-            val useLiquidGlass = rememberLiquidGlassSupport()
-            if (useLiquidGlass) {
-                LiquidGlassLayer(
-                    modifier = Modifier.fillMaxSize(),
-                    cornerRadius = corner,
-                    tint = tint,
-                    tintAlpha = if (ios.isDark) 0.16f else 0.06f,
-                )
-            } else if (shader != null) {
-                Canvas(Modifier.fillMaxSize()) {
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().apply {
-                            this.shader = shader
-                            isAntiAlias = true
-                        }
-                        val r = corner.toPx()
-                        canvas.nativeCanvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
-                    }
-                }
-            } else {
-                backdrop?.let { bmp ->
-                    Canvas(
-                        Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                alpha = if (ios.isDark) 0.62f else 0.72f
-                            }
-                    ) {
-                        val src = if (srcRect.width > 1f) srcRect else Rect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat())
-                        drawImage(
-                            image = bmp.asImageBitmap(),
-                            srcOffset = IntOffset(src.left.toInt().coerceAtLeast(0), src.top.toInt().coerceAtLeast(0)),
-                            srcSize = IntSize(
-                                src.width.toInt().coerceIn(1, bmp.width),
-                                src.height.toInt().coerceIn(1, bmp.height),
-                            ),
-                            // CPU 降级：轻微放大背景（镜头感）+ 边缘高光。真正折射要 AGSL。
-                            dstOffset = IntOffset(-3, -3),
-                            dstSize = IntSize(
-                                size.width.toInt().coerceAtLeast(1) + 6,
-                                size.height.toInt().coerceAtLeast(1) + 6,
-                            ),
-                            filterQuality = FilterQuality.Low,
-                        )
-                    }
-                }
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            if (ios.isDark) Color(0xFF141416).copy(alpha = if (style == "plain") 0.96f else 0.58f)
-                            else Color.White.copy(alpha = if (style == "plain") 0.96f else 0.52f)
-                        )
-                )
-            }
+            // 半透明染色：悬浮栏不采样窗口内容，避免把自己的图标画成重影。
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(tint.copy(alpha = if (ios.isDark) 0.88f else 0.93f))
+            )
 
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.38f),
+                            0f to Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.22f),
                             0.35f to Color.Transparent,
                             1f to Color.Black.copy(alpha = if (ios.isDark) 0.22f else 0.05f),
                         )

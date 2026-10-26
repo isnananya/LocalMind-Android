@@ -83,32 +83,51 @@ fun AuroraBackground(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val ios = IosTheme.palette
-    Box(modifier.fillMaxSize().background(ios.groupedBackground)) {
-        if (!ios.isDark) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(420.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                ios.blue.copy(alpha = 0.035f),
-                                Color.Transparent,
-                            )
+    val base = Brush.verticalGradient(
+        if (ios.isDark) listOf(Color(0xFF04060A), Color(0xFF080B11), Color(0xFF05070B))
+        else listOf(Color(0xFFEAF2FF), Color(0xFFF7F9FD), Color(0xFFF1F4F9))
+    )
+    Box(modifier.fillMaxSize().background(base)) {
+        // 大色团：让悬浮玻璃有真实的颜色可以弯折，不再是一块死白。
+        Box(
+            Modifier
+                .size(520.dp)
+                .offset(x = (-160).dp, y = (-120).dp)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            ios.blue.copy(alpha = if (ios.isDark) 0.16f else 0.26f),
+                            Color.Transparent,
                         )
                     )
-            )
-            Box(
-                Modifier
-                    .size(280.dp)
-                    .padding(start = 0.dp)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(ios.purple.copy(alpha = 0.035f), Color.Transparent),
+                )
+        )
+        Box(
+            Modifier
+                .size(420.dp)
+                .offset(x = 220.dp, y = 60.dp)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            ios.purple.copy(alpha = if (ios.isDark) 0.14f else 0.20f),
+                            Color.Transparent,
                         )
                     )
-            )
-        }
+                )
+        )
+        Box(
+            Modifier
+                .size(360.dp)
+                .offset(x = 40.dp, y = 560.dp)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            (if (ios.isDark) Color(0xFF19C2B0) else Color(0xFF7BD8D0)).copy(alpha = 0.16f),
+                            Color.Transparent,
+                        )
+                    )
+                )
+        )
         content()
     }
 }
@@ -142,7 +161,7 @@ fun AuroraNavBar(
         Column(
             Modifier
                 .fillMaxWidth()
-                .background(if (glassSupported) Color.Transparent else ios.groupedBackground.copy(alpha = 0.94f))
+                .background(Color.Transparent)
         ) {
         Spacer(Modifier.height(com.localmind.ui.components.statusBarTopPadding()))
         Row(
@@ -170,7 +189,6 @@ fun AuroraNavBar(
                 Spacer(Modifier.size(36.dp))
             }
         }
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(ios.separator))
         }
     }
 }
@@ -275,15 +293,19 @@ fun AuroraGroup(
             .then(
                 if (ios.isDark) Modifier
                 else Modifier.shadow(
-                    elevation = 10.dp,
+                    elevation = 16.dp,
                     shape = shape,
-                    ambientColor = Color.Black.copy(alpha = 0.05f),
-                    spotColor = Color.Black.copy(alpha = 0.06f),
+                    ambientColor = Color.Black.copy(alpha = 0.07f),
+                    spotColor = Color.Black.copy(alpha = 0.08f),
                 )
             )
             .clip(shape)
-            .background(ios.secondaryGroupedBackground)
-            .border(0.5.dp, ios.barBorder, shape),
+            .background(ios.secondaryGroupedBackground.copy(alpha = if (ios.isDark) 0.62f else 0.74f))
+            .border(
+                0.8.dp,
+                if (ios.isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.72f),
+                shape,
+            ),
         content = content,
     )
 }
