@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -141,26 +142,22 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 
             item {
                 AuroraSectionLabel("风格")
-                AuroraGroup {
-                    com.localmind.data.UiPresets.ALL.forEach { preset ->
-                        AuroraRow(
-                            title = preset.name,
-                            subtitle = preset.description,
-                            leading = {
-                                Box(
-                                    Modifier
-                                        .size(26.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            runCatching {
-                                                Color(android.graphics.Color.parseColor(preset.tokens["accent"] ?: "#2E6BE6"))
-                                            }.getOrDefault(ios.blue)
-                                        )
+                Column(Modifier.padding(horizontal = Aurora.PagePadding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    com.localmind.data.UiPresets.ALL.chunked(2).forEach { pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            pair.forEach { preset ->
+                                PresetPreviewCard(
+                                    name = preset.name,
+                                    accent = runCatching {
+                                        Color(android.graphics.Color.parseColor(preset.tokens["accent"] ?: "#2E6BE6"))
+                                    }.getOrDefault(ios.blue),
+                                    selected = activePreset?.id == preset.id,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { viewModel.applyUiPreset(preset) },
                                 )
-                            },
-                            trailing = { CheckMark(activePreset?.id == preset.id) },
-                            onClick = { viewModel.applyUiPreset(preset) },
-                        )
+                            }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -202,6 +199,51 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     modifier = Modifier.padding(start = Aurora.PagePadding + 2.dp, top = 6.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PresetPreviewCard(
+    name: String,
+    accent: Color,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val ios = IosTheme.palette
+    Column(
+        modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(ios.secondaryGroupedBackground.copy(alpha = 0.74f))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(accent.copy(alpha = 0.16f))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(accent)
+            )
+            Spacer(Modifier.size(8.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Box(Modifier.width(46.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(accent.copy(alpha = 0.55f)))
+                Box(Modifier.width(30.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(ios.label.copy(alpha = 0.16f)))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(name, style = IosTheme.typography.footnote, color = ios.label, modifier = Modifier.weight(1f))
+            if (selected) Text("✓", style = IosTheme.typography.footnote, color = ios.blue)
         }
     }
 }

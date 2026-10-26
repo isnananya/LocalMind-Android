@@ -278,9 +278,9 @@ fun LiquidGlassTabBar(
                         .graphicsLayer {
                             translationX = pillX.value - 27.dp.toPx()
                             alpha = if (pillX.value > 0f) 1f else 0f
-                            val stretch = if (dragging) 1.16f else 1f
+                            val stretch = if (dragging) 1.45f else 1f
                             scaleX = stretch
-                            scaleY = if (dragging) 0.94f else 1f
+                            scaleY = if (dragging) 0.82f else 1f
                         }
                         .width(54.dp)
                         .height(54.dp)
