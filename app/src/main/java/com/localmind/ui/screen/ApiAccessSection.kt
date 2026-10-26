@@ -119,14 +119,14 @@ internal fun ApiAccessSection(
                 Text(
                     "API Key " + (if (current.apiKey.isBlank()) "未填 —— 大多数服务会直接 401" else "已填"),
                     style = IosTheme.typography.caption1,
-                    color = if (current.apiKey.isBlank()) ios.orange else ios.secondaryLabel,
+                    color = if (current.apiKey.isBlank()) ios.warningText else ios.secondaryLabel,
                 )
                 tests[current.id]?.let { t ->
                     Spacer(Modifier.height(4.dp))
                     Text(
                         t,
                         style = IosTheme.typography.caption1,
-                        color = if (t.contains("正常")) ios.green else ios.orange,
+                        color = if (t.contains("正常")) ios.green else ios.warningText,
                     )
                 }
                 Spacer(Modifier.height(8.dp))

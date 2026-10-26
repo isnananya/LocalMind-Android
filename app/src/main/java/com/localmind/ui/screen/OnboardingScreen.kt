@@ -104,24 +104,12 @@ fun OnboardingScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
             .padding(horizontal = 26.dp)
     ) {
-        Spacer(Modifier.height(if (step == 0) 90.dp else 60.dp))
-
-        // 进度点：只剩一步，画一个就够了（三个点会让人以为后面还有东西要填）
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(1) { i ->
-                Box(
-                    Modifier
-                        .height(4.dp)
-                        .width(if (i == step) 26.dp else 14.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (i <= step) ios.blue else ios.fillSecondary)
-                )
-            }
-        }
-        Spacer(Modifier.height(22.dp))
+        // 只剩一步，就不画"1/1"的进度条了：单独一条短蓝线飘在标题上方，
+        // 看起来像没加载完的进度条，而不是"这是第几步"。
+        Spacer(Modifier.height(if (step == 0) 76.dp else 56.dp))
 
         Column(
             modifier = Modifier

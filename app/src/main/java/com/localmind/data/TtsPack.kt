@@ -57,6 +57,11 @@ data class TtsEngineSpec(
     val defaultInstruction: String = "",
     /** 指令强度（Breeze 建议 4）。 */
     val cfgScale: Float = 4f,
+    /** 随机种子；同一个种子 + 同一句话可复现同一段音频。 */
+    val seed: Int = 42,
+    /** 连接 / 读取超时（毫秒）。本地服务很快，公网服务可能要更久。 */
+    val connectTimeoutMs: Int = 8_000,
+    val readTimeoutMs: Int = 120_000,
     /** 服务返回的采样率。Breeze 是 24000。 */
     val sampleRate: Int = 24000,
     /** `pcm_s16le`（Breeze）或 `wav`（OpenAI）。 */
@@ -137,7 +142,13 @@ object TtsPacks {
                 return ParseResult.Failed("引擎 ${e.id} 的 baseUrl 要以 http:// 或 https:// 开头")
             }
             if (e.sampleRate !in 8000..48000) {
-                return ParseResult.Failed("引擎 ${e.id} 的 sampleRate 应在 8000~48000 之间")
+                return ParseResult.Failed("引擎 " + e.id + " 的 sampleRate 应在 8000~48000 之间")
+            }
+            if (e.connectTimeoutMs !in 1_000..60_000) {
+                return ParseResult.Failed("引擎 " + e.id + " 的 connectTimeoutMs 应在 1000~60000 之间")
+            }
+            if (e.readTimeoutMs !in 5_000..600_000) {
+                return ParseResult.Failed("引擎 " + e.id + " 的 readTimeoutMs 应在 5000~600000 之间")
             }
         }
         return ParseResult.Ok(pack)

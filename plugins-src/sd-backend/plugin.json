@@ -1,8 +1,10 @@
 {
   "id": "dev.localmind.backend.sd",
   "name": "本地生图后端（通用版）",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "LocalMind",
+  "license": "MIT",
+  "sourceUrl": "https://github.com/leejet/stable-diffusion.cpp",
   "description": "离线生图推理后端（stable-diffusion.cpp）通用版：步数、线程、flash attention、采样器/调度器与逐帧进度都可传；包内同时带 arm64-v8a 与 x86_64。",
   "abilities": ["native_backend"],
   "requires": ["storage"],

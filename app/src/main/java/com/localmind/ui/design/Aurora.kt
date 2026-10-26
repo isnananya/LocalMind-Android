@@ -203,6 +203,7 @@ fun AuroraTitle(
     text: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val ios = IosTheme.palette
@@ -212,6 +213,10 @@ fun AuroraTitle(
             .padding(start = Aurora.PagePadding, end = Aurora.PagePadding - 6.dp, top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(10.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 text = text,

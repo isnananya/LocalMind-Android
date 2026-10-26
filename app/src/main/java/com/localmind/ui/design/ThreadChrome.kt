@@ -51,7 +51,7 @@ fun ThreadTopBar(
     onSettings: () -> Unit,
 ) {
     val ios = IosTheme.palette
-    Column(Modifier.fillMaxWidth().background(ios.groupedBackground.copy(alpha = 0.92f))) {
+    Column(Modifier.fillMaxWidth().background(ios.groupedBackground.copy(alpha = 0.58f))) {
         Spacer(Modifier.height(statusBarTopPadding()))
         Row(
             Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 12.dp),
@@ -111,6 +111,13 @@ fun ChatComposer(
     onStop: () -> Unit,
     onPickImage: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 没有可用模型时点输入条的行为。
+     *
+     * 原来这里只是把输入框 disabled 掉：用户点了没反应，底部写着"先加载模型"，
+     * 却不知道去哪儿加载 —— 一次无效点击。所以把整条输入区做成"去选模型"的入口。
+     */
+    onBlocked: (() -> Unit)? = null,
 ) {
     val ios = IosTheme.palette
     val canSend = value.isNotBlank() && enabled && !streaming
@@ -127,6 +134,15 @@ fun ChatComposer(
                 .clip(RoundedCornerShape(22.dp))
                 .background(ios.secondaryGroupedBackground)
                 .border(0.6.dp, ios.separator, RoundedCornerShape(22.dp))
+                .then(
+                    if (!enabled && onBlocked != null) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onBlocked,
+                        )
+                    } else Modifier
+                )
                 .padding(start = 6.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -157,7 +173,7 @@ fun ChatComposer(
             ) {
                 if (value.isEmpty()) {
                     Text(
-                        text = if (enabled) "发消息…" else "先加载模型",
+                        text = if (enabled) "发消息…" else "点这里选模型",
                         style = IosTheme.typography.body,
                         color = ios.tertiaryLabel,
                     )
@@ -191,7 +207,7 @@ fun ChatComposer(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) {
-                    if (streaming) onStop() else if (canSend) onSend()
+                    if (streaming) onStop() else if (canSend) onSend() else onBlocked?.invoke()
                 },
             contentAlignment = Alignment.Center,
         ) {

@@ -33,6 +33,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -54,8 +56,8 @@ enum class Tab(val title: String) {
     CHAT("对话"),
     MODELS("模型"),
     ME("我的"),
-    /** 语音与音色整页。默认不是标签，但界面布局插件可以把它放到底栏。 */
-    VOICE("语音"),
+    /** TTS 测试整页。默认不是标签，但界面布局插件可以把它放到底栏。 */
+    VOICE("TTS"),
     /** Breeze TTS 2（外部语音引擎）整页。 */
     BREEZE("Breeze 语音"),
     PLUGINS("插件"),
@@ -144,6 +146,9 @@ private const val HISTORY_KEEP = 24
  */
 private const val HISTORY_ALIGN = 6
 
+/** 状态页曲线保留的采样点数：1 秒一个 ≈ 一分钟窗口。 */
+private const val STATUS_POINTS = 60
+
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val localApp = app as LocalMindApp
@@ -219,6 +224,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val _showDebug = MutableStateFlow(false)
     val showDebug: StateFlow<Boolean> = _showDebug.asStateFlow()
+
+    /**
+     * 「状态」整页：设备与模型的实时状态。
+     *
+     * 入口在对话列表左上的圆按钮（见 ChatListPage）—— 它回答的是"现在这台手机
+     * 和这个模型怎么样"，而不是"我要设置什么"，所以不该埋在「我的」里。
+     * 打开时每秒采样一次，关掉就停，不在后台耗电。
+     */
+    private val _showStatus = MutableStateFlow(false)
+    val showStatus: StateFlow<Boolean> = _showStatus.asStateFlow()
+
+    /**
+     * 深浅色模式（system / light / dark）。
+     *
+     * 必须是 StateFlow：以前 [AppTheme] 直接读 `storage.themeMode()`，那是个普通
+     * 函数调用 —— 改完设置不会触发重组，界面提示"下次启动生效"其实是在掩饰
+     * "这一版没接好"。现在改一下立刻重绘。
+     */
+    private val _themeMode = MutableStateFlow(storage.themeMode())
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
+    fun setThemeMode(mode: String) {
+        val safe = mode.takeIf { it in setOf("system", "light", "dark") } ?: "system"
+        storage.setThemeMode(safe)
+        _themeMode.value = safe
+    }
 
     /**
      * 「我的」里面那一层整页子页（主题 / 本机 API / 语音与音色 / 关于）有没有开着。
@@ -420,6 +451,57 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 正在安装的内置插件 key；空 = 空闲。 */
+    private val _builtinInstalling = MutableStateFlow("")
+    val builtinInstalling: StateFlow<String> = _builtinInstalling.asStateFlow()
+
+    /**
+     * 安装 / 重装一个 **APK 内置**插件（模型库、玻璃底栏、生图后端）。
+     *
+     * 和导入 zip 走同一条 [PluginInstall]，只是文件来自 assets；没有特权路径。
+     * 放后台：sd 后端 30 MB，主线程装会把界面卡住。
+     */
+    fun installBuiltin(key: String) {
+        if (_builtinInstalling.value.isNotBlank()) {
+            toast("正在安装另一个内置插件，稍等")
+            return
+        }
+        val item = com.localmind.data.BuiltinPlugins.ALL.firstOrNull { it.key == key }
+        if (item == null) {
+            toast("没有这个内置插件")
+            return
+        }
+        // 已加载的原生后端不能用新 .so 覆盖（旧映射会段错误）。见 BuiltinPlugins 的说明。
+        if (item.key == "sd-backend" &&
+            runCatching { com.localmind.native.image.ImageBridge.hasDiffusionBackend }.getOrDefault(false)
+        ) {
+            toast("生图后端已经加载，重装要等下次启动；现在可以继续用")
+            return
+        }
+        _builtinInstalling.value = key
+        viewModelScope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                com.localmind.data.BuiltinPlugins.install(localApp, storage, item, force = true)
+            } ?: "「" + item.name + "」已是最新"
+            _plugins.value = storage.loadPlugins()
+            _modelPacks.value = storage.loadModelPacks()
+            _enabledPackIds.value = storage.enabledModelPackIds()
+            refreshVoiceCatalog()
+            refreshModels()
+            refreshBreeze()
+            localApp.bumpPluginRevision()
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.localmind.service.NativeLibraryInstaller.activateInstalled(storage)
+                    com.localmind.native.image.ImageBridge.hasDiffusionBackend
+                }.getOrDefault(false)
+            }
+            _diffusionBackendReady.value = ok
+            _builtinInstalling.value = ""
+            toast(msg)
+        }
+    }
+
     /**
      * 把示例表情包写到 `pluginsDir/示例-表情包/`。
      *
@@ -507,6 +589,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun uninstallPlugin(pluginId: String) {
         val p = _plugins.value[pluginId] ?: return
+        // 内置插件卸载后不要再被下一次启动偷偷装回来（见 BuiltinPlugins.isRemoved）。
+        if (com.localmind.data.BuiltinPlugins.isBuiltin(pluginId)) {
+            com.localmind.data.BuiltinPlugins.markRemoved(localApp, pluginId)
+        }
         _plugins.value = _plugins.value - pluginId
         storage.savePlugins(_plugins.value)
         // 顺手清掉它的资源目录，避免卸载后留下几十 MB 的孤儿文件。
@@ -938,6 +1024,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _inChat.value = false
         refreshModels()
 
+        // ---- 内置插件：模型库 / 液态玻璃底栏 / 生图后端 ----
+        //
+        // 放后台：sd 后端要解 30 MB zip、校验并 System.load 37 MB 的 .so。
+        // 装完必须把插件、模型、音色、后端状态全部刷新一遍 —— 这几份缓存
+        // 都在 init 里先读过一次了，不刷新的话界面会一直显示"没装"。
+        viewModelScope.launch {
+            val messages = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.localmind.data.BuiltinPlugins.installMissing(getApplication(), storage)
+                }.getOrDefault(emptyList())
+            }
+            if (messages.isNotEmpty()) {
+                _plugins.value = storage.loadPlugins()
+                _modelPacks.value = storage.loadModelPacks()
+                _enabledPackIds.value = storage.enabledModelPackIds()
+                refreshVoiceCatalog()
+                refreshModels()
+                refreshBreeze()
+                localApp.bumpPluginRevision()
+            }
+            // 串行：**先**装/更新，**再**加载。原生库的写入与 System.load
+            // 并发是段错误的来源（见 BuiltinPlugins.installMissing 的说明）。
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.localmind.service.NativeLibraryInstaller.activateInstalled(storage)
+                    com.localmind.native.image.ImageBridge.hasDiffusionBackend
+                }.getOrDefault(false)
+            }
+            _diffusionBackendReady.value = ok
+            if (messages.isNotEmpty()) toast(messages.joinToString("；"))
+        }
+
         // Auto-load the previously used model once, in the background.
         LocalMindApp.pendingModelId?.let { id ->
             LocalMindApp.pendingModelId = null
@@ -966,22 +1084,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _companionStates.value = companion.allStates()
         }
 
-        // 上次装过、但还没进进程的原生后端（生图 / 语音引擎）在这里补一次加载。
-        //
-        // 为什么必须补：插件的安装动作和"这个进程能不能用"是两件事。用户装完
-        // 后端、重启应用之后，如果不重新 System.load，"有没有生图后端"就永远
-        // 回答没有 —— 界面显示"已安装"，生图却还在走程序化渲染。
-        //
-        // 放后台：dlopen 一个 36 MB 的 .so 要几百毫秒，不该压在主线程启动路径上。
-        viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    com.localmind.service.NativeLibraryInstaller.activateInstalled(storage)
-                    com.localmind.native.image.ImageBridge.hasDiffusionBackend
-                }.getOrDefault(false)
-            }
-            _diffusionBackendReady.value = ok
-        }
+        // 原生后端的加载已经并进上面的内置插件协程：**先装/更新，再 load**，
+        // 不能两个协程同时碰 files/native 下的 .so（会段错误）。
 
         // 界面令牌也先建一遍。深浅色在这里是**自己算出来的**（见 isDarkTheme），
         // 所以第一帧就是对的；MainActivity 之后还会用真实值再对一次。
@@ -1083,6 +1187,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (open) {
             com.localmind.data.Diagnostics.action(localApp, "打开测试模式")
         }
+    }
+
+    // ------------------------------------------------------------- 状态页
+
+    private val systemStatus by lazy { com.localmind.service.SystemStatus(getApplication()) }
+    private var statusJob: Job? = null
+
+    /** 最近一次采样；null = 还没采到（刚从别的页面进来）。 */
+    private val _statusSnapshot =
+        MutableStateFlow<com.localmind.service.SystemStatus.Snapshot?>(null)
+    val statusSnapshot: StateFlow<com.localmind.service.SystemStatus.Snapshot?> =
+        _statusSnapshot.asStateFlow()
+
+    /** 曲线用的环形历史，旧的在前。 */
+    data class StatusHistory(
+        val cpu: List<Float> = emptyList(),
+        val ram: List<Float> = emptyList(),
+        val tps: List<Float> = emptyList(),
+        val rx: List<Float> = emptyList(),
+        val tx: List<Float> = emptyList(),
+        val batteryTemp: List<Float> = emptyList(),
+    )
+
+    private val _statusHistory = MutableStateFlow(StatusHistory())
+    val statusHistory: StateFlow<StatusHistory> = _statusHistory.asStateFlow()
+
+    /** 打开/关闭「状态」页；打开时才开始每秒采样。 */
+    fun openStatus(open: Boolean) {
+        _showStatus.value = open
+        if (open) {
+            startStatusLoop()
+            com.localmind.data.Diagnostics.action(localApp, "打开状态页")
+        } else {
+            stopStatusLoop()
+        }
+    }
+
+    private fun startStatusLoop() {
+        if (statusJob?.isActive == true) return
+        statusJob = viewModelScope.launch {
+            while (isActive) {
+                val snap = withContext(Dispatchers.IO) { systemStatus.sample() }
+                _statusSnapshot.value = snap
+                val prev = _statusHistory.value
+                val tps = engine.state.value.lastTokensPerSecond.toFloat()
+                _statusHistory.value = StatusHistory(
+                    cpu = (prev.cpu + (snap.cpuUsagePercent ?: 0f)).takeLast(STATUS_POINTS),
+                    ram = (prev.ram + snap.ramPercent).takeLast(STATUS_POINTS),
+                    tps = (prev.tps + tps).takeLast(STATUS_POINTS),
+                    rx = (prev.rx + snap.rxBytesPerSec.toFloat()).takeLast(STATUS_POINTS),
+                    tx = (prev.tx + snap.txBytesPerSec.toFloat()).takeLast(STATUS_POINTS),
+                    batteryTemp = snap.batteryTempC?.let { (prev.batteryTemp + it).takeLast(STATUS_POINTS) }
+                        ?: prev.batteryTemp,
+                )
+                delay(1000)
+            }
+        }
+    }
+
+    private fun stopStatusLoop() {
+        statusJob?.cancel()
+        statusJob = null
     }
 
     /**
@@ -2012,7 +2178,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (wanted.isBlank()) return
         val model = modelStore.resolveAll().firstOrNull { it.id == wanted } ?: return
         if (model.isImageModel || model.embedding) return
-        if (!File(model.localPath).isFile) return
+        val modelFile = model.localPath?.takeIf { it.isNotBlank() }?.let { File(it) }
+        if (modelFile?.isFile != true) return
         viewModelScope.launch {
             if (engine.state.value.ready || engine.state.value.generating) return@launch
             android.util.Log.i("AppViewModel", "预热模型：${model.name}")
@@ -3212,6 +3379,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val status: String = "",
         val error: String = "",
         val lastFile: String = "",
+        /** 「测试连接」正在进行。 */
+        val probing: Boolean = false,
+        /** 「测试连接」的结果（成功或失败的一句话）。 */
+        val probe: String = "",
     ) {
         val active: BreezeOption? get() = options.firstOrNull { it.key == activeKey } ?: options.firstOrNull()
         /** 能用 = 用户打开了开关 + 有插件 + 填了地址。 */
@@ -3262,6 +3433,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshBreeze()
         selectBreezeOption(key)
         toast("已保存 ${spec.label} 的配置")
+    }
+
+    /** 只测网络 / 地址 / 鉴权，不跑模型。 */
+    fun probeBreeze(specOverride: com.localmind.data.TtsEngineSpec? = null) {
+        // 用**页面上正在编辑的那份**，不是已保存的那份：用户改完地址先点
+        // 「测试连接」是再自然不过的顺序，拿旧地址测等于骗他。
+        val spec = specOverride ?: _breeze.value.active?.spec
+        if (spec == null) {
+            toast("没有可用的语音引擎，先导入一个「语音引擎」插件")
+            return
+        }
+        if (spec.baseUrl.isBlank()) {
+            toast("先把地址填上")
+            return
+        }
+        _breeze.value = _breeze.value.copy(probing = true, probe = "", error = "")
+        viewModelScope.launch {
+            runCatching { breezeTts.probe(spec) }
+                .onSuccess { msg ->
+                    _breeze.value = _breeze.value.copy(probing = false, probe = msg)
+                }
+                .onFailure { t ->
+                    _breeze.value = _breeze.value.copy(
+                        probing = false,
+                        probe = "",
+                        error = t.message ?: t.javaClass.simpleName,
+                    )
+                }
+        }
     }
 
     /** 试听：合成一句并播放。 */
@@ -3411,12 +3611,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun speak(text: String) {
+        // 本地神经音色优先：它是真·离线（sherpa VITS），不依赖任何服务。
+        // 没选本地音色、或引擎还没加载好时，才轮到 Breeze，最后才是系统 TTS。
+        val neural = _activeNeuralVoice.value
+        if (neural.isNotBlank() && neuralTts.loadedVoiceId == neural) {
+            val v = _voice.value
+            val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+            viewModelScope.launch {
+                withContext(Dispatchers.Default) {
+                    neuralTts.speak(text, speed = rate, pitch = pitch, volume = v.volume)
+                }
+            }
+            return
+        }
         if (speakViaBreeze(text)) return
         tts.init { }
         tts.speak(text, _voice.value)
     }
 
-    fun stopSpeaking() = tts.stop()
+    fun stopSpeaking() {
+        runCatching { neuralTts.stop() }
+        tts.stop()
+    }
 
     // ------------------------------------------------------- 神经音色（TTS）
 
@@ -3565,7 +3781,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         toast("已关闭语音")
     }
 
-    fun downloadVoice(voice: com.localmind.data.VoiceEntry) {
+    fun downloadVoice(voice: com.localmind.data.VoiceEntry, quiet: Boolean = false) {
         // 引擎没就绪时先别让用户下 115 MB 的音色 —— 下完也加载不了。
         // 这里不自动帮他下引擎：那是另一个 36 MB，应该由用户明确点一下。
         if (!voiceEngineReady) {
@@ -3575,11 +3791,69 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 重新下载 = 用户明确要再试一次，顺手解除拉黑。
         storage.clearNeuralVoiceBad(voice.id)
         voiceDownloader.install(voice)
-        toast("开始下载 ${voice.label}")
+        // 批量下载时由一个总结性 toast 收尾，别一次弹 5 条。
+        if (!quiet) toast("开始下载 ${voice.label}")
     }
 
     fun cancelVoiceDownload(voice: com.localmind.data.VoiceEntry) {
         voiceDownloader.cancel(voice)
+    }
+
+    /**
+     * 语音页多选之后的批量下载。**同时最多下 2 个**。
+     *
+     * 为什么不一次性全开：手机上的瓶颈是带宽和 CPU，不是连接数。八个 100 MB 的
+     * 音色一起下，每个都只能分到 1/8 的带宽，进度条全在原地爬，用户会以为卡死；
+     * 而且每个下载协程都在解压时抢 CPU。两个是"感觉在并行"和"每个都跑得动"的平衡点。
+     *
+     * 已经装好的会跳过（不是重下），这一点和行内的「下载」按钮不同 —— 那个是用户
+     * 明确点某一行，重下等于"再试一次"。
+     */
+    fun downloadVoices(voices: List<com.localmind.data.VoiceEntry>) {
+        val todo = voices.filter { !voiceInstalled(it) }
+        if (todo.isEmpty()) {
+            toast("选中的音色都已经下载好了")
+            return
+        }
+        if (!voiceEngineReady) {
+            toast("先下载「语音引擎」，再下音色")
+            return
+        }
+        viewModelScope.launch {
+            val gate = kotlinx.coroutines.sync.Semaphore(2)
+            val tasks = todo.map { voice ->
+                launch {
+                    gate.withPermit {
+                        downloadVoice(voice, quiet = true)
+                        voiceDownloader.await(voice)
+                    }
+                }
+            }
+            tasks.forEach { it.join() }
+            val done = todo.count { voiceInstalled(it) }
+            toast(
+                if (done == todo.size) "已下载 " + done + " 个音色"
+                else "下载结束：" + done + " / " + todo.size + " 成功，失败的行内有原因"
+            )
+        }
+    }
+
+    /**
+     * 批量删除。删除目录是同步 IO（上百 MB），放到 IO 线程串行做，
+     * 免得主线程在这里卡出一帧空白。
+     */
+    fun deleteVoices(voices: List<com.localmind.data.VoiceEntry>) {
+        if (voices.isEmpty()) return
+        voices.forEach { v ->
+            if (_voice.value.neuralVoiceId == v.id) releaseNeuralVoice()
+            storage.clearNeuralVoiceBad(v.id)
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                voices.forEach { voiceDownloader.uninstall(it) }
+            }
+            toast("已删除 " + voices.size + " 个音色")
+        }
     }
 
     fun deleteVoice(voice: com.localmind.data.VoiceEntry) {

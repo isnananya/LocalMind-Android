@@ -49,7 +49,7 @@ fun PluginDevDocsScreen(onBack: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
     ) {
         IosNavigationBar(
             title = "插件开发文档",

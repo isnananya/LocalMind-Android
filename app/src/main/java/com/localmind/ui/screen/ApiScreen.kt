@@ -84,47 +84,42 @@ fun ApiScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
     ) {
+        // 标题就叫「本地 API」：原来顶栏写「开放接口」、下面大标题又写「本地 API」，
+        // 同一个页面两个名字，用户以为进了两个地方。返回键也用全站统一的圆形箭头。
         IosNavigationBar(
-            title = "开放接口",
+            title = "本地 API",
             collapsed = true,
             topInset = statusBarTopPadding(),
             leading = {
                 if (onBack != null) {
-                    Row(
-                        modifier = Modifier.clickable { onBack() },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
-                            contentDescription = "返回",
-                            tint = ios.blue,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Spacer(Modifier.width(2.dp))
-                        Text("返回", style = IosTheme.typography.body, color = ios.blue)
-                    }
+                    com.localmind.ui.design.AuroraCircleButton(
+                        icon = com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
+                        contentDescription = "返回",
+                        onClick = { onBack() },
+                        size = 36.dp,
+                        tint = ios.label,
+                    )
                 } else {
                     Icon(AppIcons.Api, contentDescription = null, tint = ios.teal, modifier = Modifier.size(20.dp))
                 }
             },
             trailing = {
-                Icon(
-                    AppIcons.Delete,
+                com.localmind.ui.design.AuroraCircleButton(
+                    icon = AppIcons.Delete,
                     contentDescription = "清空日志",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clickable { viewModel.clearApiLog() },
+                    onClick = { viewModel.clearApiLog() },
+                    size = 36.dp,
+                    tint = ios.secondaryLabel,
                 )
             },
         )
-        IosLargeTitle("本地 API")
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 28.dp),
+            // 顶栏下面直接贴卡片会显得挤；留 12dp，和外观页的节奏一致。
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 12.dp, bottom = 28.dp),
         ) {
             item {
                 Column(
@@ -213,7 +208,7 @@ fun ApiScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
                         Text(
                             "注意：当前没有加载模型，对话接口会返回 503。",
                             style = IosTheme.typography.caption1,
-                            color = ios.orange,
+                            color = ios.warningText,
                         )
                     }
                 }

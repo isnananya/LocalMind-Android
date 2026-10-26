@@ -217,7 +217,7 @@ fun PersonaChatSettingsScreen(
             Divider(ios.separator)
             AbilityRow(
                 title = "发语音",
-                subtitle = if (voiceOk) "回复用 TTS 念出来" else "还缺语音引擎 —— 去「我的 → 语音与音色」下载（约 36 MB）",
+                subtitle = if (voiceOk) "回复用 TTS 念出来" else "还缺语音引擎 —— 去「我的 → TTS 测试」下载（约 36 MB）",
                 checked = conversation.abilities.voice,
                 ready = voiceOk,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(voice = on) } }
@@ -262,6 +262,9 @@ fun PersonaChatSettingsScreen(
                 Text("全部打开", style = IosTheme.typography.body, color = ios.blue)
             }
         }
+
+        // ------------------------------------------------------------ 朗读
+        ConversationVoiceSection(viewModel, conversation)
 
         // ------------------------------------------------------------ 设备感知
         //

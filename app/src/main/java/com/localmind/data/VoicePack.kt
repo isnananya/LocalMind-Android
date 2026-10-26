@@ -108,7 +108,7 @@ data class VoiceEntry(
         family = "离线语音",
         params = "",
         quant = "",
-        description = description.ifBlank { "离线语音音色" } + "（下载后到「我的 → 语音与音色」里使用）",
+        description = description.ifBlank { "离线语音音色" } + "（下载后到「我的 → TTS 测试」里使用）",
         tags = buildList {
             add("语音")
             if (badge.isNotBlank()) add(badge)

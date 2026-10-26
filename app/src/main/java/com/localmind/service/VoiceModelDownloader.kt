@@ -112,6 +112,9 @@ class VoiceModelDownloader(
         }
         jobs[LIBRARY_KEY] = scope.launch {
             val installer = SherpaLibraryInstaller(storage)
+            installer.onProgress = { bytes ->
+                update(LIBRARY_KEY) { it.copy(downloadedBytes = bytes) }
+            }
             val ok = runCatching { installer.ensureInstalled() }.getOrElse { t ->
                 Log.w(TAG, "原生库安装失败：${t.message}", t)
                 false
@@ -171,6 +174,14 @@ class VoiceModelDownloader(
         }
     }
 
+    /**
+     * 等某个音色的安装任务结束。批量下载用它把**同时进行的下载**压到 N 个以内：
+     * [install] 只是起一个协程并立刻返回，真正占带宽的是那个协程。
+     */
+    suspend fun await(voice: VoiceEntry) {
+        jobs[voice.id]?.join()
+    }
+
     fun cancel(voice: VoiceEntry) {
         cancelled += voice.id
         jobs[voice.id]?.cancel()
@@ -190,12 +201,11 @@ class VoiceModelDownloader(
         val target = NeuralVoiceModels.dirOf(storage, voice)
         NeuralVoiceModels.voiceRoot(storage).mkdirs()
 
-        val urls = buildList {
-            add("https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${voice.id}.tar.bz2")
-            // 直连 GitHub Releases 在这台机器上实测会随机超时，gh-proxy 是唯一
-            // 稳定的（docs/BLOCKERS.md 有实测表）。所以直连先试、代理兜底。
-            add("https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${voice.id}.tar.bz2")
-        }
+        // 地址列表统一由 VoiceCatalog 给出：插件可以自带 url / mirrors，
+        // 之前这里按 id 现拼，导致**插件里写的镜像永远不生效** —— 明明允许插件
+        // 换地址，却不读那个字段，等于把可维护性又退回发版。
+        // 顺序：插件 url（或默认 tarball 地址）→ mirrors → gh-proxy 兜底。
+        val urls = com.localmind.data.VoiceCatalog.urlsFor(voice)
 
         var lastError: String? = null
         for ((i, url) in urls.withIndex()) {

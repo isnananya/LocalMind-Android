@@ -83,6 +83,16 @@ data class IosPalette(
 ) {
     /** colour picker used by model avatars, tags, etc. */
     val accents: List<Color> get() = listOf(blue, indigo, purple, pink, orange, green, teal, yellow, red)
+
+    /**
+     * 警示/说明文字用的琥珀色。
+     *
+     * [orange] 是 iOS 的系统橙（#FF9500），当图标没问题，但当**正文**放在
+     * 白底上只有约 2.2:1 的对比度 —— 实测在模拟器上「注意事项」那几行几乎
+     * 融进卡片里。这个值只压暗不换色相，仍是同一种"警告"语义。
+     */
+    val warningText: Color
+        get() = if (isDark) Color(0xFFFFB454) else Color(0xFFA25000)
 }
 
 /**

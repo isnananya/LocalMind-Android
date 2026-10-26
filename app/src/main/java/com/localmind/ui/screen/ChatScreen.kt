@@ -218,7 +218,7 @@ internal fun AbilityRow(
             Text(
                 subtitle,
                 style = IosTheme.typography.caption1,
-                color = if (!ready && !locked) ios.orange else ios.secondaryLabel,
+                color = if (!ready && !locked) ios.warningText else ios.secondaryLabel,
             )
         }
         if (locked) {
@@ -515,7 +515,7 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
             .imePadding()
     ) {
         com.localmind.ui.design.ThreadTopBar(
@@ -650,6 +650,9 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
             // 加号发图。「上网 / Agent」那两个开关移到对话设置里了 ——
             // 它们是模式开关，不是每次发消息都要碰的东西。
             onPickImage = { pickImage.launch(arrayOf("image/*")) },
+            // 点输入条 → 去模型页挑一个。和上面那条横幅同一个目的地，
+            // 因为用户的第一反应往往是点输入框，而不是读横幅。
+            onBlocked = { viewModel.selectTab(Tab.MODELS) },
             tps = engineState.lastTokensPerSecond,
             tokens = engineState.tokensGenerated,
             cacheHit = engineState.cacheHitPercent,
@@ -723,7 +726,7 @@ private fun PendingImageStrip(path: String, canSee: Boolean, onRemove: () -> Uni
                 Text(
                     if (canSee) "会一起发给模型" else "当前版本还不能识图，发出去模型看不到这张图",
                     style = IosTheme.typography.caption2,
-                    color = if (canSee) ios.secondaryLabel else ios.orange,
+                    color = if (canSee) ios.secondaryLabel else ios.warningText,
                 )
             }
             Icon(
@@ -1138,6 +1141,8 @@ private fun ChatInputBar(
     onPickImage: () -> Unit,
     tps: Double,
     tokens: Int,
+    /** 没有可用模型时点输入条的跳转（目前是打开「模型」页去挑一个）。 */
+    onBlocked: (() -> Unit)? = null,
     /** 上一轮提示词里有多大比例是直接复用 KV cache 的（见 docs/SPEED.md）。 */
     cacheHit: Int = 0,
     /** 这个对话走的是不是云端 / 局域网 API（那种情况下本机的 tok/s 没有意义）。 */
@@ -1147,7 +1152,11 @@ private fun ChatInputBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(ios.barBackground)
+            .background(ios.groupedBackground.copy(alpha = 0.58f))
+            // 输入条原来直接贴到屏幕最底：手势导航那一条正好压在发送键下沿
+            // （实测下沿已经进到系统手势区里）。这里在背景里面补一条安全的
+            // 底部留白 —— 背景仍然通到底，只有内容被抬起来。
+            .padding(bottom = com.localmind.ui.components.navigationBottomPadding())
     ) {
         if (streaming && tokens > 0) {
             Text(
@@ -1165,6 +1174,7 @@ private fun ChatInputBar(
             onSend = onSend,
             onStop = onStop,
             onPickImage = onPickImage,
+            onBlocked = onBlocked,
         )
     }
 }

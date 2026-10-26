@@ -2,7 +2,10 @@ package com.localmind.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,7 +35,10 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -40,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,26 +101,33 @@ fun IosSection(
                 text = header,
                 style = IosTheme.typography.footnote.copy(fontWeight = FontWeight.Medium),
                 color = ios.secondaryLabel,
-                modifier = Modifier.padding(start = 24.dp, end = 16.dp, top = 22.dp, bottom = 8.dp),
+                modifier = Modifier.padding(start = 24.dp, end = 16.dp, top = 24.dp, bottom = 8.dp),
             )
         } else {
             Spacer(Modifier.height(22.dp))
         }
+        // 1.0.5 的「Aurora」卡片：20dp 页边距、半透明底、发丝高光边。
+        // 这一层是**共享组件**，所以 API / 生图 / 关于 / 对话设置这些老页面
+        // 不用逐个改，卡片会一起变成新风格。
         Column(
             modifier = Modifier
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 20.dp)
                 .then(
                     if (ios.isDark) Modifier
                     else Modifier.shadow(
-                        elevation = 10.dp,
+                        elevation = 14.dp,
                         shape = shape,
-                        ambientColor = Color.Black.copy(alpha = 0.05f),
-                        spotColor = Color.Black.copy(alpha = 0.06f),
+                        ambientColor = Color.Black.copy(alpha = 0.06f),
+                        spotColor = Color.Black.copy(alpha = 0.07f),
                     )
                 )
                 .clip(shape)
-                .background(ios.secondaryGroupedBackground)
-                .border(0.5.dp, ios.barBorder, shape),
+                .background(ios.secondaryGroupedBackground.copy(alpha = if (ios.isDark) 0.62f else 0.74f))
+                .border(
+                    0.8.dp,
+                    if (ios.isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.72f),
+                    shape,
+                ),
             content = content,
         )
         if (footer != null) {
@@ -331,9 +346,11 @@ fun IosSwitch(
                 .offset(x = thumbOffset.dp)
                 .size(27.dp)
                 .clip(RoundedCornerShape(IosTheme.metrics.pillCorner))
-                // 滑块圆钮原来写死白色。它落在**填充色**（ios.fill）上，
-                // 所以跟卡片色走最稳：深色主题下卡片色就是那个"亮块"。
-                .background(IosTheme.palette.secondaryGroupedBackground)
+                // 圆钮必须是亮的：原来跟卡片色走，深色主题下卡片是 #141416，
+                // 绿色轨道上就变成一个"黑洞"（实测深色下开关像没打开）。
+                // iOS 本身也是深浅色都用白色圆钮 + 一圈极淡投影。
+                .shadow(1.5.dp, RoundedCornerShape(IosTheme.metrics.pillCorner))
+                .background(Color.White)
         )
     }
 }
@@ -358,21 +375,83 @@ fun IosSlider(
     enabled: Boolean = true,
 ) {
     val ios = IosTheme.palette
-    androidx.compose.material3.Slider(
-        value = value,
-        onValueChange = onValueChange,
-        valueRange = valueRange,
-        enabled = enabled,
-        modifier = modifier.alpha(if (enabled) 1f else 0.4f),
-        colors = androidx.compose.material3.SliderDefaults.colors(
-            thumbColor = ios.secondaryGroupedBackground,
-            activeTrackColor = activeColor ?: ios.blue,
-            inactiveTrackColor = ios.fill,
-            disabledThumbColor = ios.secondaryGroupedBackground,
-            disabledActiveTrackColor = ios.gray,
-            disabledInactiveTrackColor = ios.fill,
-        ),
-    )
+    val accent = activeColor ?: ios.blue
+    val span = (valueRange.endInclusive - valueRange.start).takeIf { it > 0f } ?: 1f
+    val fraction = ((value - valueRange.start) / span).coerceIn(0f, 1f)
+    // Material3 的 Sheet 式滑杆在浅色卡片上是"白钮贴白底"——实测只能看到轨道上一道白缝，
+    // 末端还会多一个 material 3 的停靠圆点。这里按 iOS 的比例自己画：
+    // 4dp 轨道 + 26dp 白钮（带一像素投影），钮始终压在轨道上，深浅色都不会消失。
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val thumbPx = with(density) { 26.dp.toPx() }
+    val trackPx = with(density) { 4.dp.toPx() }
+    var widthPx by remember { mutableFloatStateOf(0f) }
+    val onChange = rememberUpdatedState(onValueChange)
+    val rangeStart = valueRange.start
+
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .alpha(if (enabled) 1f else 0.42f)
+            .onSizeChanged { widthPx = it.width.toFloat() }
+            .pointerInput(enabled, widthPx) {
+                if (!enabled) return@pointerInput
+                fun report(x: Float) {
+                    val travel = (widthPx - thumbPx).coerceAtLeast(1f)
+                    val f = ((x - thumbPx / 2f) / travel).coerceIn(0f, 1f)
+                    onChange.value(rangeStart + f * span)
+                }
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    report(down.position.x)
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        report(change.position.x)
+                        change.consume()
+                    }
+                }
+            },
+    ) {
+        val cy = size.height / 2f
+        val left = thumbPx / 2f
+        val trackW = (size.width - thumbPx).coerceAtLeast(1f)
+        val corner = androidx.compose.ui.geometry.CornerRadius(trackPx / 2f, trackPx / 2f)
+        drawRoundRect(
+            color = ios.fill,
+            topLeft = androidx.compose.ui.geometry.Offset(left, cy - trackPx / 2f),
+            size = androidx.compose.ui.geometry.Size(trackW, trackPx),
+            cornerRadius = corner,
+        )
+        val filled = trackW * fraction
+        if (filled > 0f) {
+            drawRoundRect(
+                color = accent,
+                topLeft = androidx.compose.ui.geometry.Offset(left, cy - trackPx / 2f),
+                size = androidx.compose.ui.geometry.Size(filled.coerceAtLeast(trackPx), trackPx),
+                cornerRadius = corner,
+            )
+        }
+        val cx = left + filled
+        drawCircle(
+            color = Color.Black.copy(alpha = 0.12f),
+            radius = thumbPx / 2f,
+            center = androidx.compose.ui.geometry.Offset(cx, cy + 1.dp.toPx()),
+        )
+        drawCircle(
+            color = Color.White,
+            radius = thumbPx / 2f - 0.5f,
+            center = androidx.compose.ui.geometry.Offset(cx, cy),
+        )
+        drawCircle(
+            color = Color.Black.copy(alpha = 0.07f),
+            radius = thumbPx / 2f - 0.5f,
+            center = androidx.compose.ui.geometry.Offset(cx, cy),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1f),
+        )
+    }
 }
 
 @Composable

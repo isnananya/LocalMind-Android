@@ -34,6 +34,7 @@ import com.localmind.data.RemoteProvider
 import com.localmind.ui.AppViewModel
 import com.localmind.ui.components.IosNavigationBar
 import com.localmind.ui.components.IosSection
+import com.localmind.ui.components.IosSwitch
 import com.localmind.ui.components.ModelPickerSheet
 import com.localmind.ui.components.PickerOption
 import com.localmind.ui.components.modelOptions
@@ -104,7 +105,7 @@ internal fun SettingsPage(title: String, onBack: () -> Unit, content: @Composabl
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
     ) {
         SettingsNavBar(title, onBack)
         Column(
@@ -268,6 +269,118 @@ internal fun ThinkLine(label: String, value: String) {
         )
         Text(value, style = IosTheme.typography.footnote, color = ios.label, modifier = Modifier.weight(1f))
     }
+}
+
+/**
+ * 每个对话的朗读设置。
+ *
+ * 三样东西，都只影响这一个对话：
+ *  * 开不开朗读（[com.localmind.data.Conversation.ttsEnabled]）；
+ *  * 音色提示词（[com.localmind.data.Conversation.voicePrompt]），留空跟随全局；
+ *  * 用哪个神经音色（[com.localmind.data.Conversation.voiceId]），留空跟随全局。
+ *
+ * 为什么不放在「语音」页：那里的东西是"这台手机怎么发声"，这里是
+ * "这个对话听起来像谁"。两者混在一起时，用户改了一个对话的语气，别的对话也变了。
+ */
+@Composable
+internal fun ConversationVoiceSection(
+    viewModel: AppViewModel,
+    conversation: Conversation,
+) {
+    val ios = IosTheme.palette
+    val voice by viewModel.voice.collectAsState()
+    val catalog by viewModel.voiceCatalog.collectAsState()
+    val installed = catalog.filter { viewModel.voiceInstalled(it) }
+
+    IosSection(
+        header = "朗读",
+        footer = "只影响这个对话。音色提示词会替换全局那句；留空就跟随「TTS 测试」里的设置。",
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("朗读它的回复", style = IosTheme.typography.body, color = ios.label)
+                Text(
+                    if (voice.enabled) "还要在语音设置里打开自动朗读" else "语音总开关关着，这里打开也不会出声",
+                    style = IosTheme.typography.caption1,
+                    color = ios.secondaryLabel,
+                )
+            }
+            IosSwitch(
+                checked = conversation.ttsEnabled,
+                onCheckedChange = { on ->
+                    viewModel.updateConversationSettings(conversation.id) { it.copy(ttsEnabled = on) }
+                },
+            )
+        }
+        Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(0.5.dp).background(ios.separator))
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 11.dp)) {
+            Text("音色提示词", style = IosTheme.typography.body, color = ios.label)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "例如：语速慢一点，像在耳边说话。留空跟随全局。",
+                style = IosTheme.typography.caption1,
+                color = ios.secondaryLabel,
+            )
+            Spacer(Modifier.height(8.dp))
+            PromptField(
+                value = conversation.voicePrompt,
+                placeholder = "留空 = 跟随全局",
+            ) { v ->
+                viewModel.updateConversationSettings(conversation.id) { it.copy(voicePrompt = v) }
+            }
+        }
+        Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(0.5.dp).background(ios.separator))
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 11.dp)) {
+            Text("音色", style = IosTheme.typography.body, color = ios.label)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                VoiceChip(
+                    label = "跟随全局",
+                    selected = conversation.voiceId.isBlank(),
+                    onClick = {
+                        viewModel.updateConversationSettings(conversation.id) { it.copy(voiceId = "") }
+                    },
+                )
+                installed.take(4).forEach { v ->
+                    VoiceChip(
+                        label = v.label,
+                        selected = conversation.voiceId == v.id,
+                        onClick = {
+                            viewModel.updateConversationSettings(conversation.id) { it.copy(voiceId = v.id) }
+                        },
+                    )
+                }
+            }
+            if (installed.isEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "还没有安装神经音色；不装也能用系统 TTS。去「我的 → TTS 测试」下载。",
+                    style = IosTheme.typography.caption2,
+                    color = ios.tertiaryLabel,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val ios = IosTheme.palette
+    Text(
+        label,
+        style = IosTheme.typography.footnote,
+        color = if (selected) ios.onAccent else ios.label,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) ios.blue else ios.fillSecondary)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    )
 }
 
 /** 一行危险操作（清空 / 删除）。 */

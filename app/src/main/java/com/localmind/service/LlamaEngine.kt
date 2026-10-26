@@ -141,16 +141,22 @@ class LlamaEngine(private val context: Context) {
             systemInfo = runCatching { LlamaBridge.systemInfoSafe() }.getOrDefault(""),
         )
 
+        // 低端模式：先按**总内存**算出这台设备该被夹到什么程度，再交给规划器。
+        // 这里算一遍是为了拿到 kvQuant —— 规划器要用"真的会用的精度"估 KV，
+        // 否则 2.5 GB 的机器按 f16 估出来会比实际需要的保守一倍。
+        val lowEnd = withContext(Dispatchers.IO) { MemoryPlanner.lowEndPolicy(context) }
+        val kvName = lowEnd?.kvQuant ?: settings.kvQuant
         val plan = withContext(Dispatchers.IO) {
             MemoryPlanner.plan(
                 context, file, settings.contextSize, settings.threads, settings.mmap,
                 // 量化 KV 时按实际元素大小估算，否则规划器会按 f16 保守一倍，
                 // 用户开了 q8_0 却看不到「上下文能开更大」这件事。
-                kvBytesPerElement = when (settings.kvQuant.lowercase()) {
+                kvBytesPerElement = when (kvName.lowercase()) {
                     "q8_0", "q8" -> 1
                     "q4_0", "q4" -> 1  // q4_0 实际 0.5，但按 1 估更保守：留出零头
                     else -> 2
                 },
+                policy = lowEnd,
             )
         }
         _state.value = _state.value.copy(plan = plan)
@@ -167,12 +173,19 @@ class LlamaEngine(private val context: Context) {
                 // 批量与分块：设置里默认 512/256，但**不能超过上下文** ——
                 // n_batch 大于 n_ctx 没有意义，先夹一次是为了让日志与诊断页
                 // 显示的数字就是真实用的那个。
-                val batch = if (settings.batchSize > 0) {
-                    settings.batchSize.coerceAtMost(maxOf(64, plan.recommendedContext))
-                } else 256
+                // batch 也要跟低端模式对齐：ctx 只剩 1024 时还提交 1024 的
+                // 逻辑批，等于每次 prefill 都把整个上下文重建一遍。
+                val batch = (if (settings.batchSize > 0) settings.batchSize else 256)
+                    .let { if (plan.recommendedBatch > 0) minOf(it, plan.recommendedBatch) else it }
+                    .coerceAtMost(maxOf(64, plan.recommendedContext))
                 val ubatch =
-                    if (settings.ubatchSize > 0) settings.ubatchSize.coerceAtMost(batch) else 0
-                val kvCode = when (settings.kvQuant.lowercase()) {
+                    if (settings.ubatchSize > 0) {
+                        settings.ubatchSize.coerceAtMost(batch)
+                    } else if (plan.recommendedBatch > 0) {
+                        // 低端设备的物理批再小一档，峰值内存跟着下来。
+                        minOf(plan.recommendedBatch, batch)
+                    } else 0
+                val kvCode = when (kvName.lowercase()) {
                     "q8_0", "q8" -> 1
                     "q4_0", "q4" -> 2
                     else -> 0
@@ -491,6 +504,7 @@ class LlamaEngine(private val context: Context) {
         var tokenCount = 0
         val started = System.currentTimeMillis()
         var firstTokenAt = 0L
+        var lastLivePush = 0L
         val builder = StringBuilder()
 
         val result = withContext(Dispatchers.IO) {
@@ -505,6 +519,18 @@ class LlamaEngine(private val context: Context) {
                     tokenCount++
                     builder.append(piece)
                     onToken?.invoke(piece)
+                    // 状态页要"实时"：每 200ms 推一次当前 token 数和瞬时速度。
+                    // 每个 token 都推会让整棵 Compose 树每几毫秒重组一次。
+                    val now = System.currentTimeMillis()
+                    if (now - lastLivePush >= 200L) {
+                        lastLivePush = now
+                        val secs = (now - started) / 1000.0
+                        _state.value = _state.value.copy(
+                            generating = true,
+                            tokensGenerated = tokenCount,
+                            lastTokensPerSecond = if (secs > 0.01) tokenCount / secs else 0.0,
+                        )
+                    }
                 }
                 if (out.startsWith(LlamaBridge.ERROR_PREFIX)) {
                     error(out.removePrefix(LlamaBridge.ERROR_PREFIX))

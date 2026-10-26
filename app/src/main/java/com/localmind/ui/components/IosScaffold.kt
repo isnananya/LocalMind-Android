@@ -121,8 +121,8 @@ fun IosLargeTitle(title: String, modifier: Modifier = Modifier) {
     val ios = IosTheme.palette
     Text(
         text = title,
-        style = IosTheme.typography.largeTitle,
+        style = IosTheme.typography.largeTitle.copy(fontWeight = FontWeight.SemiBold),
         color = ios.label,
-        modifier = modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+        modifier = modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp),
     )
 }

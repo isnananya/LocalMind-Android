@@ -8,6 +8,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.Locale
 
 /**
  * Reads GGUF metadata without loading the model, then decides how much context
@@ -22,6 +23,22 @@ object MemoryPlanner {
 
     private const val GGUF_MAGIC = 0x46554747 // "GGUF" little-endian
     private const val MAX_KV_PREVIEW = 24
+
+    /**
+     * 低端模式的封顶策略（规则见 [lowEndPolicy]）。
+     *
+     * [note] 是**给用户看的一行字**，会原样出现在设置页 / 状态页：
+     * "低端模式 · 2.4 GB 内存 · ctx 1024 · KV q8"。
+     * 夹了却不说，用户只会觉得"这个模型怎么这么蠢"（其实是他设定的上下文
+     * 被砍了一半），所以这句话必须能被看到。
+     */
+    data class LowEndPolicy(
+        val contextCap: Int,
+        val batchCap: Int,
+        val kvQuant: String,
+        val totalRamGb: Double,
+        val note: String,
+    )
 
     data class GgufInfo(
         val version: Int,
@@ -233,6 +250,94 @@ object MemoryPlanner {
     fun cpuCores(): Int = Runtime.getRuntime().availableProcessors()
 
     /**
+     * 低端模式：按**总内存**给上下文 / 批大小 / KV 精度封顶。
+     *
+     * ## 为什么需要它
+     *
+     * 手机上的默认值（ctx 4096 / batch 1024 / KV f16）是按"8 GB 起"定的。
+     * 4 GB 甚至 2.5 GB 的机器上，光是 KV cache 就能把应用顶到 OOM，而 Android
+     * 的 OOM killer 是**整进程**杀掉 —— 用户看到的是"加载模型时闪退"，
+     * 不是"内存不够"的提示。夹一层之后同一台机器至少能跑起来，只是上下文短一些。
+     *
+     * ## 规则
+     *
+     * | 总内存 | ctx 上限 | batch 上限 | KV |
+     * |---|---|---|---|
+     * | < 4 GB | 1024 | 128 | q8_0 |
+     * | < 6 GB | 2048 | 256 | q8_0 |
+     * | < 8 GB | 4096 | 512 | q8_0 |
+     * | ≥ 8 GB | 用户设置 | 用户设置 | 用户设置 |
+     *
+     * 6–8 GB 这一档是"均衡"：ctx 4096 本来就是默认值，等于不夹上下文，
+     * 只把 batch 和 KV 收一收；< 6 GB 才是真正的低端模式。
+     *
+     * KV 用 q8_0 是**收益最大的一刀**：同样内存能装下两倍的上下文，精度损失
+     * 在对话场景里听不出来。需要 flash attention —— 不支持时原生侧会自动退回
+     * f16 并继续加载，所以这里不需要判断设备支不支持。
+     *
+     * @return null = 这台设备不需要夹（≥ 8 GB 或读不到内存信息）。
+     */
+    fun lowEndPolicy(context: Context): LowEndPolicy? {
+        val total = totalRamBytes(context)
+        if (total <= 0L) return null
+        val gb = total.toDouble() / (1024.0 * 1024.0 * 1024.0)
+        val ctx: Int
+        val batch: Int
+        when {
+            gb < 4.0 -> { ctx = 1024; batch = 128 }
+            gb < 6.0 -> { ctx = 2048; batch = 256 }
+            gb < 8.0 -> { ctx = 4096; batch = 512 }
+            else -> return null
+        }
+        val label = String.format(Locale.US, "%.1f GB", gb)
+        val mode = if (gb < 6.0) "低端模式" else "均衡模式"
+        return LowEndPolicy(
+            contextCap = ctx,
+            batchCap = batch,
+            kvQuant = "q8_0",
+            totalRamGb = gb,
+            note = mode + " · " + label + " 内存 · ctx " + ctx + " · KV q8",
+        )
+    }
+
+    /**
+     * 大核数：从 `cpufreq/cpuinfo_max_freq` 里数**最高一档**有几个。
+     *
+     * 为什么不用 `availableProcessors()`：手机是大小核，8 个核里通常只有 4 个
+     * 大核。llama.cpp 的矩阵乘是内存带宽瓶颈，摊到小核上不会更快，反而要等
+     * 最慢的那个。厂商会写 1804800 和 1800000 这种近似值，所以按最高值的 95%
+     * 判定同一档。
+     *
+     * 读不到（模拟器、部分 ROM 不给权限）时返回 0，由 [recommendedThreads]
+     * 退回到保守近似。
+     */
+    fun bigCoreCount(): Int = bigCores
+
+    private val bigCores: Int by lazy {
+        val freqs = (0 until 16).mapNotNull { i ->
+            runCatching {
+                val f = File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq")
+                if (!f.isFile) null else f.readText().trim().toLongOrNull()
+            }.getOrNull()
+        }.filter { it > 0 }
+        if (freqs.isEmpty()) return@lazy 0
+        val top = freqs.max()
+        freqs.count { it >= top * 0.95 }
+    }
+
+    /**
+     * 自动线程数：优先大核数，夹在 2–6。
+     *
+     * 上限 6 而不是"全用"：超过 6 个线程后带宽抢得比算得快，实测曲线是平的
+     * 甚至往下走（见 [plan] 里那段注释）。
+     */
+    fun recommendedThreads(): Int {
+        val big = bigCoreCount()
+        if (big < 2) return autoThreads()
+        return big.coerceIn(2, 6)
+    }
+
+    /**
      * 自动线程数。**界面那行「自动（N）」必须调这个函数**，不要再自己算一份。
      *
      * 原来设置页写的是 `cores - 1`，而这里算的是 `cores <= 4 ? cores : 4`：
@@ -256,10 +361,15 @@ object MemoryPlanner {
         threadsHint: Int = 0,
         preferStreaming: Boolean = true,
         kvBytesPerElement: Int = 2,
+        /**
+         * 低端模式策略。默认在这一层自己算，这样**所有**调用方（设置页、模型页、
+         * 引擎）看到的是同一份规则；引擎那边还要拿它决定真的传给 llama.cpp 的
+         * KV 类型，所以算完再传进来，避免两处不一致。
+         */
+        policy: LowEndPolicy? = lowEndPolicy(context),
     ): ModelMemoryPlan {
         val fileBytes = file.length()
         val info = readGguf(file)
-        val cores = cpuCores()
         val totalRam = totalRamBytes(context)
         val availRam = availableRamBytes(context)
         val warnings = mutableListOf<String>()
@@ -274,7 +384,9 @@ object MemoryPlanner {
         // KV cache bytes for one token, approximated from the GGUF geometry.
         val embd = info?.embeddingLength ?: 0
         val heads = info?.headCount ?: 0
-        val kvElem = kvBytesPerElement.coerceIn(1, 4).toLong()
+        // 低端模式强制 q8_0：调用方可能还按用户设置传了 2（f16），
+        // 那样估出来的上下文会保守一倍，和最终真的跑的数字对不上。
+        val kvElem = (if (policy != null) 1 else kvBytesPerElement).coerceIn(1, 4).toLong()
         val kvPerToken = if (embd > 0 && heads > 0 && layers > 0) {
             // 2 (K 和 V) * 层数 * embd * 每个元素的字节数
             (2L * layers * embd * kvElem).coerceAtLeast(1024L)
@@ -298,33 +410,28 @@ object MemoryPlanner {
         val byMemory = (kvBudget / kvPerToken).toInt().coerceAtLeast(256)
 
         val userHint = if (contextSizeHint > 0) contextSizeHint else Int.MAX_VALUE
-        val recommended = minOf(userHint, byMemory, trainCtx).coerceAtLeast(512)
+        val byBudget = minOf(userHint, byMemory, trainCtx).coerceAtLeast(512)
         if (contextSizeHint > byMemory && contextSizeHint > 0) {
-            warnings += "设定的上下文 $contextSizeHint 超出内存预算，已下调为 $recommended"
+            warnings += "设定的上下文 $contextSizeHint 超出内存预算，已下调为 $byBudget"
+        }
+        // 内存预算之外再加一道"设备档位"的硬顶。两者取小：
+        // 预算宽裕但机器只有 4 GB 时，短上下文换来的是**不闪退**。
+        val recommended = if (policy != null) {
+            minOf(byBudget, policy.contextCap).coerceAtLeast(512)
+        } else {
+            byBudget
+        }
+        if (policy != null && recommended < byBudget) {
+            warnings += policy.note + "：上下文按内存档位下调到 $recommended"
         }
 
         val threads = if (threadsHint > 0) {
             threadsHint
         } else {
-            // 自动选线程数。
-            //
-            // ## 为什么不是"核数减一"
-            //
-            // 手机 CPU 是**大小核**（4 大 + 4 小很常见）。llama.cpp 的矩阵乘是
-            // 内存带宽瓶颈：把任务摊到小核上不但不快，还会因为调度和缓存同步变慢。
-            // 实测经验值是**只用大核**（6–8 核机器上 4 个线程）最快，超过之后
-            // 反而变慢。
-            //
-            // 但 Android 没有稳定的公开 API 能查"几个大核"（`/sys` 里的
-            // cpu_capacity 各家不一样，读它会在部分机型上直接抛 AccessDenied）。
-            // 所以这里用一个**保守的近似**：
-            //  * 小机器（≤4 核）→ 全用，少一个就少 25%
-            //  * 6 核 → 4（典型 2 大 + 4 小，或者 4 大 + 2 小，取 4 都不亏）
-            //  * 8 核及以上 → 4（大核数基本就是 4；给到 6 会开始抢带宽）
-            //
-            // 用户可以在「模型」页看到实际用的线程数，也可以在设置里写死
-            // （`threadsHint`）。
-            autoThreads(cores)
+            // 自动选线程数：优先"数得出来的大核"，读不到时退回保守近似。
+            // 细节见 [recommendedThreads] / [bigCoreCount]。
+            // 用户可以在设置里写死（`threadsHint`），也可以在模型页看到实际值。
+            recommendedThreads()
         }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -341,6 +448,9 @@ object MemoryPlanner {
             needsStreaming = needsStreaming,
             warnings = warnings,
             layers = layers,
+            // 0 = 不夹，用用户设置的 batch。
+            recommendedBatch = policy?.batchCap ?: 0,
+            lowEndNote = policy?.note.orEmpty(),
         )
     }
 

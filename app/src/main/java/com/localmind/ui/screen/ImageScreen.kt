@@ -176,30 +176,28 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
     ) {
         IosNavigationBar(
             title = "生图",
             collapsed = true,
             topInset = statusBarTopPadding(),
             leading = {
-                Icon(
-                    AppIcons.ArrowBack,
+                com.localmind.ui.design.AuroraCircleButton(
+                    icon = AppIcons.ArrowBack,
                     contentDescription = "返回",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(23.dp)
-                        .clickable(onClick = onBack),
+                    onClick = onBack,
+                    size = 36.dp,
+                    tint = ios.label,
                 )
             },
             trailing = {
-                Icon(
-                    AppIcons.Tune,
+                com.localmind.ui.design.AuroraCircleButton(
+                    icon = AppIcons.Tune,
                     contentDescription = "设置",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable { viewModel.openSettings(true) },
+                    onClick = { viewModel.openSettings(true) },
+                    size = 36.dp,
+                    tint = ios.label,
                 )
             },
         )
@@ -236,7 +234,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                             if (via == ImageEngine.Via.DIFFUSION) "这张是生图模型画的"
                             else "这张是内置渲染器画的",
                             style = IosTheme.typography.subheadline,
-                            color = if (via == ImageEngine.Via.DIFFUSION) ios.green else ios.orange,
+                            color = if (via == ImageEngine.Via.DIFFUSION) ios.green else ios.warningText,
                             fontWeight = FontWeight.SemiBold,
                         )
                         lastInfo?.let {
@@ -256,24 +254,24 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                 // 否则用户会以为它坏了（它只是按关键词换配色和构图）。
                 Column(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 20.dp)
                         .padding(bottom = 12.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(22.dp))
                         .background(ios.orange.copy(alpha = 0.14f))
                         .padding(14.dp)
                 ) {
                     Text(
                         "这里不是 AI 生图",
                         style = IosTheme.typography.subheadline,
-                        color = ios.orange,
+                        color = ios.warningText,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "默认版内置的是本地程序化渲染器：它只按提示词里的「关键词」换配色和构图，" +
+                        "没有扩散模型时用的是本地程序化渲染器：它只按提示词里的「关键词」换配色和构图，" +
                             "画不出「一只猫在雨中」这种具体内容。\n\n" +
-                            "想要真正的 AI 生图，需要装 SD-Turbo 模型（2GB）并使用编译了 " +
-                            "stable-diffusion.cpp 后端的版本，见 docs/IMAGE_ENGINE.md。",
+                            "想要真正的 AI 生图，去「模型 → 生图」下载一个 SD-Turbo / LCM 模型（约 2GB）。" +
+                            "扩散后端已经内置在 APK 里，不用另外安装。",
                         style = IosTheme.typography.footnote,
                         color = ios.secondaryLabel,
                     )
@@ -400,7 +398,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                     Text(
                         if (extendedBackend) "采样步数" else "采样步数（需要更新生图后端插件）",
                         style = IosTheme.typography.footnote,
-                        color = if (extendedBackend) ios.secondaryLabel else ios.orange,
+                        color = if (extendedBackend) ios.secondaryLabel else ios.warningText,
                     )
                     Spacer(Modifier.height(6.dp))
                     // 老插件（14 MB 那份）没有 nativeSdGenerateEx，传不进步数。
@@ -418,7 +416,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                                     "到「我的 → 插件」重新导入一个新生图后端插件即可。"
                             },
                             style = IosTheme.typography.caption2,
-                            color = ios.orange,
+                            color = ios.warningText,
                         )
                         Spacer(Modifier.height(6.dp))
                     }
@@ -503,7 +501,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                         Text(
                             "正在出图…已用 " + (elapsedMs / 1000) + " 秒（第一张要加载模型，会更久）",
                             style = IosTheme.typography.caption1,
-                            color = ios.orange,
+                            color = ios.warningText,
                         )
                     }
                     if (generating && stepTotal > 0) {
@@ -513,7 +511,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                                 (elapsedMs / 1000) + " 秒" +
                                 if (lastTook > 0L) "（上次 " + (lastTook / 1000) + " 秒）" else "",
                             style = IosTheme.typography.caption1,
-                            color = ios.orange,
+                            color = ios.warningText,
                         )
                     }
                     if (generating && stepTotal == 0 && lastTook > 0L) {
@@ -522,7 +520,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                             "正在出图…已用 " + (elapsedMs / 1000) + " 秒 / 上次同样的设置用了 " +
                                 (lastTook / 1000) + " 秒",
                             style = IosTheme.typography.caption1,
-                            color = ios.orange,
+                            color = ios.warningText,
                         )
                     }
 
@@ -611,7 +609,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                 Spacer(Modifier.height(20.dp))
                 Text(
                     "内置渲染器为本地程序化生成（离线、毫秒级、可复现）。" +
-                        "如需真实扩散模型，可编译 stable-diffusion.cpp 后端或接入局域网 PC 上的 SD 服务，见 docs/IMAGE_ENGINE.md。",
+                        "stable-diffusion.cpp 后端已内置；下载一个生图模型即可切换到真实模型，见 docs/IMAGE_ENGINE.md。",
                     style = IosTheme.typography.caption1,
                     color = ios.secondaryLabel,
                     modifier = Modifier.padding(horizontal = 32.dp),
@@ -743,11 +741,11 @@ private fun DiffusionBackendSection(viewModel: AppViewModel, onChanged: () -> Un
     IosSection(
         header = "生图后端",
         footer = when {
-            ready -> "后端是独立下载的：不用生图的人不必为它付 36 MB，" +
-                "它也不影响对话与语音。"
+            ready -> "后端已内置在 APK 里（约 37 MB/ABI），不用另外下载；" +
+                "它不影响对话与语音，下载一个生图模型就能用。"
             onDisk -> "文件已经装好了，但还没加载进当前进程 —— 点「启用」。"
-            else -> "装之前只能用程序化渲染 —— 那个不下载任何东西、立刻可用，" +
-                "但画不出提示词里的具体内容。要跑真正的 SD 模型需要这个后端。"
+            else -> "这个 APK 的后端没有加载成功（常见于 ABI 不匹配）。" +
+                "先重启应用；仍然失败时只能用程序化渲染，画不出具体内容。"
         },
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -767,17 +765,17 @@ private fun DiffusionBackendSection(viewModel: AppViewModel, onChanged: () -> Un
                             ready -> "${com.localmind.util.Formatters.size(backendFile.length())} · $abi" +
                                 (if (universal) " · 通用版" else "")
                             onDisk -> "点「启用」把它加载进来（$abi）"
-                            else -> "需要约 36 MB（$abi）"
+                            else -> "内置后端未加载（$abi）"
                         },
                         style = IosTheme.typography.caption1,
-                        color = if (ready) ios.green else ios.orange,
+                        color = if (ready) ios.green else ios.warningText,
                     )
                     if (ready) {
                         Text(
                             if (universal) "采样器 / 调度器、逐帧进度已启用"
                             else "旧版后端：只有步数与线程，重新装通用版可拿到采样器与进度",
                             style = IosTheme.typography.caption2,
-                            color = if (universal) ios.secondaryLabel else ios.orange,
+                            color = if (universal) ios.secondaryLabel else ios.warningText,
                         )
                     }
                 }
@@ -822,7 +820,7 @@ private fun DiffusionBackendSection(viewModel: AppViewModel, onChanged: () -> Un
                             else -> "本机没有检测到扩散模型"
                         },
                         style = IosTheme.typography.caption1,
-                        color = if (chosen == null && models.isEmpty()) ios.orange else ios.secondaryLabel,
+                        color = if (chosen == null && models.isEmpty()) ios.warningText else ios.secondaryLabel,
                     )
                 }
                 ImageRowAction("选择", ios.blue) { pickingModel = true }

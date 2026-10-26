@@ -115,7 +115,7 @@ fun MePage(viewModel: AppViewModel) {
                     )
                     AuroraDivider(indent = 58.dp)
                     AuroraRow(
-                        title = "语音与音色",
+                        title = "TTS 测试",
                         leading = { AuroraIcon(AppIcons.Mic, ios.green) },
                         onClick = { viewModel.openVoiceScreen(true) },
                     )
@@ -132,6 +132,13 @@ fun MePage(viewModel: AppViewModel) {
             item {
                 AuroraSectionLabel("高级")
                 AuroraGroup {
+                    AuroraRow(
+                        title = "设备状态",
+                        subtitle = "CPU / 内存 / 电池 / 模型实时速度",
+                        leading = { AuroraIcon(AppIcons.GraphicEq, ios.teal) },
+                        onClick = { viewModel.openStatus(true) },
+                    )
+                    AuroraDivider(indent = 58.dp)
                     AuroraRow(
                         title = "本机 API",
                         leading = { AuroraIcon(AppIcons.Api, ios.teal) },
@@ -187,8 +194,14 @@ fun MePage(viewModel: AppViewModel) {
             photo = profile.avatarImage,
             onDismiss = { editing = false },
             onSave = { name, emoji, color, photoPath ->
+                val oldPhoto = profile.avatarImage
                 viewModel.updateUserProfile {
                     it.copy(nickname = name, avatarEmoji = emoji, avatarColor = color, avatarImage = photoPath)
+                }
+                // 换了照片就把旧文件删掉：不删的话每换一次头像就在 files/avatars
+                // 里留一张 512px 的 JPEG，一年下来能积出几十 MB 没人认领的图。
+                if (oldPhoto.isNotBlank() && oldPhoto != photoPath) {
+                    com.localmind.ui.components.AvatarStore.delete(oldPhoto)
                 }
                 editing = false
             },
@@ -264,12 +277,11 @@ private fun ProfileEditSheet(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            runCatching {
-                val file = java.io.File(context.filesDir, "avatar_" + System.currentTimeMillis() + ".jpg")
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    file.outputStream().use { out -> input.copyTo(out) }
-                }
-                pickedPhoto = file.absolutePath
+            // 走 AvatarStore：居中裁成方形 + 缩到 512px + JPEG。
+            // 直接 copyTo 会把一张 10 MB 的原图留在 filesDir，而且列表里每个
+            // 头像都要 decode 一次原图 —— 这是上一版真实存在的内存/磁盘浪费。
+            com.localmind.ui.components.AvatarStore.save(context, uri, "user")?.let {
+                pickedPhoto = it
             }
         }
     }

@@ -770,6 +770,10 @@ data class ModelMemoryPlan(
     val needsStreaming: Boolean,
     val warnings: List<String> = emptyList(),
     val layers: Int = 0,
+    /** batch 的建议上限；0 = 不夹，用用户设置（见 MemoryPlanner.lowEndPolicy）。 */
+    val recommendedBatch: Int = 0,
+    /** 低端模式说明，例如 "低端模式 · 2.4 GB 内存 · ctx 1024 · KV q8"。空 = 没夹。 */
+    val lowEndNote: String = "",
 )
 
 @Serializable

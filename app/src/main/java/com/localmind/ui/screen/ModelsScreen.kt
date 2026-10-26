@@ -94,7 +94,7 @@ private fun buildCategories(models: List<LocalModel>): List<ModelCategory> {
     }
     role("看图", "多模态，可描述图片内容") { it.isVisionModel }
     role("生图", "真实扩散模型（需要生图后端插件）") { it.isImageModel }
-    role("语音", "离线语音音色（下完到「语音与音色」选用）") { it.isVoiceModel }
+    role("语音", "离线语音音色（下完到「TTS 测试」选用）") { it.isVoiceModel }
     role("向量", "给 /v1/embeddings 与本地检索用") { it.embedding }
 
     // ---- 系列：按条目数取前 6 ----
@@ -787,13 +787,14 @@ private fun ModelDetailSheet(
             if (plan != null) {
                 DetailRow("建议上下文", "${plan.recommendedContext} tokens")
                 DetailRow("建议线程", "${plan.recommendedThreads}")
+                if (plan.lowEndNote.isNotBlank()) DetailRow("内存模式", plan.lowEndNote)
                 DetailRow(
                     "内存策略",
                     if (plan.needsStreaming) "超过可用内存 → mmap 磁盘流式加载" else "可全部驻留内存",
                 )
                 plan.warnings.forEach {
                     Spacer(Modifier.height(6.dp))
-                    Text(it, style = IosTheme.typography.caption1, color = ios.orange)
+                    Text(it, style = IosTheme.typography.caption1, color = ios.warningText)
                 }
             }
 

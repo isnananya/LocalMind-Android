@@ -2,135 +2,152 @@ package com.localmind.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Rect
 import android.view.View
-import android.view.ViewGroup
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * Backdrop capture + blur for the liquid-glass bar.
+ * 底栏背后的窗口截图。
  *
- * Technique reimplemented (Kotlin/Compose, no code copied) after
- * [liuran001/WeChat-LiquidGlass](https://github.com/liuran001/WeChat-LiquidGlass):
- * the bar needs the pixels *behind* it to refract, and Compose's `Modifier.blur`
- * cannot blur what another composable painted. So we grab the window's decor view
- * once per N frames into a small bitmap and blur that.
+ * LiquidTab 用 RenderNode + RenderEffect 现模糊现取；在模拟器（SwiftShader）
+ * 上 RuntimeShader 链会整层变透明，所以这里退一步：每次抓一帧**清晰**的
+ * 窗口缩略图，再复制一份做 CPU 三次方框模糊（≈高斯）。
  *
- * Two deliberate choices:
- *
- *  * **Down-sampled capture.** The decor view is drawn at 1/[SAMPLE] scale. A box
- *    blur costs O(pixels) and we only need a soft background, so capturing at 1/6
- *    and scaling back up is both much cheaper and visually indistinguishable
- *    after a 3-pass blur.
- *  * **Nobody is invalidated by this.** `View.draw(Canvas)` on a hardware canvas
- *    re-records display lists; we call it on a *software* canvas backed by our own
- *    bitmap, which is the documented way to snapshot a view tree off-screen.
+ *  - [sharp] 给选中胶囊用：静止=清晰的透玻璃，按压时才叠色散透镜；
+ *  - [blurred] 给底板和底部渐变模糊用。
  */
+class Backdrop(
+    val sharp: Bitmap,
+    val blurred: Bitmap,
+    val sample: Int,
+)
+
 object GlassBackdrop {
+
+    /** 抓图缩放：3 => 1/9 像素。折射要看得见，背景不能糊成一团色块。 */
+    const val SAMPLE = 3
 
     /** 采窗口缩略图时临时藏掉底栏，避免把上一帧的自己画进玻璃。 */
     @Volatile
     var capturing = false
 
+    private const val MIN_INTERVAL_MS = 90L
 
-    /** Capture scale. 6 => ~1/36 the pixels to blur. */
-    private const val SAMPLE = 6
-
-    private var bitmap: Bitmap? = null
+    private var sharp: Bitmap? = null
+    private var blurA: Bitmap? = null
+    private var blurB: Bitmap? = null
+    private var published: Bitmap? = null
+    private var pixels: IntArray = IntArray(0)
+    private var temp: IntArray = IntArray(0)
     private var lastCapture = 0L
     private var lastWidth = 0
     private var lastHeight = 0
-    private var loggedFailure = false
-    private var loggedSuccess = false
-
-    /** Minimum gap between captures; the bar re-reads the cached bitmap in between. */
-    private const val MIN_INTERVAL_MS = 90L
+    private var lastRadius = -1
+    private var logged = false
 
     /**
-     * Returns a blurred bitmap of what is currently on screen, or null when the
-     * decor view is not ready yet.
-     *
-     * @param force ignore the frame throttle (used when the tab changes)
+     * @param blurRadiusPx 屏幕像素的模糊半径（会换算到缩略图尺度）
      */
-    fun capture(decor: View?, force: Boolean = false): Bitmap? {
-        if (decor == null) return null
-        val w = decor.width
-        val h = decor.height
+    suspend fun capture(decor: View?, blurRadiusPx: Int, force: Boolean = false): Backdrop? {
+        val view = decor ?: return null
+        val w = view.width
+        val h = view.height
         if (w <= 0 || h <= 0) return null
+        val radius = blurRadiusPx.coerceIn(0, 48)
 
         val now = System.currentTimeMillis()
-        val cached = bitmap
-        if (!force && cached != null && now - lastCapture < MIN_INTERVAL_MS &&
-            lastWidth == w && lastHeight == h && !cached.isRecycled
+        val cachedSharp = sharp
+        val cachedBlurred = published
+        if (!force && cachedSharp != null && cachedBlurred != null &&
+            now - lastCapture < MIN_INTERVAL_MS &&
+            lastWidth == w && lastHeight == h && lastRadius == radius &&
+            !cachedSharp.isRecycled && !cachedBlurred.isRecycled
         ) {
-            return cached
+            return Backdrop(cachedSharp, cachedBlurred, SAMPLE)
         }
 
         val bw = (w / SAMPLE).coerceAtLeast(1)
         val bh = (h / SAMPLE).coerceAtLeast(1)
-
-        if (cached == null || cached.isRecycled || cached.width != bw || cached.height != bh) {
-            cached?.recycle()
-            bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        var s = sharp
+        if (s == null || s.isRecycled || s.width != bw || s.height != bh) {
+            s?.recycle()
+            s = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            sharp = s
         }
-        val target = bitmap ?: return null
+        if (blurA == null || blurA!!.isRecycled || blurA!!.width != bw || blurA!!.height != bh) {
+            blurA?.recycle()
+            blurA = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            published = null
+        }
+        if (blurB == null || blurB!!.isRecycled || blurB!!.width != bw || blurB!!.height != bh) {
+            blurB?.recycle()
+            blurB = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            published = null
+        }
 
         return try {
-            val canvas = Canvas(target)
-            // Fill first: areas the view tree does not paint would otherwise stay
-            // transparent, and transparency turns black once blurred.
+            val canvas = Canvas(s)
             canvas.drawColor(0xFF000000.toInt())
             val save = canvas.save()
             canvas.scale(1f / SAMPLE, 1f / SAMPLE)
-            decor.draw(canvas)
+            capturing = true
+            try {
+                view.draw(canvas)
+            } finally {
+                capturing = false
+            }
             canvas.restoreToCount(save)
 
-            stackBlur(target, BLUR_RADIUS)
-            if (!loggedSuccess) {
-                loggedSuccess = true
-                android.util.Log.i("GlassBackdrop", "capture ok " + target.width + "x" + target.height)
+            // 清晰图 → 模糊图：写到「当前没在显示」的那块缓冲，再切换指针，
+            // 这样 UI 线程正在画旧图时不会被踩。
+            val target = if (published === blurA) blurB!! else blurA!!
+            val r = (radius.toFloat() / SAMPLE).toInt().coerceIn(0, 30)
+            withContext(Dispatchers.Default) {
+                Canvas(target).drawBitmap(s, 0f, 0f, null)
+                if (r > 0) stackBlur(target, r)
+            }
+            published = target
+
+            if (!logged) {
+                logged = true
+                android.util.Log.i("GlassBackdrop", "capture ok " + bw + "x" + bh + " blur=" + r)
             }
             lastCapture = now
             lastWidth = w
             lastHeight = h
-            target
+            lastRadius = radius
+            Backdrop(s, target, SAMPLE)
         } catch (t: Throwable) {
-            if (!loggedFailure) {
-                loggedFailure = true
-                android.util.Log.w("GlassBackdrop", "capture 失败：" + (t.message ?: t.javaClass.simpleName))
-            }
-            // A capture failure must never take the UI down; the bar falls back to
-            // its translucent tint.
+            capturing = false
+            android.util.Log.w("GlassBackdrop", "capture 失败：" + (t.message ?: t.javaClass.simpleName))
             null
         }
     }
-
-    /** Radius in *captured* pixels (the bitmap is 1/SAMPLE of the screen). */
-    private const val BLUR_RADIUS = 10
 
     fun invalidate() {
         lastCapture = 0L
     }
 
     fun release() {
-        bitmap?.recycle()
-        bitmap = null
+        sharp?.recycle()
+        blurA?.recycle()
+        blurB?.recycle()
+        sharp = null
+        blurA = null
+        blurB = null
+        published = null
         lastCapture = 0L
     }
 
-    /**
-     * Three box-blur passes ≈ Gaussian. Sliding-window sums, so cost is independent
-     * of radius — this is the classic StackBlur structure.
-     */
+    /** 三次方框模糊 ≈ 高斯。滑动窗口累加，代价与半径无关（StackBlur 结构）。 */
     fun stackBlur(bmp: Bitmap, radius: Int) {
         val w = bmp.width
         val h = bmp.height
         if (w <= 1 || h <= 1 || radius < 1) return
-
-        val pixels = IntArray(w * h)
+        if (pixels.size != w * h) pixels = IntArray(w * h)
+        if (temp.size != w * h) temp = IntArray(w * h)
         bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val temp = IntArray(w * h)
         val div = radius + radius + 1
-
         repeat(3) {
             boxBlurH(pixels, temp, w, h, radius, div)
             boxBlurV(temp, pixels, w, h, radius, div)
@@ -185,14 +202,10 @@ object GlassBackdrop {
         }
     }
 
-    /** Walks up from a Compose view to the window decor view. */
-    fun findDecor(view: View?): View? {
-        // 一直走到"父级不是 View"的那一层，最后一个 View 就是 DecorView。
-        // 旧实现判断 parent.parent == null，在 Compose + ViewRootImpl 的结构下
-        // 永远不成立（DecorView 的 parent 是 ViewRootImpl，不是 View），
-        // 于是 capture 一直返回 null，底栏从来没有真正模糊过。
+    /** 从 Compose 的 View 往上找最外层的 decor（整窗截图，包含背景）。 */
+    fun findDecor(view: View): View {
+        var last: View = view
         var v: View? = view
-        var last: View? = null
         while (v != null) {
             last = v
             val p = v.parent
@@ -200,7 +213,4 @@ object GlassBackdrop {
         }
         return last
     }
-
-    @Suppress("unused")
-    private val unusedRect = Rect()
 }

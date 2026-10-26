@@ -1,7 +1,9 @@
 package com.localmind.ui.screen
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +17,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,8 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.localmind.data.BuiltinPlugins
 import com.localmind.data.InstalledPlugin
 import com.localmind.data.PluginAbilities
 import com.localmind.data.PluginState
@@ -64,6 +74,8 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     var pendingDelete by remember { mutableStateOf<InstalledPlugin?>(null) }
     var pendingCode by remember { mutableStateOf<java.io.File?>(null) }
     var showDev by remember { mutableStateOf(false) }
+    var detail by remember { mutableStateOf<InstalledPlugin?>(null) }
+    val installing by viewModel.builtinInstalling.collectAsState()
 
     val pickZip = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -152,6 +164,56 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 }
             }
 
+            // 只列**还没装 / 能更新**的内置包。全都装到最新时整段收起来 ——
+            // 否则同一批插件在"内置"和"已安装"里各出现一次，用户以为装了两份。
+            val pendingBuiltins = BuiltinPlugins.ALL.filter { item ->
+                val inst = plugins[item.id]
+                inst == null || inst.manifest.version != item.version
+            }
+            if (pendingBuiltins.isNotEmpty()) {
+            item { AuroraSectionLabel("可安装的内置插件") }
+            item {
+                AuroraGroup {
+                    pendingBuiltins.forEachIndexed { index, item ->
+                        if (index > 0) AuroraDivider(indent = 58.dp)
+                        val installed = plugins[item.id]
+                        val upToDate = installed?.manifest?.version == item.version
+                        val busy = installing == item.key
+                        AuroraRow(
+                            title = item.name,
+                            subtitle = item.note +
+                                if (installed != null) " · 可更新" else " · 未安装",
+                            leading = {
+                                AuroraIcon(
+                                    when (item.key) {
+                                        "model-library" -> AppIcons.Memory
+                                        "glass-bar" -> AppIcons.AutoAwesome
+                                        "breeze-tts" -> AppIcons.RecordVoiceOver
+                                        else -> AppIcons.Image
+                                    },
+                                    when (item.key) {
+                                        "model-library" -> ios.blue
+                                        "glass-bar" -> ios.teal
+                                        "breeze-tts" -> ios.green
+                                        else -> ios.pink
+                                    },
+                                )
+                            },
+                            showChevron = false,
+                            trailing = {
+                                Text(
+                                    if (busy) "安装中…" else if (upToDate) "重装" else "安装",
+                                    style = IosTheme.typography.caption1,
+                                    color = if (busy) ios.tertiaryLabel else ios.blue,
+                                )
+                            },
+                            onClick = { if (!busy) viewModel.installBuiltin(item.key) },
+                        )
+                    }
+                }
+            }
+            }
+
             if (plugins.isEmpty()) {
                 item {
                     AuroraEmpty(
@@ -164,12 +226,16 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 item { AuroraSectionLabel("已安装 " + plugins.size + " 个") }
                 item {
                     AuroraGroup {
-                        val list = plugins.values.sortedBy { it.installedAt }
+                        // 液态底栏已经是应用内置能力，旧的插件记录不再展示（也不必卸载）。
+        val list = plugins.values
+            .filter { it.manifest.id != "com.localmind.bar.liquidtab" }
+            .sortedBy { it.installedAt }
                         list.forEachIndexed { index, plugin ->
                             if (index > 0) AuroraDivider(indent = 62.dp)
                             PluginRow(
                                 plugin = plugin,
                                 onToggle = { on -> viewModel.setPluginEnabled(plugin.manifest.id, on) },
+                                onClick = { detail = plugin },
                                 onLongPress = { pendingDelete = plugin },
                             )
                         }
@@ -226,6 +292,18 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         }
     }
 
+    detail?.let { plugin ->
+        PluginDetailSheet(
+            plugin = plugin,
+            viewModel = viewModel,
+            onDismiss = { detail = null },
+            onAskDelete = {
+                detail = null
+                pendingDelete = plugin
+            },
+        )
+    }
+
     pendingCode?.let { file ->
         AlertDialog(
             onDismissRequest = {
@@ -280,10 +358,177 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     }
 }
 
+/**
+ * 插件详情：清单里的每一件事都在这里说清楚 —— 谁写的、什么许可、从哪来、
+ * 提供哪些能力、具体装了什么。插件不是黑盒，用户有权在卸载前看到这些。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PluginDetailSheet(
+    plugin: InstalledPlugin,
+    viewModel: AppViewModel,
+    onDismiss: () -> Unit,
+    onAskDelete: () -> Unit,
+) {
+    val ios = IosTheme.palette
+    val context = LocalContext.current
+    val m = plugin.manifest
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val builtin = BuiltinPlugins.itemForId(m.id)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = ios.secondaryGroupedBackground,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(m.name, style = IosTheme.typography.title2, color = ios.label, modifier = Modifier.weight(1f))
+                if (builtin != null) {
+                    Text(
+                        "内置",
+                        style = IosTheme.typography.caption2,
+                        color = ios.teal,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(ios.teal.copy(alpha = 0.12f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "v" + m.version + (if (m.author.isNotBlank()) " · " + m.author else ""),
+                style = IosTheme.typography.caption1,
+                color = ios.secondaryLabel,
+            )
+            if (m.description.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(m.description, style = IosTheme.typography.footnote, color = ios.secondaryLabel)
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                m.abilities.forEach { id ->
+                    val ability = PluginAbilities.fromId(id)
+                    AbilityChip(ability?.label ?: id, ability?.implemented == true, ios.blue)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            DetailLine("状态", when (plugin.state) {
+                PluginState.ENABLED -> "启用中"
+                PluginState.DISABLED -> "已停用"
+                PluginState.FAILED -> "加载失败"
+                else -> "已安装"
+            })
+            DetailLine("来源", plugin.source.ifBlank { "本地导入" })
+            DetailLine("许可", m.license.ifBlank { "未声明" })
+            DetailLine(
+                "安装时间",
+                runCatching {
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                        .format(java.util.Date(plugin.installedAt))
+                }.getOrDefault("—"),
+            )
+            if (plugin.contents.isNotEmpty()) {
+                DetailLine("内容", plugin.contents.joinToString("、"))
+            }
+            if (m.sourceUrl.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "源码：" + m.sourceUrl,
+                    style = IosTheme.typography.caption1,
+                    color = ios.blue,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(m.sourceUrl),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    },
+                )
+            }
+            if (plugin.lastError.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(plugin.lastError, style = IosTheme.typography.caption1, color = ios.red)
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AuroraButton(
+                    if (plugin.state == PluginState.ENABLED) "停用" else "启用",
+                    onClick = {
+                        viewModel.setPluginEnabled(m.id, plugin.state != PluginState.ENABLED)
+                        onDismiss()
+                    },
+                    color = ios.fill,
+                    modifier = Modifier.weight(1f),
+                )
+                AuroraButton(
+                    "删除",
+                    onClick = onAskDelete,
+                    color = ios.red.copy(alpha = 0.12f),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            builtin?.let { item ->
+                Spacer(Modifier.height(8.dp))
+                AuroraButton(
+                    "重装内置版本（v" + item.version + "）",
+                    onClick = {
+                        viewModel.installBuiltin(item.key)
+                        onDismiss()
+                    },
+                    color = ios.fill,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "插件的能力由主程序按白名单解释；卸载后它提供的内容（模型、音色、主题）会一起消失。",
+                style = IosTheme.typography.caption2,
+                color = ios.tertiaryLabel,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    val ios = IosTheme.palette
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Text(
+            label,
+            style = IosTheme.typography.caption1,
+            color = ios.secondaryLabel,
+            modifier = Modifier.width(64.dp),
+        )
+        Text(
+            value,
+            style = IosTheme.typography.caption1,
+            color = ios.label,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PluginRow(
     plugin: InstalledPlugin,
     onToggle: (Boolean) -> Unit,
+    onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
     val ios = IosTheme.palette
@@ -313,10 +558,11 @@ private fun PluginRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null,
-                onClick = onLongPress,
+                onClick = onClick,
+                onLongClick = onLongPress,
             )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

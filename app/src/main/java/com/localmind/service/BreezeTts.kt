@@ -51,7 +51,7 @@ class BreezeTts(private val context: Context) {
         cfgScale: Float = spec.cfgScale,
         refAudio: File? = null,
         refText: String = "",
-        seed: Int = 42,
+        seed: Int = spec.seed,
     ): Outcome = withContext(Dispatchers.IO) {
         val started = System.currentTimeMillis()
         val url = spec.endpoint
@@ -73,7 +73,14 @@ class BreezeTts(private val context: Context) {
                 refText = refText,
                 seed = seed,
             )
-            val res = post(url, contentType = "multipart/form-data; boundary=$boundary", body = body, apiKey = spec.apiKey)
+            val res = post(
+                url,
+                contentType = "multipart/form-data; boundary=$boundary",
+                body = body,
+                apiKey = spec.apiKey,
+                connectTimeoutMs = spec.connectTimeoutMs,
+                readTimeoutMs = spec.readTimeoutMs,
+            )
             raw = res.first
             contentType = res.second
         } else {
@@ -82,7 +89,14 @@ class BreezeTts(private val context: Context) {
                 input = text,
                 voice = voice.ifBlank { "alloy" },
             )
-            val res = post(url, contentType = "application/json", body = json.toByteArray(), apiKey = spec.apiKey)
+            val res = post(
+                url,
+                contentType = "application/json",
+                body = json.toByteArray(),
+                apiKey = spec.apiKey,
+                connectTimeoutMs = spec.connectTimeoutMs,
+                readTimeoutMs = spec.readTimeoutMs,
+            )
             raw = res.first
             contentType = res.second
         }
@@ -112,6 +126,34 @@ class BreezeTts(private val context: Context) {
             start()
         }
     }.onFailure { Log.w(TAG, "播放失败", it) }.getOrNull()
+
+    /**
+     * 探一下服务是否可达（GET 根地址）。返回一句给人看的结果。
+     *
+     * 它不是"合成测试"：合成要跑模型，可能几十秒；这里只证明网络 / 地址 / 鉴权
+     * 这条路是通的。真正的合成测试在「试听」那一栏。
+     */
+    suspend fun probe(spec: TtsEngineSpec): String = withContext(Dispatchers.IO) {
+        val base = spec.baseUrl.trim().trimEnd('/')
+        require(base.startsWith("http://") || base.startsWith("https://")) {
+            "地址要以 http:// 或 https:// 开头"
+        }
+        val started = System.currentTimeMillis()
+        val timeout = spec.connectTimeoutMs.coerceIn(1_000, 10_000)
+        val conn = (URL(base).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = timeout
+            readTimeout = timeout
+            if (spec.apiKey.isNotBlank()) setRequestProperty("Authorization", "Bearer " + spec.apiKey)
+        }
+        try {
+            val code = conn.responseCode
+            val ms = System.currentTimeMillis() - started
+            "服务可达：HTTP " + code + " · " + ms + " ms"
+        } finally {
+            conn.disconnect()
+        }
+    }
 
     // ------------------------------------------------------------------ 内部
 
@@ -161,11 +203,18 @@ class BreezeTts(private val context: Context) {
         return """{"model":"${esc(model)}","input":"${esc(input)}","voice":"${esc(voice)}","response_format":"wav"}"""
     }
 
-    private fun post(url: String, contentType: String, body: ByteArray, apiKey: String): Pair<ByteArray, String> {
+    private fun post(
+        url: String,
+        contentType: String,
+        body: ByteArray,
+        apiKey: String,
+        connectTimeoutMs: Int = 8_000,
+        readTimeoutMs: Int = 120_000,
+    ): Pair<ByteArray, String> {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 8_000
-            readTimeout = 120_000
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
             doOutput = true
             setRequestProperty("Content-Type", contentType)
             setRequestProperty("Accept", "audio/*")

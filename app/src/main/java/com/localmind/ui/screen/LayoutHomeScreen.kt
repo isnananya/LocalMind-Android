@@ -64,7 +64,7 @@ fun LayoutHomeScreen(viewModel: AppViewModel, layout: UiLayout?) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
             .verticalScroll(rememberScrollState()),
     ) {
         Spacer(Modifier.height(com.localmind.ui.components.statusBarTopPadding()))

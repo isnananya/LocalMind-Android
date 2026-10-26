@@ -1,8 +1,149 @@
+# 交接说明（下一轮从这里读）
+
+> 这一节是给下一个对话/开发者的交接文档，写在 README 最前面；下面才是项目本身的 README。
+> 最近一轮做完了「内置音色 + 多选」「低端模式」，并把 Breeze 的界面入口撤掉。
+> 第 1 节是**已经验证过、不要回退**的东西；第 2 节是剩下的活。
+
+## 0. 环境、构建、验证
+
+- 仓库：`D:\aichat\LocalMind`（Compose App）；上游 LiquidTab 源码：`D:\aichat\lt\LiquidTab-main`（GPL-3.0，只作参考，不要整文件粘）。
+- 构建：
+  ```powershell
+  $env:JAVA_HOME='C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot'
+  $env:ANDROID_HOME='C:\Users\16505\AppData\Local\Android\Sdk'
+  cd D:\aichat\LocalMind
+  .\gradlew.bat :app:assembleDebug
+  adb -s emulator-5554 install -r app\build\outputs\apk\debug\app-debug.apk
+  ```
+- 模拟器：`emulator-5554`，1080×2400，density 420，**SwiftShader 软件 GLES**，2.5 GB 内存 / 4 核。
+  - 因此 `RenderNode + RuntimeShader` 的 RenderEffect 链在这个模拟器上会整块渲染成透明；
+    `LiquidBarGlass` 里必须保留 `Paint + BitmapShader` 的降级路径，真机才走 AGSL。
+  - 模拟器默认网络是 3G 档；`adb emu network speed full` 能放开限速，但从这台机器到
+    GitHub 直连本来就慢（实测 30–40 KB/s），下 36 MB 的语音引擎要十几分钟。
+- 截图/素材目录：`D:\aichat\_shots`（本轮关键几张：`s12` 内置音色、`s15` 多选、`s16` 内存模式）。
+- 偏好设置（theme_overrides）在 `shared_prefs/localmind.xml`，JSON 字符串。改法：
+  ```powershell
+  adb -s emulator-5554 exec-out run-as com.localmind cat shared_prefs/localmind.xml > prefs.xml
+  adb -s emulator-5554 push prefs.xml /data/local/tmp/prefs.xml
+  adb -s emulator-5554 shell "run-as com.localmind cp /data/local/tmp/prefs.xml shared_prefs/localmind.xml"
+  ```
+- 生图原生库默认**不打包**：要带 SD 用 `.\gradlew.bat :app:assembleSdPlugin` 或 `-PwithSdLib=true`。
+
+## 1. 已完成、不要回退
+
+### 1.1 液态底栏（已内置，不是插件）
+- 文件：`ui/components/LiquidGlassTabBar.kt`、`ui/components/LiquidBarGlass.kt`、`ui/components/GlassBackdrop.kt`。
+- 内置化：`data/BuiltinPlugins.kt` 里 `com.localmind.bar.liquidtab` 已删除；
+  `ui/screen/PluginsScreen.kt` 列表过滤掉旧记录；`ThemeScreen` 只留一个「液态底栏」总开关。
+- 关键常量（**照抄 LiquidTab，别再"优化"**）：
+  - 面板填充 `fillAlpha = 0.40`；
+  - 胶囊：`pillInset = 4dp`、`pillTop = 4dp`、radius = h/2（**不要 clamp 到 18dp**）；
+  - 胶囊静止：模糊图 + 10% 白/黑 + 16% 轻透镜；按压：缩放 1.36 + 清晰图 + 色散透镜；
+  - 长按拖动：整条放大 8%、阴影 12→22dp、透镜 ×1.5、**采样要加 dragY**；
+  - 默认模糊 10dp，抓图 `SAMPLE = 3`。
+- 手势统一在标签行的 `awaitEachGesture` 里：长按 → 拖底栏；长按前横向拖 → 拖胶囊。
+  **不要把长按拖动挂到面板上**，会被子级 clickable 吃掉。
+
+### 1.2 外观设置（顺序固定）
+`ThemeScreen.kt`：宽度（悬浮胶囊/通栏）、选中态（圆形/下划线/圆点/无）、液态底栏、底部渐变模糊、
+描边、动态配色、底栏模糊半径、高光强度、底栏高度、单栏宽度、距底距离、仅图标、文字大小、图标大小、隐藏底栏。
+令牌在 `data/UiTheme.kt`；动态配色在 `ui/theme/DynamicAccent.kt`，在 `ui/AppTheme.kt` 合并。
+
+### 1.3 内置音色 + 多选（本轮 A，做完了）
+- **`data/BuiltinVoices.kt`**：4 个内置音色，只放 **VITS / Piper**（原因见 §3.2）：
+  `vits-piper-zh_CN-chaowen-medium-int8`（13 MB）/ `...huayan-medium`（64 MB）/
+  `vits-zh-hf-fanchen-unity`（114 MB）/ `sherpa-onnx-vits-zh-ll`（113 MB）。
+- **合并规则**（`data/VoiceCatalog.kt` 的 `setFromPlugins`）：内置按声明顺序在前；
+  插件里**同 id 的条目覆盖**内置那一份（插件可以改地址/文案/镜像）；插件独有的追加在后面。
+  所以「没装插件也有音色」和「换地址不用发版」同时成立。
+- **语音页多选**（`ui/screen/VoiceScreen.kt`）：右上「多选 / 完成」；行首圆形勾选框（已装的也能勾）；
+  底部固定「下载所选 (n) / 删除所选 (n)」，n 是**可执行的数量**（已装的不计入下载）；
+  退出多选恢复行内「使用/试听/删除」。「使用」仍然单选（sherpa 引擎单实例）。
+- 批量下载并发 **2**：`AppViewModel.downloadVoices` 用 `Semaphore(2)` + `VoiceModelDownloader.await`
+  （`install()` 只起协程就返回，不限流的话会同时开 N 个下载）。批量删除走 `Dispatchers.IO`。
+- **Breeze 入口撤掉**：TTS 页右上圆形按钮和「外部引擎」分组已删除；
+  `service/BreezeTts.kt`、`ui/screen/BreezeScreen.kt` 保留（有服务器的用户仍可走）。
+  「我的」页（`ui/design/MePage.kt`）本来就没有 Breeze 入口。
+- 插件里的 `url / mirrors` **现在真的生效**：下载器改走 `VoiceCatalog.urlsFor(voice)`，
+  之前按 id 现拼 URL，插件的镜像字段是死的。
+
+### 1.4 低端模式（本轮 B，做完了）
+- `data/MemoryPlanner.kt` 的 `lowEndPolicy(context)`（按 `totalMem`）：
+
+  | 总内存 | ctx 上限 | batch 上限 | KV |
+  |---|---|---|---|
+  | < 4 GB | 1024 | 128 | q8_0 |
+  | < 6 GB | 2048 | 256 | q8_0 |
+  | < 8 GB | 4096 | 512 | q8_0 |
+  | ≥ 8 GB | 用户设置 | 用户设置 | 用户设置 |
+
+- `plan()` 新增 `policy` 参数（默认自己算）、`recommendedBatch`、`lowEndNote`；
+  `n_ctx = min(内存预算, 档位上限)`，夹了会写进 `warnings`。
+- `LlamaEngine.load`：用 policy 的 KV 精度估 KV（否则按 f16 估保守一倍），
+  `kvCode / batch / ubatch` 都按档位落到原生；`nCtx` 用 `plan.recommendedContext`。
+- 线程：`bigCoreCount()` 读 `/sys/.../cpuinfo_max_freq` 数**最高一档**的核数，
+  `recommendedThreads()` 夹在 2–6；读不到退回 `autoThreads()`。
+  设置页「自动（N）」必须调 `recommendedThreads()`。
+- 展示：设置页「内存模式」**常显**（不依赖加载模型）、状态页「内存模式」、模型详情、设置页内存规划。
+- 模拟器实测（2.5 GB）：显示「低端模式 · 2.4 GB 内存 · ctx 1024 · KV q8」，自动线程 4。
+
+### 1.5 其它已完成
+- 捐赠榜按金额降序（`AboutScreen.kt` 的 `Donors`）。
+- 状态页「正在使用」实时卡：引擎每 200 ms 推一次进度（不要改成每 token，重组会炸）。
+- 本地 TTS 优先：`AppViewModel.speak()` = 本地神经音色 → Breeze → 系统 TTS。
+- 语音引擎下载有百分比了：`SherpaLibraryInstaller.onProgress` → `VoiceDownloader.installLibrary`。
+- 引擎安装抗中断：下完写 `.ok` 标记，只有标记在才复用 tarball；解压失败会删包重下。
+  原来只按 `> 40 MB` 判断，被杀过一次的半包会被当成"已完成"，之后每次安装都失败。
+
+## 2. 待办（下一轮）
+
+### 2.1 生图 / 识图收尾（必须真机）
+- 生图：装 `assembleSdPlugin` 产物 → 下一个小 SD 模型（512×512、低步数先跑通）→
+  看 `diffusionBackendReady` / `ImageEngine` 日志。
+- 识图：`data/ModelCatalog.kt` 里挑带 `mmprojUrl` 的多模态模型，主模型 + mmproj 都下完，
+  `loadModel` 会自动 `nativeMmprojLoad`；验收 = 状态页「现在能看图」+ 真机发图问答。
+
+### 2.2 语音这块还能做
+- 引擎包 36 MB，直连 GitHub 实测 30–40 KB/s（这台机器上直连甚至会 RST），
+  可以在 `SherpaLibraryInstaller.URLS` 里加国内镜像（gh-proxy 也慢，约 8–10 KB/s）。
+- Kokoro 想要「最自然」得先接非 VITS 路径；现在 `Layout.unsupportedReason` 会拦住它，
+  **不要只把模型塞进内置清单**。
+
+### 2.3 清理
+- `ui/screen/ProfileScreen.kt` 是**死代码**（根页面用 `MePage`），里面还留着 Breeze 入口和旧样式。
+  要么删掉，要么接回根页面 —— 不要两边都改。
+- `docs/archive/` 下的文档是历史记录，不要当现状改。
+
+## 3. 硬约束（别浪费时间）
+
+1. **Breeze TTS 2 = 3.47B、CUDA 专用、~7 GB fp16，手机跑不了**。本地 TTS 只有 sherpa-onnx 这条路。
+2. **主程序只接了 VITS 引擎**：Kokoro / Matcha 的 tarball 装上也发不出声
+   （`NeuralVoiceModels.Layout.unsupportedReason` 会拦，放行会让原生库直接结束进程）。
+   内置清单因此只放 VITS/Piper。
+3. **GPL-3.0**：从 LiquidTab 移植的 AGSL/几何常量属于派生作品，发布按 GPL；其余代码 MIT。
+4. 模拟器只能验证 UI/交互/降级渲染；性能、真机 AGSL、SD、识图必须真机。
+5. 底栏截图循环 180 ms/次、1/3 缩略、后台模糊双缓冲；`capturing` 期间不能画底栏，否则自拍自。
+
+## 4. 本轮验证记录
+
+- `:app:assembleDebug` 通过（Kotlin 只有 3 条历史 warning，无新增）。
+- 模拟器：关掉「LocalMind 官方模型库」插件 → TTS 页只剩 4 个内置音色（`_shots/s12.png`）；
+  打开时是 17 个且插件文案生效（同 id 覆盖）。
+- 多选：勾 2 个 → 行变蓝、底部「下载所选 (2)」可用（`_shots/s15.png`）。
+- 低端模式：设置页显示档位文案（`_shots/s16.png`）。
+- 语音引擎安装：40 MB+ 的包在模拟器上只下到一半（直连 GitHub 30–40 KB/s），
+  完整「下载 → 试听 → 使用」没跑完；新增的 `.ok` 标记保证下次点击从干净状态重下。
+  这一段建议真机 / 快网复核。
+- 最终产物：`dist/LocalMind-1.0.6-arm64+armv7.apk`（release，44.4 MB，debug 签名）；
+  模拟器装的是 x86_64 的 debug 包（release 只带 arm64/armv7）。
+
+---
+
 # LocalMind
 
-> 当前版本 **1.0.4（测试通道）**。这一轮把插件开放到「可执行代码」：`code_plugin`（classes.dex，
+> 当前版本 **1.0.5**。这一轮把插件开放到「可执行代码」：`code_plugin`（classes.dex，
 > 含 View 整页）、`web_screen`（HTML/CSS/JS 整页）、`theme.css`（用 CSS 变量写主题与底栏样式），
-> 底栏换成 AGSL 折射 + CPU 降级的液态玻璃。版本号按测试通道保持 1.0.4。
+> 底栏换成 AGSL 折射 + CPU 降级的液态玻璃。版本号按批次保持 1.0.5。
 
 手机本地大模型工作台：把开源大模型**下载到手机、在本机跑起来、直接聊天**，
 还要能**文字生图**、**语音对话**，并把整个模型能力用 **OpenAI 兼容 API**
@@ -24,7 +165,7 @@
 | 聊天 | 流式输出、代码块/Markdown 渲染、多会话、tok/s 实时统计 | 完全离线 |
 | 生图 | 内置原生程序化渲染引擎（毫秒级、可复现），并预留真实扩散模型接入位 | 完全离线 |
 | 语音对话 | 长按说话 → 语音识别 → 本地大模型 → TTS 朗读；**8 种情感音色** | 识别取决于机型 |
-| **神经音色** | **sherpa-onnx VITS 离线语音合成**（小雅 / aishell3 / 原神角色等 8 种），模型下载后完全离线、跟机型无关 | 下载时需要 |
+| **神经音色** | **sherpa-onnx VITS 离线语音合成**：内置 4 个（Piper / VITS，13–114 MB），官方插件再加 17 个；支持多选批量下载/删除。模型下载后完全离线、跟机型无关 | 下载时需要 |
 | **Breeze 语音** | **外部语音引擎插件**（`tts_engine`）：端点、密钥、模型名由插件声明，手机只当客户端。Breeze TTS 2 是 3.47B / 需要 CUDA 的模型，**手机上跑不动**，必须在 PC 或 GPU 服务器上自建服务 | 合成时需要（局域网/云端） |
 | **分步流水线** | `pipeline` 插件：把长文拆成片，逐片跑（本机模型 / 外部语音引擎），最后聚合。手机装不下的模型靠这个绕开内存与上下文限制 | 看具体步骤 |
 | **界面布局插件** | `ui_layout`：底栏入口、首页块、应用标题都能声明；`screens` 自己写整页、`overrides` **整页替换**内置页面；动作目标支持 `prompt:` / `send:` / `copy:` | — |
@@ -34,12 +175,13 @@
 | **CSS 主题** | `theme.css`：用 CSS 变量写颜色、圆角、底栏形状/指示器，支持 `dark-` 深色令牌 | — |
 | 开放接口 | 应用内 HTTP 服务器，OpenAI 兼容，可开局域网 | 局域网内 |
 | 内存优化 | 内存规划器 + mmap 磁盘流式加载（AirLLM 思路的移动端实现） | — |
+| **低端模式** | 按总内存自动封顶上下文 / batch / KV（< 4 GB → ctx 1024 · KV q8），4 GB 以下的机器先保证能跑起来而不是 OOM 闪退；设置页与状态页如实显示档位 | — |
 | **对话走 API** | 每个对话可以单独选「本机模型」或任意 **OpenAI 格式接口**（OpenAI / DeepSeek / Kimi / 硅基流动 / 局域网 Ollama…），也可在对话设置里现场填地址与 Key；记忆/情绪照常工作 | 走 API 时需要 |
 | **提示词前缀复用** | 稳定段进 system prompt、易变段挂在最新消息上，KV cache 能真正命中；日志与界面直接显示命中率 | 完全离线 |
 
 ---
 
-## 悬浮底栏（1.0.4 测试）
+## 悬浮底栏（1.0.5）
 
 - 底栏改为**覆盖在内容之上**的悬浮胶囊，不再占据布局、也没有整条底色遮挡；内容可以从它下面滚过。
 - 页面底色改成大色团渐变（蓝/紫/青），卡片改成半透明玻璃（白 74% + 1px 高光边），导航栏去掉整条实色。
@@ -97,7 +239,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
    - 想装更多：导入 `官方模型库插件.zip`（83 个实测条目）
 2. 下载完点 **加载**（模型卡片右侧的播放键，或点卡片进详情再加载）。
 3. **对话页** 点右上角 + 直接开聊。
-4. 要语音：**我的 → 语音与音色** → 开启"启用语音模式" → 选情感 → 长按麦克风说话。
+4. 要语音：**我的 → TTS 测试** → 打开「启用语音」→ 选音色 / 情感 → 点「朗读」试听；
+   每个对话的朗读开关与音色提示词在**对话 → 右上角设置 → 朗读**里。
    - 想要更自然的声音：在同一页的「神经音色」里下载一个（小雅 13 MB 最轻量），
      下完点「使用」。**下载后完全离线**，且跟机型无关 —— 换手机听起来还是同一个人。
    - 不下载也行，默认走系统 TTS。
@@ -231,4 +374,3 @@ curl -X POST http://127.0.0.1:18080/v1/audio/speech \
 如果这个项目对你有用，可以扫码请作者喝杯咖啡。金额随意，不影响任何功能。
 
 <img src="docs/assets/author_reward.png" width="240" alt="作者的赞赏码" />
-

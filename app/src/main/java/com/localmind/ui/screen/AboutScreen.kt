@@ -67,20 +67,19 @@ fun AboutScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground)
+            .background(androidx.compose.ui.graphics.Color.Transparent)
     ) {
         IosNavigationBar(
             title = "关于",
             collapsed = true,
             topInset = statusBarTopPadding(),
             leading = {
-                Icon(
-                    AppIcons.ArrowBack,
+                com.localmind.ui.design.AuroraCircleButton(
+                    icon = AppIcons.ArrowBack,
                     contentDescription = "返回",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(23.dp)
-                        .clickable(onClick = onBack),
+                    onClick = onBack,
+                    size = 36.dp,
+                    tint = ios.label,
                 )
             },
         )
@@ -234,17 +233,14 @@ fun AboutScreen(
                         )
                     }
                     Divider(ios.separator)
-                    DonorRow(
-                        name = "沉璧",
-                        amount = "20 元",
-                        base64 = com.localmind.ui.theme.BuiltInAvatars.DONOR_CHENBI,
-                    )
-                    Divider(ios.separator)
-                    DonorRow(
-                        name = "韪嘆",
-                        amount = "15 元",
-                        base64 = com.localmind.ui.theme.BuiltInAvatars.DONOR_WEITAN,
-                    )
+                    Donors.list().forEachIndexed { index, donor ->
+                        if (index > 0) Divider(ios.separator)
+                        DonorRow(
+                            name = donor.name,
+                            amount = donor.label,
+                            base64 = donor.base64,
+                        )
+                    }
                 }
             }
 
@@ -309,6 +305,22 @@ fun AboutScreen(
                         name = "ONNX Runtime",
                         license = "MIT",
                         note = "语音引擎的推理运行时（microsoft/onnxruntime，随 sherpa-onnx 一起下载）",
+                    )
+                    Divider(ios.separator)
+                    // 状态页的 CPU/内存/电池采样与折线图**改编自**这个项目，
+                    // 不是"参考了思路"：字段选择、/proc/stat 解析、绘制算法都来自它。
+                    LicenseRow(
+                        name = "AndroidMonitor",
+                        license = "MIT",
+                        note = "状态页设备采样与折线图（TerminalDev-1/AndroidMonitor-Preview，" +
+                            "Copyright (c) 2026 Android Monitor contributors）",
+                    )
+                    Divider(ios.separator)
+                    LicenseRow(
+                        name = "AndroidLiquidGlassView",
+                        license = "MIT",
+                        note = "液态玻璃导航 / 底栏的 RenderEffect 折射（QmDeve/AndroidLiquidGlassView，" +
+                            "Copyright (c) 2025-2026 Donny Yale）",
                     )
                     Divider(ios.separator)
                     LicenseRow(
@@ -524,6 +536,21 @@ private fun ContributorRow(
             Text(role, style = IosTheme.typography.caption1, color = ios.secondaryLabel)
         }
     }
+}
+
+/** 捐赠者名单。按金额降序排；金额相同按登记先后，方便以后直接往后加。 */
+private data class Donor(val name: String, val yuan: Int, val base64: String) {
+    val label: String get() = yuan.toString() + " 元"
+}
+
+private object Donors {
+    private val rows = listOf(
+        Donor("沉璧", 20, com.localmind.ui.theme.BuiltInAvatars.DONOR_CHENBI),
+        Donor("韪嘆", 15, com.localmind.ui.theme.BuiltInAvatars.DONOR_WEITAN),
+        Donor("Lie.", 20, com.localmind.ui.theme.BuiltInAvatars.DONOR_LIE),
+    )
+
+    fun list(): List<Donor> = rows.sortedByDescending { it.yuan }
 }
 
 @Composable

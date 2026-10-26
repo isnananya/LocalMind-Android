@@ -73,7 +73,7 @@ fun ProviderScreen(viewModel: AppViewModel, onClose: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ios.groupedBackground),
+            .background(androidx.compose.ui.graphics.Color.Transparent),
     ) {
         IosNavigationBar(
             title = "云端接口",
@@ -236,7 +236,7 @@ private fun ProviderRow(
             Text(
                 test,
                 style = IosTheme.typography.caption1,
-                color = if (test.contains("正常")) ios.green else ios.orange,
+                color = if (test.contains("正常")) ios.green else ios.warningText,
             )
         }
 

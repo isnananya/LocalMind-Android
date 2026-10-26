@@ -51,6 +51,7 @@ import com.localmind.ui.screen.OnboardingScreen
 import com.localmind.ui.screen.PluginDevDocsScreen
 import com.localmind.ui.screen.PluginsScreen
 import com.localmind.ui.screen.SettingsScreen
+import com.localmind.ui.screen.StatusScreen
 import com.localmind.ui.screen.VoiceScreen
 import com.localmind.ui.theme.IosTheme
 
@@ -80,6 +81,7 @@ fun LocalMindRoot(
     val profile by viewModel.userProfile.collectAsState()
     val showPlugins by viewModel.showPlugins.collectAsState()
     val showDebug by viewModel.showDebug.collectAsState()
+    val showStatus by viewModel.showStatus.collectAsState()
     val meFullPage by viewModel.meFullPage.collectAsState()
     val showPluginDocs by viewModel.showPluginDocs.collectAsState()
 
@@ -101,17 +103,20 @@ fun LocalMindRoot(
         val step = androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
         androidx.activity.compose.BackHandler(enabled = step.intValue > 0) { step.intValue-- }
         androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.setBarVisible(false) }
-        OnboardingScreen(viewModel, step = step.intValue, onStepChange = { step.intValue = it })
+        AuroraBackground {
+            OnboardingScreen(viewModel, step = step.intValue, onStepChange = { step.intValue = it })
+        }
         ToastOverlay(toast, bottomPadding = 24.dp)
         return
     }
 
     val canGoBack = showSettings || showImageStudio || showVoiceScreen || showBreeze || showPlugins ||
-        showPluginDocs || showConversationDetail || showDebug || (tab == Tab.CHAT && inChat) ||
+        showPluginDocs || showConversationDetail || showDebug || showStatus || (tab == Tab.CHAT && inChat) ||
         (tab != Tab.CHAT && tab != Tab.MODELS && tab != Tab.ME && tab != Tab.HOME)
     val goBack: () -> Unit = {
         when {
             showDebug -> viewModel.openDebug(false)
+            showStatus -> viewModel.openStatus(false)
             showSettings -> viewModel.openSettings(false)
             showConversationDetail -> viewModel.openConversationDetail(false)
             showBreeze -> viewModel.openBreeze(false)
@@ -141,8 +146,8 @@ fun LocalMindRoot(
     val tabStyleTop = uiTokens["tabStyle"] ?: "glass"
     val canHideTop = tabs.size > 1
     val subPageTop = showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
-        showPluginDocs || showDebug || showSettings || meFullPage ||
-        (showImageStudio && tab == Tab.MODELS)
+        showPluginDocs || showDebug || showStatus || showSettings || meFullPage ||
+        showImageStudio
     val immersiveTop = tab == Tab.CHAT && inChat
     val barVisibleTop = !subPageTop && !immersiveTop && !(tabStyleTop == "hidden" && canHideTop)
 
@@ -150,8 +155,8 @@ fun LocalMindRoot(
         AuroraBackground {
             Box(Modifier.fillMaxSize()) {
                 val subPage = showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
-                    showPluginDocs || showDebug || showSettings || meFullPage ||
-                    (showImageStudio && tab == Tab.MODELS)
+                    showPluginDocs || showDebug || showStatus || showSettings || meFullPage ||
+                    showImageStudio
                 val immersiveChat = tab == Tab.CHAT && inChat
 
                 Box(
@@ -169,12 +174,13 @@ fun LocalMindRoot(
                     AnimatedContent(
                         targetState = when {
                             showDebug -> "debug"
+                            showStatus -> "status"
                             showConversationDetail -> "convdetail"
                             showBreeze -> "breeze"
                             showVoiceScreen -> "voice"
                             showPluginDocs -> "plugindocs"
                             showPlugins -> "plugins"
-                            showImageStudio && tab == Tab.MODELS -> "image"
+                            showImageStudio -> "image"
                             tab == Tab.CHAT -> "chat"
                             tab == Tab.MODELS -> "models"
                             tab == Tab.HOME -> "home"
@@ -187,7 +193,7 @@ fun LocalMindRoot(
                         },
                         transitionSpec = {
                             val isSub = { s: String ->
-                                s in setOf("voice", "image", "convdetail", "plugins", "plugindocs", "debug")
+                                s in setOf("voice", "image", "convdetail", "plugins", "plugindocs", "debug", "status")
                             }
                             if (isSub(targetState) || isSub(initialState)) {
                                 val forward = isSub(targetState)
@@ -248,6 +254,7 @@ fun LocalMindRoot(
                                 }
                             }
                             "debug" -> DebugScreen(viewModel) { viewModel.openDebug(false) }
+                            "status" -> StatusScreen(viewModel) { viewModel.openStatus(false) }
                             "voice" -> VoiceScreen(viewModel)
                             "plugins" -> PluginsScreen(viewModel) { viewModel.openPlugins(false) }
                             "plugindocs" -> PluginDevDocsScreen { viewModel.openPluginDocs(false) }

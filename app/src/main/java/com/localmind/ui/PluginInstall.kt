@@ -68,6 +68,20 @@ object PluginInstall {
     }
 
     private fun installUnsafe(storage: Storage, file: File): Outcome {
+        // 在**解压之前**就拦住"覆盖已加载 .so"这条路。
+        // 等到 read() 之后再判断就晚了：文件已经被写坏，旧映射会段错误。
+        val hasNative = runCatching {
+            java.util.zip.ZipFile(file).use { z ->
+                z.entries().toList().any { com.localmind.data.PluginArchive.isLibPath(it.name) }
+            }
+        }.getOrDefault(false)
+        if (hasNative && runCatching {
+                com.localmind.native.image.ImageBridge.hasDiffusionBackend
+            }.getOrDefault(false)
+        ) {
+            return Outcome.Failed("生图后端已在内存里加载，不能热替换；重启应用后再安装")
+        }
+
         // ---- 第一步：先读清单，才能知道要解压哪些资源到哪里 ----
         val probe = PluginArchive.read(file, assetDir = null).getOrElse {
             return Outcome.Failed("读取压缩包失败：${it.message?.take(90)}")
@@ -121,6 +135,14 @@ object PluginInstall {
         if (contents.otherAbis.isNotEmpty()) {
             report += "通用包，已选 $abi（包内还有 " +
                 contents.otherAbis.sorted().joinToString("、") + "）"
+        }
+
+        // 已经加载进进程的原生库不能覆盖：旧映射还在，写同路径会让正在映射的页
+        // 变成 SIGBUS/SIGSEGV。只能在下次启动、旧库没被 load 时更新。
+        if (contents.libs.isNotEmpty() &&
+            runCatching { com.localmind.native.image.ImageBridge.hasDiffusionBackend }.getOrDefault(false)
+        ) {
+            return Outcome.Failed("生图后端已在内存里加载，不能热替换；重启应用后再安装")
         }
 
         // ---- 原生库：先校验 ELF 头（架构对不对），再谈加载 ----

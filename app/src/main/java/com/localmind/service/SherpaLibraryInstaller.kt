@@ -75,6 +75,27 @@ class SherpaLibraryInstaller(private val storage: Storage) {
 
     val archive: File get() = File(root, TARBALL_NAME)
 
+    /**
+     * 「这个 tarball 是下完的」标记。
+     *
+     * 起因是一个能把安装流程**永久卡死**的坑：原来只按大小判断
+     * （`archive.length() > 40_000_000`），于是应用在一次 43 MB 下载中途被
+     * 杀掉之后，下次启动会把**截断的包**当成"已完成"，解压必然失败；
+     * 而失败分支又不清 archive，于是每次点安装都是同一个错误，只有手动清数据
+     * 才能恢复。现在「下完」由一个标记文件证明，解压失败也会把包删掉。
+     */
+    private val doneMarker: File get() = File(root, "$TARBALL_NAME.ok")
+
+    /**
+     * 下载进度（已写入的字节数）。
+     *
+     * 为什么需要：这个包 36 MB，网络差的时候要十几分钟。界面只有一个静态的
+     * 「下载中…」时，用户分不清是"在慢慢下"还是"已经卡死" —— 实测有人在这
+     * 一屏反复点安装。数字不用很精确，能动就行。
+     */
+    @Volatile
+    var onProgress: ((Long) -> Unit)? = null
+
     /** 四个 `.so` 都在，且已经成功 `System.load` 过（或 APK 里自带）。 */
     val isInstalled: Boolean
         get() = SherpaNativeLoader.isBundled || SherpaNativeLoader.isLoadableFrom(dir)
@@ -116,10 +137,11 @@ class SherpaLibraryInstaller(private val storage: Storage) {
     fun uninstall() {
         dir.deleteRecursively()
         archive.delete()
+        doneMarker.delete()
     }
 
     private fun download(): Boolean {
-        if (archive.isFile && archive.length() > 40_000_000) return true
+        if (archive.isFile && doneMarker.isFile && archive.length() > 40_000_000) return true
         archive.parentFile?.mkdirs()
 
         for ((i, url) in URLS.withIndex()) {
@@ -132,7 +154,23 @@ class SherpaLibraryInstaller(private val storage: Storage) {
                     setRequestProperty("User-Agent", "LocalMind/1.0 (Android)")
                 }
                 conn.getInputStream().use { input ->
-                    archive.outputStream().use { out -> input.copyTo(out) }
+                    archive.outputStream().use { out ->
+                        val buf = ByteArray(256 * 1024)
+                        var written = 0L
+                        var last = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            out.write(buf, 0, n)
+                            written += n
+                            val now = System.currentTimeMillis()
+                            if (now - last >= 500) {
+                                last = now
+                                onProgress?.invoke(written)
+                            }
+                        }
+                        onProgress?.invoke(written)
+                    }
                 }
                 archive.length() > 40_000_000
             }.getOrElse { t ->
@@ -140,7 +178,10 @@ class SherpaLibraryInstaller(private val storage: Storage) {
                 archive.delete()
                 false
             }
-            if (ok) return true
+            if (ok) {
+                runCatching { doneMarker.writeText(VERSION) }
+                return true
+            }
         }
         return false
     }
@@ -169,7 +210,10 @@ class SherpaLibraryInstaller(private val storage: Storage) {
             false
         }
         if (!ok) {
+            // 截断/损坏的包留着只会让下一次安装重复失败，直接丢掉重下。
             staging.deleteRecursively()
+            archive.delete()
+            doneMarker.delete()
             return false
         }
 
@@ -185,6 +229,7 @@ class SherpaLibraryInstaller(private val storage: Storage) {
         }
         staging.deleteRecursively()
         archive.delete()
+        doneMarker.delete()
 
         if (copied != LIBRARIES.size) {
             Log.w(TAG, "只解出 $copied/${LIBRARIES.size} 个原生库（ABI=$abi），放弃")

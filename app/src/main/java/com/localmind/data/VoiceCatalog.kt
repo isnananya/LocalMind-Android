@@ -1,15 +1,17 @@
 package com.localmind.data
 
 /**
- * 当前可用的神经音色 —— **由语音插件填充，主程序不带任何音色**。
+ * 当前可用的神经音色 —— **内置 4 个 + 语音插件提供的**。
  *
- * ## 为什么不再是 enum
+ * ## 两层清单
  *
- * 原来这里是一个 8 项的 `enum class VoiceCatalog`：音色清单写死在 APK 里。
- * 问题和模型库一样 —— 地址会失效、会出新音色、会换镜像，每改一次都要发版。
+ *  * [BuiltinVoices]：随 APK 带来的 4 个 VITS/Piper 音色，保证空装机也能用；
+ *  * 插件（`voices.json`）：可以加新音色、改地址、换镜像。
  *
- * 现在它是一个**运行时注册表**：装一个语音插件（`voices.json`）就往里加一批。
- * 不装任何语音插件时 [all] 是空的，语音页就只会说"还没有音色"。
+ * 合并规则写在 [setFromPlugins] 里：**同 id 时插件优先**，其余按"内置在前、
+ * 插件在后"的顺序排。这样：
+ *  * 下架/改地址只换插件，不用发版（当初把音色全挪进插件的理由，仍然成立）；
+ *  * 但"语音页是空的"这个最差的首次体验不会再出现。
  *
  * ## 为什么保留这个对象名和这些字段
  *
@@ -20,18 +22,31 @@ package com.localmind.data
 object VoiceCatalog {
 
     @Volatile
-    private var entries: List<VoiceEntry> = emptyList()
+    private var entries: List<VoiceEntry> = BuiltinVoices.all
 
-    /** 当前所有音色（来自所有已启用的语音插件）。 */
+    /** 当前所有音色（内置 + 所有已启用的语音插件）。 */
     val all: List<VoiceEntry> get() = entries
 
-    /** 有音色可用吗。语音页据此决定显示列表还是空态。 */
+    /** 有音色可用吗。语音页据此决定显示列表还是空态。内置清单在就永远非空。 */
     val hasAny: Boolean get() = entries.isNotEmpty()
 
-    /** 用插件提供的清单整体替换。没装语音插件时传空表。 */
+    /**
+     * 用插件提供的清单整体替换（内置那一层永远保留）。
+     *
+     * 顺序：内置音色按声明顺序在前，插件里**额外**的音色接在后面。
+     * 同 id 的条目用插件那一份 —— 插件可以改说明、改镜像、改体积，
+     * 而且这个覆盖是"重装插件即生效"的，不需要发版。
+     */
     fun setFromPlugins(list: List<VoiceEntry>) {
-        // 按 id 去重：两个插件提供同一个音色时，先装的赢（稳定、可预期）。
-        entries = list.distinctBy { it.id }
+        val builtin = BuiltinVoices.all
+        val pluginById = list.associateBy { it.id }
+        val merged = buildList {
+            builtin.forEach { add(pluginById[it.id] ?: it) }
+            val builtinIds = builtin.mapTo(HashSet()) { it.id }
+            list.forEach { if (it.id !in builtinIds) add(it) }
+        }
+        // 按 id 再去一次重：插件内部自己也可能重复。
+        entries = merged.distinctBy { it.id }
     }
 
     fun byId(id: String?): VoiceEntry? =

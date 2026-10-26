@@ -5,7 +5,7 @@
   "author": "LocalMind",
   "license": "音色模型来自 k2-fsa/sherpa-onnx 官方 Release，各自遵循其原始许可",
   "home": "https://github.com/k2-fsa/sherpa-onnx",
-  "note": "17 个离线音色。id 就是官方 tarball 的名字；下载走 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2，直连失败自动回退 gh-proxy。需要先在「语音与音色」里装「语音引擎」才能真正发声。",
+  "note": "17 个离线音色。id 就是官方 tarball 的名字；下载走 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2，直连失败自动回退 gh-proxy。需要先在「TTS 测试」里装「语音引擎」才能真正发声。",
   "voices": [
     {
       "id": "vits-piper-zh_CN-chaowen-medium-int8",
@@ -15,7 +15,7 @@
       "sizeBytes": 14011298,
       "url": "",
       "mirrors": [],
-      "description": "13 MB · 完全离线 · Apache-2.0（Piper 系）。14MB 男声，与现有 14MB 小雅正好配成男女一对。 URL 实测 302→200 / 14011298 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "13 MB · 完全离线 · Apache-2.0（Piper 系）。14MB 男声，与现有 14MB 小雅正好配成男女一对。 URL 实测 302→200 / 14011298 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -28,7 +28,7 @@
       "sizeBytes": 29149650,
       "url": "",
       "mirrors": [],
-      "description": "28 MB · 完全离线 · Apache-2.0。29MB，音质比 int8 好一档 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "28 MB · 完全离线 · Apache-2.0。29MB，音质比 int8 好一档 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -41,7 +41,7 @@
       "sizeBytes": 60443846,
       "url": "",
       "mirrors": [],
-      "description": "58 MB · 完全离线 · Apache-2.0。60MB 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "58 MB · 完全离线 · Apache-2.0。60MB 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -54,7 +54,7 @@
       "sizeBytes": 67255926,
       "url": "",
       "mirrors": [],
-      "description": "64 MB · 完全离线 · Apache-2.0。Piper 另一个中文女声，基线与现有小雅不同的音色。67MB 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "64 MB · 完全离线 · Apache-2.0。Piper 另一个中文女声，基线与现有小雅不同的音色。67MB 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -67,7 +67,7 @@
       "sizeBytes": 29151028,
       "url": "",
       "mirrors": [],
-      "description": "28 MB · 完全离线 · Apache-2.0。现有 int8 版的高音质版 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "28 MB · 完全离线 · Apache-2.0。现有 int8 版的高音质版 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -80,7 +80,7 @@
       "sizeBytes": 60462944,
       "url": "",
       "mirrors": [],
-      "description": "58 MB · 完全离线 · Apache-2.0。现有 int8 版的全精度版 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "58 MB · 完全离线 · Apache-2.0。现有 int8 版的全精度版 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -93,7 +93,7 @@
       "sizeBytes": 146922607,
       "url": "",
       "mirrors": [],
-      "description": "140 MB · 完全离线 · Apache-2.0（AISHELL-3 学术数据集训练）。多说话人。注意与现有 vits-icefall-zh-aishell3（31MB）不是同一个：这个是 147MB 的另一个转换，说话人更多 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "140 MB · 完全离线 · Apache-2.0（AISHELL-3 学术数据集训练）。多说话人。注意与现有 vits-icefall-zh-aishell3（31MB）不是同一个：这个是 147MB 的另一个转换，说话人更多 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -106,7 +106,7 @@
       "sizeBytes": 167006755,
       "url": "",
       "mirrors": [],
-      "description": "159 MB · 完全离线 · MIT（MeloTTS 上游）。中英混读是它的卖点：正文里夹英文单词不用切语言。167MB。 URL 实测 302→200 / 167006755 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "159 MB · 完全离线 · MIT（MeloTTS 上游）。中英混读是它的卖点：正文里夹英文单词不用切语言。167MB。 URL 实测 302→200 / 167006755 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -119,7 +119,7 @@
       "sizeBytes": 118810709,
       "url": "",
       "mirrors": [],
-      "description": "113 MB · 完全离线 · Apache-2.0。带中文 lexicon 的 VITS，数字/多音字正则更全 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "113 MB · 完全离线 · Apache-2.0。带中文 lexicon 的 VITS，数字/多音字正则更全 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -132,7 +132,7 @@
       "sizeBytes": 119143475,
       "url": "",
       "mirrors": [],
-      "description": "114 MB · 完全离线 · 社区模型，个人/非商用。现有 fanchen-C 的姊妹版，多说话人 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "114 MB · 完全离线 · 社区模型，个人/非商用。现有 fanchen-C 的姊妹版，多说话人 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -145,7 +145,7 @@
       "sizeBytes": 119159130,
       "url": "",
       "mirrors": [],
-      "description": "114 MB · 完全离线 · 个人/非商用。同系列不同音色 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "114 MB · 完全离线 · 个人/非商用。同系列不同音色 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -158,7 +158,7 @@
       "sizeBytes": 119402911,
       "url": "",
       "mirrors": [],
-      "description": "114 MB · 完全离线 · 个人/非商用。老年音色，角色扮演用 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "114 MB · 完全离线 · 个人/非商用。老年音色，角色扮演用 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -171,7 +171,7 @@
       "sizeBytes": 120579632,
       "url": "",
       "mirrors": [],
-      "description": "115 MB · 完全离线 · 个人/非商用。游戏角色音，低沉 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "115 MB · 完全离线 · 个人/非商用。游戏角色音，低沉 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -184,7 +184,7 @@
       "sizeBytes": 120556412,
       "url": "",
       "mirrors": [],
-      "description": "115 MB · 完全离线 · 个人/非商用。角色音 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "115 MB · 完全离线 · 个人/非商用。角色音 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -197,7 +197,7 @@
       "sizeBytes": 120559956,
       "url": "",
       "mirrors": [],
-      "description": "115 MB · 完全离线 · 个人/非商用。角色音 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
+      "description": "115 MB · 完全离线 · 个人/非商用。角色音 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。",
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": ""
@@ -213,7 +213,7 @@
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": "",
-      "description": "72 MB · 完全离线 · Apache-2.0。flow matching 架构，合成速度比 VITS 快数倍，中文质量好。⚠️ 主程序目前只接了 VITS 引擎，装了这个还发不出声 —— 需要先给 NeuralTts 加 Matcha 分支。 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。"
+      "description": "72 MB · 完全离线 · Apache-2.0。flow matching 架构，合成速度比 VITS 快数倍，中文质量好。⚠️ 主程序目前只接了 VITS 引擎，装了这个还发不出声 —— 需要先给 NeuralTts 加 Matcha 分支。 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。"
     },
     {
       "id": "kokoro-int8-multi-lang-v1_1",
@@ -226,7 +226,7 @@
       "deployment": "LOCAL",
       "cloudVoiceId": "",
       "provider": "",
-      "description": "140 MB · 完全离线 · Apache-2.0。开源 TTS 里音质口碑最好的一档，v1.1 支持中文。⚠️ 同上：需要给 NeuralTts 加 Kokoro 分支（还要 voices.bin 和 lang 两个参数）才能真正发声。 用法：先在「我的 → 语音与音色」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。"
+      "description": "140 MB · 完全离线 · Apache-2.0。开源 TTS 里音质口碑最好的一档，v1.1 支持中文。⚠️ 同上：需要给 NeuralTts 加 Kokoro 分支（还要 voices.bin 和 lang 两个参数）才能真正发声。 用法：先在「我的 → TTS 测试」里下载「语音引擎」，镜像和语音都在那儿；下载按钮点了会先检查引擎在不在。"
     }
   ]
 }

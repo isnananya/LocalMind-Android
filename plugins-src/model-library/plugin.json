@@ -1,8 +1,9 @@
 {
   "id": "localmind.official.models",
   "name": "LocalMind 官方模型库",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "author": "LocalMind",
+  "license": "MIT（清单数据；模型权重各自遵循其原始许可）",
   "description": "83 个实测可下载的模型（对话 55 / 识图 6 / 生图 13 / 决策 9）+ 17 个离线语音音色。新增 DeepSeek R1 蒸馏全系与 Kimi-K3（含 0.4B 端侧小杯）；全部地址逐个 HEAD 验证过，带国内 hf-mirror 镜像。",
   "abilities": [
     "model_library",

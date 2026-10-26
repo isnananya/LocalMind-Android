@@ -4,7 +4,7 @@
   "packName": "Breeze TTS 2",
   "author": "BreezeBlue",
   "description": "把 Breeze TTS 2 的语音能力接进 LocalMind。手机跑不动这个模型（3.47B / CUDA），需要在 PC 或 GPU 服务器上自建服务，手机当客户端。",
-  "note": "端点在「我的 → 更多 → Breeze 语音」里填，改成你服务器的局域网地址。",
+  "note": "端点在「我的 → TTS 测试 → 右上角」的 Breeze 详细设置里填，改成你服务器的局域网地址。",
   "engines": [
     {
       "id": "breeze-tts-2",

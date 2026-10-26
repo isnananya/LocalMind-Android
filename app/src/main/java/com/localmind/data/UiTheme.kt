@@ -176,7 +176,8 @@ object UiTokens {
     val bubbleCorner = UiToken("bubbleCorner", "气泡圆角", TokenType.NUMBER, "18", 0.0, 32.0, "dp")
     val pagePadding = UiToken("pagePadding", "页面左右留白", TokenType.NUMBER, "16", 8.0, 28.0, "dp")
     val navBarHeight = UiToken("navBarHeight", "导航栏高度", TokenType.NUMBER, "44", 36.0, 64.0, "dp")
-    val tabBarHeight = UiToken("tabBarHeight", "标签栏高度", TokenType.NUMBER, "62", 44.0, 80.0, "dp")
+    // 56 时"图标 + 文字"只剩 2dp 呼吸空间（实测选中胶囊里的文字快贴到底边），改成 60。
+    val tabBarHeight = UiToken("tabBarHeight", "标签栏高度", TokenType.NUMBER, "60", 44.0, 80.0, "dp")
     val barBorderWidth = UiToken("barBorderWidth", "导航栏/标签栏描边粗细", TokenType.NUMBER, "0.5", 0.0, 2.0, "dp")
     val tabIconSize = UiToken("tabIconSize", "标签栏图标大小", TokenType.NUMBER, "23", 18.0, 30.0, "dp")
 
@@ -191,10 +192,11 @@ object UiTokens {
         note = "capsule（胶囊）/ rounded（圆角矩形）/ square（直角）",
     )
     val tabBarMargin = UiToken("tabBarMargin", "标签栏左右留白", TokenType.NUMBER, "18", 0.0, 48.0, "dp")
-    val tabBarLift = UiToken("tabBarLift", "标签栏离底距离", TokenType.NUMBER, "8", 0.0, 40.0, "dp")
+    val tabBarLift = UiToken("tabBarLift", "标签栏离底距离", TokenType.NUMBER, "12", 0.0, 40.0, "dp")
     val tabBarBlur = UiToken(
-        "tabBarBlur", "玻璃模糊强度", TokenType.NUMBER, "100", 0.0, 100.0,
-        note = "0 = 不模糊（纯半透明），100 = 最强",
+        "tabBarBlur", "玻璃模糊半径", TokenType.NUMBER, "10", 0.0, 16.0,
+        unitLabel = "dp",
+        note = "10 = 默认磨砂（2 太轻，底下的字会透出来）；0 = 完全清晰（纯折射），16 = 重度磨砂",
     )
     val tabBarTint = UiToken("tabBarTint", "玻璃染色", TokenType.COLOR, "#FFFFFF",
         note = "深色主题用 darkTokens 覆盖成深色")
@@ -212,6 +214,34 @@ object UiTokens {
         "uiKit", "液态玻璃组件库", TokenType.ENUM, "auto",
         note = "auto（硬件支持则用 AndroidLiquidGlassView）/ library（强制组件库）/ compose（用内置降级）",
     )
+
+    // ------------------------------------------------- 液态玻璃（LiquidTab 风格）
+    val glassBarLiquid = UiToken(
+        "glassBarLiquid", "液态玻璃效果", TokenType.BOOL, "true",
+        note = "开：边缘折射 + 色散 + 按压放大；关：只保留模糊与染色（LiquidTab 的默认行为）",
+    )
+    val dynamicColor = UiToken(
+        "dynamicColor", "动态配色", TokenType.BOOL, "false",
+        note = "从系统壁纸主色生成 accent；关掉回到主题包/预设的颜色",
+    )
+    val glassBarOutline = UiToken("glassBarOutline", "底栏描边", TokenType.BOOL, "true",
+        note = "开启时画一圈 1dp 高光描边")
+    val glassBarHighlight = UiToken(
+        "glassBarHighlight", "高光强度", TokenType.NUMBER, "0.5", 0.5, 1.7,
+        note = "描边与边缘高光的强度，随设备倾斜移动",
+    )
+    val glassBarSlotWidth = UiToken(
+        "glassBarSlotWidth", "单栏宽度", TokenType.NUMBER, "76", 56.0, 112.0,
+        unitLabel = "dp", note = "悬浮胶囊的总宽 = 单栏宽度 × 标签数",
+    )
+    val glassBarBottomBlur = UiToken(
+        "glassBarBottomBlur", "底部渐变模糊", TokenType.BOOL, "false",
+        note = "底栏上方页面底部的渐隐模糊",
+    )
+    val glassBarIconOnly = UiToken("glassBarIconOnly", "仅图标", TokenType.BOOL, "false",
+        note = "开启后不画文字（悬浮胶囊会自动更紧凑）")
+    val glassBarLabelSize = UiToken("glassBarLabelSize", "标签文字大小", TokenType.NUMBER, "11", 9.0, 14.0,
+        unitLabel = "sp")
 
     val tabStyle = UiToken(
         "tabStyle", "标签栏样式", TokenType.ENUM, "glass",
@@ -241,6 +271,8 @@ object UiTokens {
         // 导航与标签栏
         tabStyle, showTabBarLabels, navTitleAlign,
         tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator, tabBarWidth, uiKit,
+        glassBarLiquid, glassBarOutline, glassBarHighlight, glassBarSlotWidth,
+        glassBarBottomBlur, glassBarIconOnly, glassBarLabelSize, dynamicColor,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }

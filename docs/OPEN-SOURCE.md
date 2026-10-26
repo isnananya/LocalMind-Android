@@ -2,6 +2,11 @@
 
 LocalMind 自身代码以 **MIT** 发布（见仓库根目录 [LICENSE](../LICENSE)）。
 下面列出随 APK、随运行时下载的原生库，以及设计与数据来源。
+**直接改编进源码**的第三方代码，其版权与完整 MIT 文本见
+[third_party/NOTICES.md](../third_party/NOTICES.md)。
+
+> 1.0.5 起，APK 内置三个插件（官方模型库 / 液态玻璃底栏 / 本地生图后端）。
+> 它们仍是**独立插件**：可在插件页卸载，卸载后不会被下次启动偷偷装回来。
 
 ## 随 APK 分发
 
@@ -15,6 +20,8 @@ LocalMind 自身代码以 **MIT** 发布（见仓库根目录 [LICENSE](../LICEN
 | Material Icons | Apache-2.0 | 内置图标（只打包用到的子集） |
 | Kotlin / kotlinx（coroutines、serialization） | Apache-2.0 | 语言与协程/序列化 |
 | OkHttp / Okio | Apache-2.0 | 下载与本地 API 服务 |
+| AndroidLiquidGlassView (QmDeve) | MIT | 液态玻璃导航 / 底栏的 RenderEffect 折射。Copyright (c) 2025-2026 Donny Yale |
+| AndroidMonitor (TerminalDev-1) | MIT | 状态页的设备采样与折线图**改编**自此项目。Copyright (c) 2026 Android Monitor contributors |
 
 ## 运行时按需下载
 

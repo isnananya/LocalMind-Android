@@ -27,14 +27,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.localmind.ui.AppViewModel
+import com.localmind.ui.components.IosSlider
+import com.localmind.ui.components.IosSwitch
+import com.localmind.ui.components.IosTag
 import com.localmind.ui.design.Aurora
 import com.localmind.ui.design.AuroraCircleButton
+import com.localmind.ui.design.AuroraDivider
 import com.localmind.ui.design.AuroraGroup
 import com.localmind.ui.design.AuroraNavBar
 import com.localmind.ui.design.AuroraRow
 import com.localmind.ui.design.AuroraSectionLabel
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.theme.IosTheme
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * 外观：只留真正影响观感的东西 —— 底栏、布局、风格、主题包。
@@ -50,6 +56,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val currentLayout by viewModel.uiLayout.collectAsState()
     val plugins by viewModel.plugins.collectAsState()
     val tokens = com.localmind.ui.theme.LocalUiTokens.current
+    val themeMode by viewModel.themeMode.collectAsState()
 
     val barModule = plugins.values.firstOrNull {
         it.manifest.abilities.contains("glass_bar") && it.isActive
@@ -65,34 +72,35 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item {
+                AuroraSectionLabel("深浅色")
+                AuroraGroup {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("模式", style = IosTheme.typography.body, color = ios.label, modifier = Modifier.weight(1f))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEach { (mode, label) ->
+                                IosTag(label, themeMode == mode) { viewModel.setThemeMode(mode) }
+                            }
+                        }
+                    }
+                    AuroraDivider(indent = 16.dp)
+                    AuroraRow(
+                        title = "当前生效",
+                        subtitle = when {
+                            activeTheme != null -> activeTheme!!.packName
+                            activePreset != null -> "预设 · " + activePreset!!.name
+                            else -> "内置外观"
+                        },
+                        showChevron = false,
+                    )
+                }
+            }
+
+            item {
                 AuroraSectionLabel("底栏")
                 AuroraGroup {
-                    AuroraRow(
-                        title = "液态玻璃底栏",
-                        subtitle = when {
-                            barModule != null -> "已启用 · " + barModule.manifest.name
-                            plugins.values.any { it.manifest.abilities.contains("glass_bar") } ->
-                                "已安装，去插件页启用"
-                            else -> "安装模块后启用紧凑悬浮胶囊"
-                        },
-                        leading = {
-                            Box(
-                                Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(ios.blue.copy(alpha = 0.14f)),
-                                contentAlignment = Alignment.Center,
-                            ) { Text("◐", color = ios.blue) }
-                        },
-                        trailing = {
-                            Text(
-                                if (barModule != null) "已启用" else "去安装",
-                                style = IosTheme.typography.caption1,
-                                color = ios.blue,
-                            )
-                        },
-                        onClick = { viewModel.openPlugins(true) },
-                    )
                     ChoiceRow(
                         title = "宽度",
                         options = listOf("compact" to "悬浮胶囊", "full" to "通栏"),
@@ -110,11 +118,177 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         selected = tokens["tabBarIndicator"] ?: "capsule",
                         onPick = { viewModel.setThemeOverride("tabBarIndicator", it) },
                     )
-                    ChoiceRow(
-                        title = "显示",
-                        options = listOf("glass" to "玻璃", "plain" to "纯色", "hidden" to "隐藏"),
-                        selected = tokens["tabStyle"] ?: "glass",
-                        onPick = { viewModel.setThemeOverride("tabStyle", it) },
+                }
+            }
+
+            item {
+                val tabStyle = tokens["tabStyle"] ?: "glass"
+                val plain = tabStyle == "plain"
+                val hidden = tabStyle == "hidden"
+                fun n(key: String, def: Float) = tokens[key]?.toFloatOrNull() ?: def
+                fun onOff(key: String, def: Boolean) =
+                    (tokens[key] ?: def.toString()).toBooleanStrictOrNull() ?: def
+                fun setStyle(plainOn: Boolean? = null, hiddenOn: Boolean? = null) {
+                    val p = plainOn ?: plain
+                    val h = hiddenOn ?: hidden
+                    viewModel.setThemeOverride(
+                        "tabStyle",
+                        when {
+                            h -> "hidden"
+                            p -> "plain"
+                            else -> "glass"
+                        },
+                    )
+                }
+
+                val liquidOn = onOff("glassBarLiquid", true)
+                val outlineOn = onOff("glassBarOutline", true)
+                val bottomBlurOn = onOff("glassBarBottomBlur", false)
+                val iconOnly = onOff("glassBarIconOnly", false)
+                val dynamicOn = onOff("dynamicColor", false)
+
+                AuroraSectionLabel("液态底栏")
+                AuroraGroup {
+                    AuroraRow(
+                        title = "液态底栏",
+                        subtitle = if (plain) {
+                            "关闭：纯色底栏（无玻璃与折射）"
+                        } else {
+                            "液态玻璃：折射 + 色散 + 按压放大"
+                        },
+                        showChevron = false,
+                        trailing = {
+                            IosSwitch(
+                                checked = !plain,
+                                onCheckedChange = { setStyle(plainOn = !it, hiddenOn = false) },
+                            )
+                        },
+                        onClick = { setStyle(plainOn = plain, hiddenOn = false) },
+                    )
+                    AuroraDivider()
+                    AuroraRow(
+                        title = "底部渐变模糊",
+                        subtitle = "底栏上方页面底部的渐隐磨砂",
+                        showChevron = false,
+                        trailing = {
+                            IosSwitch(
+                                checked = bottomBlurOn && !plain,
+                                onCheckedChange = { viewModel.setThemeOverride("glassBarBottomBlur", it.toString()) },
+                                enabled = !plain,
+                            )
+                        },
+                        onClick = if (plain) null else ({
+                            viewModel.setThemeOverride("glassBarBottomBlur", (!bottomBlurOn).toString())
+                        }),
+                    )
+                    AuroraDivider()
+                    AuroraRow(
+                        title = "描边",
+                        subtitle = "1dp 高光描边，强度可调",
+                        showChevron = false,
+                        trailing = {
+                            IosSwitch(
+                                checked = outlineOn && !plain,
+                                onCheckedChange = { viewModel.setThemeOverride("glassBarOutline", it.toString()) },
+                                enabled = !plain,
+                            )
+                        },
+                        onClick = if (plain) null else ({
+                            viewModel.setThemeOverride("glassBarOutline", (!outlineOn).toString())
+                        }),
+                    )
+                    AuroraDivider()
+                    AuroraRow(
+                        title = "动态配色",
+                        subtitle = "从系统壁纸取主色，改的是整个应用的主色",
+                        showChevron = false,
+                        trailing = {
+                            IosSwitch(
+                                checked = dynamicOn,
+                                onCheckedChange = { viewModel.setThemeOverride("dynamicColor", it.toString()) },
+                            )
+                        },
+                        onClick = { viewModel.setThemeOverride("dynamicColor", (!dynamicOn).toString()) },
+                    )
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "底栏模糊半径",
+                        value = n("tabBarBlur", 10f),
+                        range = 0f..16f,
+                        unit = "dp",
+                        enabled = !plain,
+                    ) { viewModel.setThemeOverride("tabBarBlur", it.roundToInt().toString()) }
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "高光强度",
+                        value = n("glassBarHighlight", 0.5f),
+                        range = 0.5f..1.7f,
+                        decimals = 1,
+                        enabled = !plain,
+                    ) { viewModel.setThemeOverride("glassBarHighlight", fmtDecimals(it, 1)) }
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "底栏高度",
+                        value = n("tabBarHeight", 56f),
+                        range = 44f..72f,
+                        unit = "dp",
+                    ) { viewModel.setThemeOverride("tabBarHeight", it.roundToInt().toString()) }
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "单栏宽度",
+                        value = n("glassBarSlotWidth", 76f),
+                        range = 56f..112f,
+                        unit = "dp",
+                    ) { viewModel.setThemeOverride("glassBarSlotWidth", it.roundToInt().toString()) }
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "距底距离",
+                        value = n("tabBarLift", 12f),
+                        range = 0f..40f,
+                        unit = "dp",
+                    ) { viewModel.setThemeOverride("tabBarLift", it.roundToInt().toString()) }
+                    AuroraDivider()
+                    AuroraRow(
+                        title = "仅图标",
+                        subtitle = "不画文字，胶囊自动更紧凑",
+                        showChevron = false,
+                        trailing = {
+                            IosSwitch(
+                                checked = iconOnly,
+                                onCheckedChange = { viewModel.setThemeOverride("glassBarIconOnly", it.toString()) },
+                            )
+                        },
+                        onClick = {
+                            viewModel.setThemeOverride("glassBarIconOnly", (!iconOnly).toString())
+                        },
+                    )
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "文字大小",
+                        value = n("glassBarLabelSize", 11f),
+                        range = 9f..14f,
+                        unit = "sp",
+                        enabled = !iconOnly,
+                    ) { viewModel.setThemeOverride("glassBarLabelSize", it.roundToInt().toString()) }
+                    AuroraDivider()
+                    GlassSliderRow(
+                        title = "图标大小",
+                        value = n("tabIconSize", 23f),
+                        range = 18f..30f,
+                        unit = "dp",
+                    ) { viewModel.setThemeOverride("tabIconSize", it.roundToInt().toString()) }
+                    AuroraDivider()
+                    AuroraRow(
+                        title = "隐藏底栏",
+                        subtitle = "完全收起底栏；子页会自动收起",
+                        showChevron = false,
+                        trailing = {
+                            IosSwitch(
+                                checked = hidden,
+                                onCheckedChange = { setStyle(hiddenOn = it, plainOn = if (it) false else plain) },
+                            )
+                        },
+                        onClick = { setStyle(hiddenOn = !hidden, plainOn = if (!hidden) false else plain) },
                     )
                 }
             }
@@ -287,3 +461,49 @@ private fun ChoiceRow(
         }
     }
 }
+@Composable
+private fun GlassSliderRow(
+    title: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    unit: String = "",
+    decimals: Int = 0,
+    enabled: Boolean = true,
+    onChange: (Float) -> Unit,
+) {
+    val ios = IosTheme.palette
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = IosTheme.typography.body,
+                color = if (enabled) ios.label else ios.tertiaryLabel,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = fmtDecimals(value, decimals) + if (unit.isBlank()) "" else " " + unit,
+                style = IosTheme.typography.footnote,
+                color = ios.secondaryLabel,
+            )
+        }
+        IosSlider(
+            value = value,
+            onValueChange = { raw ->
+                val q = if (decimals == 0) raw.roundToInt().toFloat()
+                else String.format(Locale.US, "%." + decimals + "f", raw).toFloat()
+                if (q != value) onChange(q)
+            },
+            valueRange = range,
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private fun fmtDecimals(v: Float, decimals: Int): String =
+    if (decimals == 0) v.roundToInt().toString()
+    else String.format(Locale.US, "%." + decimals + "f", v)

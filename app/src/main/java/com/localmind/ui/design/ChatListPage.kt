@@ -82,6 +82,15 @@ fun ChatListPage(viewModel: AppViewModel) {
         Spacer(Modifier.height(statusBarTopPadding() + 8.dp))
         AuroraTitle(
             text = "对话",
+            leading = {
+                AuroraCircleButton(
+                    icon = AppIcons.GraphicEq,
+                    contentDescription = "状态",
+                    size = 38.dp,
+                    tint = ios.blue,
+                    onClick = { viewModel.openStatus(true) },
+                )
+            },
             trailing = {
                 AuroraCircleButton(
                     icon = AppIcons.Add,
@@ -220,7 +229,9 @@ private fun ConversationCard(
                     color = ios.label,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    // fill = false 会让标题只占自己那点宽度，时间就紧贴在标题后面
+                    // （"新对话 10:58"）。撑满剩余宽度，时间才会落到卡片右边缘。
+                    modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(

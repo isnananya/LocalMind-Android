@@ -121,7 +121,7 @@ fun DebugScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         r.checks.joinToString("\n") { c -> (if (c.ok) "[OK] " else "[!!] ") + c.name + ": " + c.detail }
     }
 
-    Column(Modifier.fillMaxSize().background(ios.groupedBackground)) {
+    Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Transparent)) {
         com.localmind.ui.design.AuroraNavBar(title = "测试模式", onBack = onBack)
 
         LazyColumn(
@@ -226,7 +226,7 @@ fun DebugScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                             Text(
                                 "通过 " + r.passed + "/" + r.checks.size + " · 耗时 " + r.durationMs + "ms",
                                 style = IosTheme.typography.footnote,
-                                color = if (r.allCriticalPassed) ios.green else ios.orange,
+                                color = if (r.allCriticalPassed) ios.green else ios.warningText,
                             )
                             Spacer(Modifier.height(6.dp))
                             r.checks.forEach { c ->

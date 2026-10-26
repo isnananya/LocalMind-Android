@@ -64,25 +64,19 @@ fun PipelineScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
     var input by remember { mutableStateOf("") }
     val active = st.pipelines.firstOrNull { it.id == st.activeId } ?: st.pipelines.firstOrNull()
 
-    Column(Modifier.fillMaxSize().background(ios.groupedBackground)) {
+    Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Transparent)) {
         IosNavigationBar(
             title = "流水线",
             collapsed = true,
             topInset = statusBarTopPadding(),
             leading = {
-                Row(
-                    modifier = Modifier.clickable(enabled = onBack != null) { onBack?.invoke() },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
-                        contentDescription = "返回",
-                        tint = ios.blue,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text("返回", style = IosTheme.typography.body, color = ios.blue)
-                }
+                com.localmind.ui.design.AuroraCircleButton(
+                    icon = com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
+                    contentDescription = "返回",
+                    onClick = { onBack?.invoke() },
+                    size = 36.dp,
+                    tint = ios.label,
+                )
             },
         )
 
