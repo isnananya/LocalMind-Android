@@ -3850,7 +3850,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             }.onFailure { e ->
-                android.util.Log.w("PluginRuntime", "加载失败 " + id + ": " + (e.message ?: e.javaClass.simpleName))
+                val msg = e.message ?: e.javaClass.simpleName
+                android.util.Log.w("PluginRuntime", "加载失败 " + id + ": " + msg)
+                // 加载失败 -> 把插件标记为 FAILED 并停用，避免每次刷新都重试同一个坏插件。
+                val all = storage.loadPlugins()
+                val current = all[id]
+                if (current != null && current.state != com.localmind.data.PluginState.FAILED) {
+                    storage.savePlugins(
+                        all + (id to current.copy(
+                            state = com.localmind.data.PluginState.FAILED,
+                            lastError = "加载失败：" + msg,
+                        ))
+                    )
+                    _plugins.value = storage.loadPlugins()
+                }
             }
         }
 
