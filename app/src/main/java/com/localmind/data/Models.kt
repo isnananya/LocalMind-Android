@@ -73,6 +73,10 @@ data class Conversation(
     var visionModelId: String = "",
     var imageModelId: String = "",
     var voiceId: String = "",
+    /** 这个对话单独的音色/语气提示词；空 = 跟随全局。 */
+    var voicePrompt: String = "",
+    /** 这个对话是否朗读 AI 回复（单独开关）。 */
+    var ttsEnabled: Boolean = true,
     /**
      * Which persona this thread belongs to, so the conversation list can show the
      * right avatar instead of one generic glyph for every row. Empty on threads

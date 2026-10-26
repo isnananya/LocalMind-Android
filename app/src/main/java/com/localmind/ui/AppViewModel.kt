@@ -2908,10 +2908,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // 收尾那次更新（富文本 / tok-s / 表情）也要真的发出去。
                 emitConversations()
 
-                if (conv.abilities.voice && voiceSettings.enabled && voiceSettings.autoSpeak) {
+                if (conv.abilities.voice && conv.ttsEnabled && voiceSettings.enabled && voiceSettings.autoSpeak) {
                     val tail = split.answer.substring(spokenUpTo.coerceAtMost(split.answer.length))
                     if (tail.isNotBlank()) {
-                        tts.speakQueued(tail, voiceSettings)
+                        tts.speakQueued(
+                            tail,
+                            voiceSettings.copy(
+                                stylePrompt = conv.voicePrompt.ifBlank { voiceSettings.stylePrompt },
+                                neuralVoiceId = conv.voiceId.ifBlank { voiceSettings.neuralVoiceId },
+                            ),
+                        )
                     }
                 }
 
