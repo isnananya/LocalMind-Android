@@ -64,6 +64,7 @@ import com.localmind.ui.theme.IosTheme
 fun LocalMindRoot(
     sharedText: String? = null,
     viewModel: AppViewModel = viewModel(),
+    hideTabBar: Boolean = false,
 ) {
     val ios = IosTheme.palette
     val tab by viewModel.tab.collectAsState()
@@ -99,6 +100,7 @@ fun LocalMindRoot(
     if (!profile.onboarded) {
         val step = androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
         androidx.activity.compose.BackHandler(enabled = step.intValue > 0) { step.intValue-- }
+        androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.setBarVisible(false) }
         OnboardingScreen(viewModel, step = step.intValue, onStepChange = { step.intValue = it })
         ToastOverlay(toast, bottomPadding = 24.dp)
         return
@@ -258,8 +260,12 @@ fun LocalMindRoot(
                 val tabStyle = uiTokens["tabStyle"] ?: "glass"
                 val showLabels = (uiTokens["showTabBarLabels"] ?: "true").toBooleanStrictOrNull() ?: true
                 val canHideTabBar = tabs.size > 1
+                val barVisible = !subPage && !immersiveChat && !(tabStyle == "hidden" && canHideTabBar)
+                androidx.compose.runtime.LaunchedEffect(barVisible, hideTabBar) {
+                    viewModel.setBarVisible(barVisible)
+                }
                 AnimatedVisibility(
-                    visible = !subPage && !immersiveChat && !(tabStyle == "hidden" && canHideTabBar),
+                    visible = barVisible && !hideTabBar,
                     modifier = Modifier.align(Alignment.BottomCenter),
                     enter = fadeIn(Motion.smooth(200)) + slideInVertically(
                         animationSpec = Motion.gentle(),

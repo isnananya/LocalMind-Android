@@ -160,6 +160,8 @@ fun LiquidGlassTabBar(
         else -> barHeight / 2
     }
     val shape = RoundedCornerShape(corner)
+    // 参考 LiquidTab：紧凑胶囊，不是通栏。3 个 240dp，4 个 312dp，最多 360dp。
+    val compactWidth = minOf(360, 72 * count + 24).dp
     val cornerPx = with(density) { corner.toPx() }
 
     val shader = remember(backdrop, srcRect, barSize, cornerPx, tint, ios.isDark, blurPct, style) {
@@ -180,8 +182,7 @@ fun LiquidGlassTabBar(
 
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = margin)
+            .width(compactWidth)
             .padding(bottom = bottomInset + lift),
         contentAlignment = Alignment.Center,
     ) {
@@ -247,7 +248,7 @@ fun LiquidGlassTabBar(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(tint.copy(alpha = if (ios.isDark) 0.10f else 0.14f))
+                    .background(tint.copy(alpha = if (ios.isDark) 0.32f else 0.46f))
             )
 
             Box(
@@ -303,18 +304,18 @@ fun LiquidGlassTabBar(
                 else -> Box(
                     modifier = Modifier
                         .graphicsLayer {
-                            translationX = pillX.value - 37.dp.toPx()
+                            translationX = pillX.value - 27.dp.toPx()
                             alpha = if (pillX.value > 0f) 1f else 0f
                         }
-                        .width(74.dp)
-                        .height(46.dp)
+                        .width(54.dp)
+                        .height(54.dp)
                         .align(Alignment.CenterStart)
                         .clip(RoundedCornerShape(999.dp))
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    if (ios.isDark) Color.White.copy(alpha = 0.14f) else ios.blue.copy(alpha = 0.16f),
-                                    if (ios.isDark) Color.White.copy(alpha = 0.04f) else ios.blue.copy(alpha = 0.08f),
+                                    if (ios.isDark) Color.White.copy(alpha = 0.16f) else Color(0xFFD9D9D9).copy(alpha = 0.66f),
+                                    if (ios.isDark) Color.White.copy(alpha = 0.06f) else Color(0xFFD9D9D9).copy(alpha = 0.52f),
                                 )
                             )
                         )

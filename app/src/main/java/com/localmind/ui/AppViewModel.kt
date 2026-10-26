@@ -183,6 +183,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _tab = MutableStateFlow(Tab.CHAT)
     val tab: StateFlow<Tab> = _tab.asStateFlow()
 
+    private val _barVisible = kotlinx.coroutines.flow.MutableStateFlow(true)
+    val barVisible: StateFlow<Boolean> = _barVisible.asStateFlow()
+
+    fun setBarVisible(visible: Boolean) { _barVisible.value = visible }
+
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
 
