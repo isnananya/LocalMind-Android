@@ -196,7 +196,21 @@ object PluginAbilities {
         description = "一次导入多个人设",
     )
 
-            /**
+                /**
+     * 网页界面：zip 里带 web/index.html（可含 css/js）。
+     *
+     * 用 WebView 渲染，JS 桥只有四个动作：send / prompt / toast / copy。
+     * 适合活动页、可视化面板；主程序不执行网页里的任何原生代码。
+     */
+    val WEB_SCREEN = PluginAbility(
+        id = "web_screen",
+        label = "网页界面",
+        description = "用 HTML/CSS/JS 写整页，JS 桥可发消息/填输入框/复制",
+        contentFiles = setOf("web/index.html"),
+        implemented = true,
+    )
+
+/**
      * 代码插件：zip 里带一份 classes.dex，安装后由 DexClassLoader 加载。
      *
      * 这是本项目第一次开放**可执行代码**。风险由用户承担，所以安装前会弹一次
@@ -237,7 +251,7 @@ object PluginAbilities {
         id = "ui_theme",
         label = "界面主题",
         description = "自定义主色、圆角、字号、标签栏",
-        contentFiles = setOf("ui.json"),
+        contentFiles = setOf("ui.json", "theme.css"),
         implemented = true,
     )
 
@@ -285,7 +299,7 @@ object PluginAbilities {
     val ALL: List<PluginAbility> = listOf(
         EMOJI_PACK, MODEL_LIBRARY, MODEL_SOURCE, TTS_VOICE, TTS_ENGINE,
         NATIVE_BACKEND, REMOTE_PROVIDER, IMAGE_BACKEND, WEB_TOOL, MCP_SERVER,
-        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, CODE_PLUGIN, PIPELINE, API_ENDPOINT,
+        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, CODE_PLUGIN, WEB_SCREEN, PIPELINE, API_ENDPOINT,
     )
 
     fun fromId(id: String): PluginAbility? = ALL.firstOrNull { it.id == id }

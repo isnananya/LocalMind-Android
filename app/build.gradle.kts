@@ -31,8 +31,8 @@ android {
         //
         // ⚠️ 版本号按**发布批次**走，不是按我改了几轮走：这一批对外就叫 1.0.4（内测）。
         // 上一批 1.0.3 是 2026-10-17 发的那份。
-        versionCode = 7
-        versionName = "1.0.6(内测)"
+        versionCode = 9
+        versionName = "1.0.4(测试)"
 
         vectorDrawables.useSupportLibrary = true
 

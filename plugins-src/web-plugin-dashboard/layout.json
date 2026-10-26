@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "packId": "com.example.web.dashboard",
+  "packName": "网页首页",
+  "author": "你",
+  "description": "首页换成 web/index.html。",
+  "startTab": "home",
+  "tabs": [
+    {
+      "id": "home",
+      "label": "面板",
+      "icon": "sparkle"
+    },
+    {
+      "id": "chat",
+      "label": "对话",
+      "icon": "bubble"
+    },
+    {
+      "id": "models",
+      "label": "模型",
+      "icon": "memory"
+    },
+    {
+      "id": "me",
+      "label": "我的",
+      "icon": "person"
+    }
+  ],
+  "overrides": {
+    "home": "web:com.example.web.dashboard"
+  },
+  "screens": {}
+}

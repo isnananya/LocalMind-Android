@@ -227,8 +227,12 @@ fun LiquidGlassTabBar(
                                 src.width.toInt().coerceIn(1, bmp.width),
                                 src.height.toInt().coerceIn(1, bmp.height),
                             ),
-                            dstOffset = IntOffset.Zero,
-                            dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1)),
+                            // CPU 降级：轻微放大背景（镜头感）+ 边缘高光。真正折射要 AGSL。
+                            dstOffset = IntOffset(-3, -3),
+                            dstSize = IntSize(
+                                size.width.toInt().coerceAtLeast(1) + 6,
+                                size.height.toInt().coerceAtLeast(1) + 6,
+                            ),
                             filterQuality = FilterQuality.Low,
                         )
                     }

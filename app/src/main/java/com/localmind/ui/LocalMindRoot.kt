@@ -179,14 +179,28 @@ fun LocalMindRoot(
                     ) { page ->
                         val layout = uiLayout
                         val overrideId = layout?.overrides?.get(page)
-                        if (layout != null && overrideId != null) {
-                            PluginScreenPage(
-                                viewModel = viewModel,
-                                layout = layout,
-                                screenId = overrideId,
-                                fallbackTitle = page,
-                            )
-                        } else when (page) {
+                        when {
+                            overrideId != null && overrideId.startsWith("code:") -> {
+                                com.localmind.ui.design.PluginCodeScreen(
+                                    viewModel = viewModel,
+                                    pluginId = overrideId.removePrefix("code:"),
+                                )
+                            }
+                            overrideId != null && overrideId.startsWith("web:") -> {
+                                com.localmind.ui.design.PluginWebScreen(
+                                    viewModel = viewModel,
+                                    pluginId = overrideId.removePrefix("web:"),
+                                )
+                            }
+                            layout != null && overrideId != null -> {
+                                PluginScreenPage(
+                                    viewModel = viewModel,
+                                    layout = layout,
+                                    screenId = overrideId,
+                                    fallbackTitle = page,
+                                )
+                            }
+                            else -> when (page) {
                             "convdetail" -> {
                                 val conv = conversations.firstOrNull { it.id == activeConversationId }
                                 if (conv != null) {
@@ -211,6 +225,7 @@ fun LocalMindRoot(
                         }
                     }
                 }
+            }
 
                 val tabStyle = uiTokens["tabStyle"] ?: "glass"
                 val showLabels = (uiTokens["showTabBarLabels"] ?: "true").toBooleanStrictOrNull() ?: true

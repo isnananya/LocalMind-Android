@@ -90,10 +90,11 @@ object PluginInstall {
         val abi = com.localmind.service.NativeLibraryInstaller.currentAbi()
         val assetsDir = File(File(storage.pluginsDir, probeId), "assets")
         val codeDir = File(File(storage.pluginsDir, probeId), "code")
+        val webDir = File(File(storage.pluginsDir, probeId), "web")
         val libDir = File(storage.nativeDir, abi)
         // libAbi 必须一起传：通用包里有 lib/arm64-v8a 和 lib/x86_64 两份同名 .so，
         // 不按本机 ABI 选就会后一份覆盖前一份，最后校验失败、后端消失。
-        val contents = PluginArchive.read(file, assetsDir, libDir, abi, codeDir).getOrElse {
+        val contents = PluginArchive.read(file, assetsDir, libDir, abi, codeDir, webDir).getOrElse {
             return Outcome.Failed("展开压缩包失败：${it.message?.take(90)}")
         }
         if (contents.isEmpty) {
@@ -101,7 +102,14 @@ object PluginInstall {
         }
 
         val report = mutableListOf<String>()
+        val cssTheme = contents.text("theme.css")?.let { com.localmind.data.CssTheme.parse(it) }
 
+        if (cssTheme != null) {
+            report += "CSS 主题 " + (cssTheme.first.size + cssTheme.second.size) + " 项"
+        }
+        if (contents.web.isNotEmpty()) {
+            report += "网页界面 " + contents.web.size + " 个文件"
+        }
         if (contents.code.isNotEmpty()) {
             val dex = contents.code["classes.dex"]
             if (dex != null) {
@@ -258,6 +266,7 @@ object PluginInstall {
                 if (theme != null) add(PluginAbilities.UI_THEME.id)
                 if (layout != null) add(PluginAbilities.UI_LAYOUT.id)
                 if (pipes != null) add(PluginAbilities.PIPELINE.id)
+                if (contents.web.isNotEmpty()) add(PluginAbilities.WEB_SCREEN.id)
                 if (actions != null) add(PluginAbilities.CHAT_ACTION.id)
                 if (isEmpty()) {
                     return Outcome.Failed(
@@ -297,10 +306,12 @@ object PluginInstall {
             if (models != null) add("模型 ${models.models.size}")
             if (voices != null) add("音色 ${voices.voices.size}")
             if (theme != null) add("主题 ${theme.tokens.size} 项")
+            if (cssTheme != null) add("CSS ${cssTheme.first.size + cssTheme.second.size} 项")
             if (engines != null) add("语音引擎 ${engines.engines.size}")
             if (layout != null) add("布局 ${layout.home.size} 块")
             if (pipes != null) add("流水线 ${pipes.pipelines.size}")
             if (actions != null) add("动作 ${actions.actions.size}")
+            if (contents.web.isNotEmpty()) add("网页 ${contents.web.size} 个")
             if (contents.assets.isNotEmpty()) add("图片 ${contents.assets.size}")
         }
         storage.savePlugins(
@@ -330,8 +341,19 @@ object PluginInstall {
             val id = pack.packId.ifBlank { manifest.id }
             storage.saveVoicePacks(storage.loadVoicePacks() + (manifest.id to pack.copy(packId = id)))
         }
-        theme?.let { t ->
-            storage.saveUiThemes(storage.loadUiThemes() + (manifest.id to t.copy(packId = manifest.id)))
+        if (theme != null || cssTheme != null) {
+            val base = theme ?: com.localmind.data.UiTheme(
+                packId = manifest.id,
+                packName = manifest.name,
+                author = manifest.author,
+                description = manifest.description,
+            )
+            val merged = base.copy(
+                tokens = base.tokens + (cssTheme?.first.orEmpty()),
+                darkTokens = base.darkTokens + (cssTheme?.second.orEmpty()),
+                packId = manifest.id,
+            )
+            storage.saveUiThemes(storage.loadUiThemes() + (manifest.id to merged))
         }
         engines?.let { pack ->
             storage.saveTtsPacks(storage.loadTtsPacks() + (manifest.id to pack.copy(packId = manifest.id)))

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "packId": "com.example.code.tools",
+  "packName": "代码插件 · 工具页",
+  "author": "你",
+  "description": "首页换成插件 Java View。",
+  "startTab": "home",
+  "tabs": [
+    {
+      "id": "home",
+      "label": "工具页",
+      "icon": "bolt"
+    },
+    {
+      "id": "chat",
+      "label": "对话",
+      "icon": "bubble"
+    },
+    {
+      "id": "models",
+      "label": "模型",
+      "icon": "memory"
+    },
+    {
+      "id": "me",
+      "label": "我的",
+      "icon": "person"
+    }
+  ],
+  "overrides": {
+    "home": "code:com.example.code.tools"
+  },
+  "screens": {}
+}

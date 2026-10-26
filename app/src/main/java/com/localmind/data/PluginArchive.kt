@@ -59,6 +59,7 @@ object PluginArchive {
     private const val MAX_ENTRIES = 512
 
     private const val MAX_DEX_BYTES = 16L * 1024 * 1024
+    private const val MAX_WEB_BYTES = 8L * 1024 * 1024
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; prettyPrint = true }
 
@@ -78,6 +79,8 @@ object PluginArchive {
         val libs: Map<String, File> = emptyMap(),
         /** 代码插件：文件名 → 已落盘的 .dex。 */
         val code: Map<String, File> = emptyMap(),
+        /** 网页插件：相对路径 → 已落盘文件（web/ 下的 html/css/js）。 */
+        val web: Map<String, File> = emptyMap(),
         /** 被跳过的条目，用来在界面上如实告诉用户"我忽略了什么"。 */
         val skipped: List<String> = emptyList(),
         /**
@@ -88,7 +91,7 @@ object PluginArchive {
     ) {
         fun text(name: String): String? = files[name]
         val manifestText: String? get() = files[MANIFEST_FILE]
-        val isEmpty: Boolean get() = files.isEmpty() && assets.isEmpty() && libs.isEmpty() && code.isEmpty()
+        val isEmpty: Boolean get() = files.isEmpty() && assets.isEmpty() && libs.isEmpty() && code.isEmpty() && web.isEmpty()
     }
 
     /** 这个 zip 路径是插件的资源（`assets/` 下）。 */
@@ -133,6 +136,7 @@ object PluginArchive {
         libDir: File? = null,
         libAbi: String? = null,
         codeDir: File? = null,
+        webDir: File? = null,
     ): Result<Contents> = runCatching {
         require(zip.isFile) { "文件不存在：${zip.name}" }
         require(zip.length() > 0) { "文件是空的" }
@@ -141,6 +145,7 @@ object PluginArchive {
         val assets = mutableMapOf<String, File>()
         val libs = mutableMapOf<String, File>()
         val code = mutableMapOf<String, File>()
+        val web = mutableMapOf<String, File>()
         val otherAbis = mutableSetOf<String>()
         val skipped = mutableListOf<String>()
         var entries = 0
@@ -168,11 +173,34 @@ object PluginArchive {
                 val isAsset = PluginAbilities.isAsset(raw)
                 val isLib = isLibPath(raw)
                 val isDex = base.endsWith(".dex", ignoreCase = true)
+                val isWeb = raw.startsWith("web/") && raw.length > 4
                 val isKnownText = base == MANIFEST_FILE || base in DOC_FILES ||
                     PluginAbilities.ALL.any { PluginAbilities.matchesContent(it, raw) }
 
-                if (!isKnownText && !isAsset && !isLib && !isDex) {
+                if (!isKnownText && !isAsset && !isLib && !isDex && !isWeb) {
                     skipped += raw
+                    continue
+                }
+
+                // 网页插件：web/ 下的文件按相对路径落盘（html/css/js 可能互相引用）。
+                if (isWeb) {
+                    if (webDir == null) {
+                        skipped += raw + "（未提供网页目录）"
+                        continue
+                    }
+                    if (entry.size > MAX_WEB_BYTES) {
+                        skipped += raw + "（超过 " + MAX_WEB_BYTES / 1024 / 1024 + " MB）"
+                        continue
+                    }
+                    val rel = raw.removePrefix("web/")
+                    if (rel.contains("..")) {
+                        skipped += raw + "（路径不安全）"
+                        continue
+                    }
+                    val out = File(webDir, rel)
+                    out.parentFile?.mkdirs()
+                    out.outputStream().use { os -> zis.copyTo(os) }
+                    web[rel] = out
                     continue
                 }
 
@@ -315,6 +343,7 @@ object PluginArchive {
             assets = assets,
             libs = libs,
             code = code,
+            web = web,
             skipped = skipped,
             otherAbis = otherAbis,
         )

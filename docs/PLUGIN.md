@@ -4,7 +4,8 @@
 > 外观令牌参考见 [UI-PLUGIN.md](UI-PLUGIN.md)。
 
 > 一个插件 = **一个 zip + 几份 JSON**。
-> 不执行任何代码，所以"装个插件"永远不等于"装个后门"。
+> **默认只处理数据**；带 `classes.dex` 的代码插件会在安装前单独确认，
+> 以主程序权限运行 —— 只装你信任的来源。
 >
 > 这份文档面向"会改 JSON、不想写代码"的人。所有字段名、默认值、取值范围、
 > 报错原文都来自源码，不是概述。
@@ -19,7 +20,7 @@
 | 2 | 用户只做一个动作：**选一个 zip** | 是表情包还是模型库，由程序按内容判断，不用用户先想清楚 |
 | 3 | zip 必须**扁平**：`plugin.json` 在压缩包**根目录** | 这是第一大坑，见 §2 |
 | 4 | 表情包 = **图片梗图**，`char`（emoji）只是兜底 | 两者都给时图片优先 |
-| 5 | 界面插件只能改**声明式令牌**，不能写代码 | 插件能改配色/圆角/字号，改不了逻辑 |
+| 5 | 界面插件默认只改**声明式令牌**；逻辑要写代码就走 `code_plugin` | 令牌改配色/圆角/底栏；需要逻辑时用 dex 插件（要用户确认） |
 | 6 | 越界数值会被**夹住**，颜色写错**回退默认** | 你的 JSON 写得再糙也不会把应用弄崩 |
 | 7 | 不认识的能力 id、不认识的令牌键会被**报出来** | 不会静默吞掉，你会知道自己写错了 |
 | 8 | 文本单文件 ≤ 1 MB，单张图 ≤ 8 MB，全部图片 ≤ 120 MB，条目 ≤ 512 | 超出的会被跳过，跳过几项会在安装结果里说明 |
@@ -156,7 +157,8 @@
 
 * 路径里出现 `..` 或以 `/` 开头 → 该条目直接跳过（防 zip-slip）；
 * 资源文件**只取文件名**，不接受任何目录穿越；
-* **不执行任何代码**：zip 里没有"可执行文件"这个概念，主程序也没有 `DexClassLoader`。
+* **默认不执行代码**：数据类插件没有任何可执行文件。带 `classes.dex` 的代码插件
+  是显式开启的第二条路，安装时会弹确认框，且异常只停用该插件。
 
 ---
 
@@ -242,6 +244,8 @@
 | `ui_theme` | 界面主题 | `ui.json` | ✅ 是 | 换主色/圆角/字号/导航外观 |
 | `ui_layout` | 界面布局 | `layout.json` | ✅ 是 | 换底栏入口、首页块；`screens`/`overrides` 可整页替换内置页面 |
 | `chat_action` | 聊天动作 | `actions.json` | ✅ 是 | 输入框上方出现一键提示词动作 |
+| `code_plugin` | 代码插件 | `classes.dex` | ✅ 是（需用户确认） | 加载 Java 代码，可注册动作 / 提供整页 View |
+| `web_screen` | 网页界面 | `web/index.html` | ✅ 是 | 用 HTML/CSS/JS 写整页，JS 桥可发消息/复制 |
 | `pipeline` | 分步流水线 | `pipeline.json` | ✅ 是 | 把长任务拆成小步逐段跑 |
 | `remote_provider` | 云端服务 | 无 | ❌ 否（仅声明） | 目前只有界面标签，没有行为 |
 | `image_backend` | 生图后端 | 无 | ❌ 否（仅声明） | 同上 |
@@ -630,12 +634,13 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 
 ## 8. `ui.json` —— 界面主题
 
-### 8.1 为什么界面插件不能写代码
+### 8.1 为什么界面插件用令牌，而不是直接写 Compose 代码
 
-这一层能改整个应用的外观和导航，听起来应该让插件直接写 Compose 代码。
-不行 —— 那就等于把 `DexClassLoader` 请回来，而**"装个插件"会立刻变成
-"装个后门"**：动态加载的代码拥有和主程序一样的权限，可以读你的聊天记录、
-上传文件、静默联网。而"改个主色、改个圆角、藏掉一个标签页"根本不需要执行代码。
+外观和导航需要的是**声明**，不是逻辑：主色、圆角、字号、底栏形状都是值，
+写成令牌可校验、可叠加、可回退，插件写错也不会崩。
+
+需要逻辑的插件走独立的 `code_plugin`（见 §9.1）：那是显式安装、显式确认、
+可单独停用的另一条路。两条路分开，审计边界才清楚。
 
 所以做成**声明式令牌**：插件只能从一份**固定名单**里挑值。三个好处：
 
@@ -858,6 +863,125 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 
 ---
 
+## 9.1 `code_plugin` —— 代码插件（classes.dex）
+
+> ⚠️ 这是唯一会**执行代码**的能力。安装时会弹确认；加载/运行异常只把该插件停用。
+
+### 清单
+
+```json
+{
+  "id": "com.example.tools",
+  "name": "工具页",
+  "abilities": ["code_plugin", "ui_layout"],
+  "config": {
+    "entryClass": "com.example.tools.ToolsPlugin",
+    "viewClass": "com.example.tools.ToolsView"
+  }
+}
+```
+
+### 入口接口
+
+`com.localmind.plugin.PluginEntry`（纯 String，不需要 Android）：
+
+* `id(): String`
+* `onLoad(ctx: PluginContext)` —— 在这里 `ctx.registerAction(id, label)`
+* `onAction(actionId: String, input: String): String?` —— 返回要发送的文本
+
+`PluginContext`：`log` / `toast` / `registerAction`。
+
+### 整页 View
+
+清单里的 `config.viewClass` 指定一个继承 `android.view.View`、带
+`(Context)` 构造器的类。再配一个 `ui_layout` 插件，把某页 overrides 到：
+
+```json
+"overrides": { "home": "code:com.example.tools" }
+```
+
+主程序只负责把 View 放进页面，页面内容完全由插件绘制。
+
+### 编译
+
+1. `javac` 编译插件类（实现 PluginEntry 的类 + 可选 View 类）；
+2. `d8 --lib android.jar --min-api 26 --output dex <classes>`；
+3. zip 根目录放 `plugin.json` + `classes.dex`（可以有多个 class）。
+
+安卓 14+ 要求 dex **只读**；应用在安装/加载时会自动 `setReadOnly()`。
+
+示例：`plugins-src/code-plugin-tools`（动作 + View + layout）。
+
+## 9.2 `web_screen` —— 网页界面（HTML/CSS/JS）
+
+zip 里放：
+
+```
+plugin.json
+layout.json
+web/index.html
+web/style.css
+web/app.js
+```
+
+`abilities` 写 `["web_screen", "ui_layout"]`，overrides 写：
+
+```json
+"overrides": { "home": "web:com.example.web.dashboard" }
+```
+
+网页加载后可以用 JS 桥：
+
+```js
+LM.post(JSON.stringify({ action: 'send', text: '你好' }));
+LM.post(JSON.stringify({ action: 'prompt', text: '帮我写一段周报：' }));
+LM.post(JSON.stringify({ action: 'toast', text: '提示' }));
+LM.post(JSON.stringify({ action: 'copy', text: '复制内容' }));
+```
+
+边界：网页没有文件/网络/原生 API，只能通过这四个动作影响主程序。
+CSS/JS 随便写，包括动画、渐变、暗色模式。
+
+示例：`plugins-src/web-plugin-dashboard`。
+
+## 9.3 `theme.css` —— 用 CSS 写主题
+
+`ui_theme` 除了 `ui.json`，也可以只放一份 `theme.css`：
+
+```css
+:root {
+  --accent: #2E6BE6;
+  --card-corner: 24;
+  --tab-bar-shape: capsule;
+  --tab-bar-margin: 16;
+  --tab-bar-lift: 6;
+  --tab-bar-tint: #F2F6FB;
+  --tab-bar-indicator: capsule;
+  --tab-bar-blur: 100;
+}
+.dark {
+  --dark-accent: #6C9BFF;
+  --dark-grouped-background: #070A0F;
+}
+```
+
+规则：`--令牌名: 值;`；深色用 `dark-` 前缀；kebab-case 会转成令牌的 camelCase。
+只支持变量声明，不实现选择器/层叠/媒体查询。
+
+### 底栏可调令牌（1.0.4 测试通道起）
+
+| 令牌 | 取值 |
+| --- | --- |
+| `tabBarShape` | capsule / rounded / square |
+| `tabBarMargin` | 0–48 dp |
+| `tabBarLift` | 0–40 dp |
+| `tabBarBlur` | 0–100（0 = 不模糊） |
+| `tabBarTint` | 颜色（浅色/深色各一份） |
+| `tabBarIndicator` | capsule / underline / dot / none |
+| `tabStyle` | glass / plain / hidden |
+
+---
+
 ## 10. 打包与测试
 
 ### 10.1 写文件
@@ -1025,7 +1149,8 @@ LocalMind 主程序是 MIT。把参考了 GPL 实现的代码内置进来，会�
 * **能力以插件形式分发**：用户自己决定装不装，插件本身是纯数据、不含任何 GPL 代码。
 
 **授权边界和代码边界重合，两边都干净。** 这条设计不是随手定的，改动前请先想清楚
-它为什么在这里 —— 这也是为什么"界面插件只能改令牌、不能注入代码"必须是硬规则。
+它为什么在这里。代码插件是后来新增的能力：它不改变这条边界，而是把"可执行"
+单独做成一个需要用户确认的能力。
 
 ---
 

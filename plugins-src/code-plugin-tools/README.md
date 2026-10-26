@@ -3,6 +3,8 @@
 这个插件里没有 JSON 数据能力，只有一份 **classes.dex**：安装时会提示
 「可执行代码，谨慎安装」，确认后由 DexClassLoader 加载。
 
+还会提供一个整页 Java View（home 标签），由 `layout.json` 的 `code:` override 挂上去。
+
 加载后注册两个聊天动作：
 
 * 转成大写：把输入框里的文字转大写后发送；
@@ -19,6 +21,11 @@ d8 --lib $ANDROID_HOME/platforms/android-35/android.jar --min-api 26 --output de
 ```
 
 3. zip 根目录放 `plugin.json` + `classes.dex`，导入。
+
+## 整页 View
+
+`ToolsView` 继承 LinearLayout，`(Context)` 构造器；清单里的 `config.viewClass` 指向它。
+`layout.json` 把 home override 成 `code:com.example.code.tools`。
 
 ## 边界
 

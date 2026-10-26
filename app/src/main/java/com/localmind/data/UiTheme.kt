@@ -681,3 +681,36 @@ object UiPresets {
             p.darkTokens.all { (k, v) -> overrides[Preset.DARK_PREFIX + k] == v }
     }
 }
+
+/**
+ * theme.css：用 CSS 自定义属性写主题令牌。
+ *
+ * 只认 `--令牌名: 值;`，不实现选择器/层叠/媒体查询 —— 这是"用熟悉的语法写令牌"，
+ * 不是浏览器。深色令牌用 `--dark-accent` 这类前缀。
+ */
+object CssTheme {
+
+    private val VAR = Regex("--([a-zA-Z0-9-]+)\\s*:\\s*([^;]+);")
+
+    fun parse(text: String): Pair<Map<String, String>, Map<String, String>> {
+        val clean = text.replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+        val light = LinkedHashMap<String, String>()
+        val dark = LinkedHashMap<String, String>()
+        VAR.findAll(clean).forEach { m ->
+            val rawName = m.groupValues[1]
+            val value = m.groupValues[2].trim().removeSuffix("!important").trim()
+            if (value.isEmpty()) return@forEach
+            val isDark = rawName.startsWith("dark-")
+            val key = camel(if (isDark) rawName.removePrefix("dark-") else rawName)
+            if (UiTokens.byKey.containsKey(key)) {
+                if (isDark) dark[key] = value else light[key] = value
+            }
+        }
+        return light to dark
+    }
+
+    private fun camel(name: String): String =
+        name.split('-').filter { it.isNotEmpty() }
+            .mapIndexed { i, s -> if (i == 0) s else s.replaceFirstChar { it.uppercaseChar() } }
+            .joinToString("")
+}

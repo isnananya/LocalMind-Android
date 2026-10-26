@@ -238,7 +238,10 @@ object Layouts {
                 )
             }
         }
-        val badOverrides = layout.overrides.filter { (screen, id) -> screen !in SCREENS || id !in layout.screens }
+        val badOverrides = layout.overrides.filter { (screen, id) ->
+            screen !in SCREENS ||
+                (id !in layout.screens && !id.startsWith("code:") && !id.startsWith("web:"))
+        }
         if (badOverrides.isNotEmpty()) {
             return ParseResult.Failed(
                 "overrides 只能指向内置页面和 screens 里的页：" +

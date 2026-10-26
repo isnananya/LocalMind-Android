@@ -64,3 +64,14 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+
+# 插件 API：外部 classes.dex 按这些名字实现/引用，R8 不能改名
+-keep interface com.localmind.plugin.** { *; }
+-keep class com.localmind.plugin.** { *; }
+
+# 网页插件：@JavascriptInterface 方法必须保留
+-keepattributes JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

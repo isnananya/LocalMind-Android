@@ -4,7 +4,8 @@
 
 * `ui_theme`：整套冷雾蓝外观（浅色/深色）；
 * `ui_layout`：底栏 4 个入口 + `screens.today` 自定义首页（用 `overrides` 覆盖 home）；
-* `chat_action`：输入框上方的两个快捷动作（译成英文 / 说短一点）。
+* `chat_action`：输入框上方的两个快捷动作（译成英文 / 说短一点）；
+* `theme.css`：同一套令牌的 CSS 写法，并演示底栏形状/留白/指示器。
 
 ## 安装
 

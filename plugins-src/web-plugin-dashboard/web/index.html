@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero glass">
+      <div class="dot"></div>
+      <h1>网页插件</h1>
+      <p>这一整页是 HTML + CSS + JS，主程序只提供宿主的 WebView 和四个桥接动作。</p>
+    </section>
+
+    <section class="grid">
+      <button class="card" onclick="sendHello()">
+        <span class="ico">💬</span>
+        <b>发一句你好</b>
+        <small>LM.post({action:'send'})</small>
+      </button>
+      <button class="card" onclick="fillPrompt()">
+        <span class="ico">✍️</span>
+        <b>填进输入框</b>
+        <small>LM.post({action:'prompt'})</small>
+      </button>
+      <button class="card" onclick="copyText()">
+        <span class="ico">📋</span>
+        <b>复制一句话</b>
+        <small>LM.post({action:'copy'})</small>
+      </button>
+      <button class="card" onclick="toastIt()">
+        <span class="ico">✨</span>
+        <b>弹一个提示</b>
+        <small>LM.post({action:'toast'})</small>
+      </button>
+    </section>
+
+    <p class="foot">CSS 动效、渐变、暗色模式都在 style.css 里，改完重新导入即可。</p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

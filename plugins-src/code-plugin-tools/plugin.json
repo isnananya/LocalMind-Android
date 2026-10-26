@@ -3,12 +3,14 @@
   "name": "示例：代码插件",
   "version": "1.0.0",
   "author": "你",
-  "description": "用 Java 注册两个聊天动作（转成大写 / 润色一下），演示 classes.dex 插件。",
+  "description": "用 Java 注册聊天动作，并提供一个整页 View 替换首页。",
   "abilities": [
-    "code_plugin"
+    "code_plugin",
+    "ui_layout"
   ],
   "config": {
-    "entryClass": "com.example.tools.ToolsPlugin"
+    "entryClass": "com.example.tools.ToolsPlugin",
+    "viewClass": "com.example.tools.ToolsView"
   },
   "requires": [],
   "manifestVersion": 1

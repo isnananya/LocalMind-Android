@@ -1,0 +1,23 @@
+:root {
+  --accent: #2E6BE6;
+  --accent-on: #FFFFFF;
+  --grouped-background: #F3F6FA;
+  --card-background: #FFFFFF;
+  --label: #0D1320;
+  --secondary-label: #8A5A6472;
+  --card-corner: 24;
+  --control-corner: 16;
+  --tab-bar-shape: capsule;
+  --tab-bar-margin: 16;
+  --tab-bar-lift: 6;
+  --tab-bar-tint: #F2F6FB;
+  --tab-bar-indicator: capsule;
+  --tab-bar-blur: 100;
+}
+.dark {
+  --dark-accent: #6C9BFF;
+  --dark-grouped-background: #070A0F;
+  --dark-card-background: #12161E;
+  --dark-label: #F2F5FA;
+  --dark-tab-bar-tint: #171A20;
+}

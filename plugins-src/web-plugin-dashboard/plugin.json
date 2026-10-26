@@ -1,0 +1,13 @@
+{
+  "id": "com.example.web.dashboard",
+  "name": "示例：网页首页",
+  "version": "1.0.0",
+  "author": "你",
+  "description": "用 HTML/CSS/JS 写首页，通过 JS 桥发消息/复制/提示。",
+  "abilities": [
+    "web_screen",
+    "ui_layout"
+  ],
+  "requires": [],
+  "manifestVersion": 1
+}
