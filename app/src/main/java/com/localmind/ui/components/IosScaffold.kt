@@ -54,53 +54,64 @@ fun IosNavigationBar(
 ) {
     val ios = IosTheme.palette
     val metrics = IosTheme.metrics
-    // 标题位置来自主题令牌（navTitleAlign）。之前这个令牌是死的：
-    // 声明了、解析了、没人读，标题恒为居中。
     val alignLeading = com.localmind.ui.theme.LocalUiTokens.current["navTitleAlign"] == "leading"
     val titleStyle = IosTheme.typography.headline
+    val glassSupported = com.localmind.ui.design.rememberLiquidGlassSupport()
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(ios.barBackground)
-    ) {
-        Spacer(Modifier.height(topInset))
-        Row(
+    Box(Modifier.fillMaxWidth()) {
+        if (glassSupported) {
+            com.localmind.ui.design.LiquidGlassLayer(
+                modifier = Modifier.matchParentSize(),
+                cornerRadius = 0.dp,
+                refractionHeight = 12.dp,
+                blurRadius = 4f,
+                tint = ios.barBackground,
+                tintAlpha = if (ios.isDark) 0.10f else 0.06f,
+            )
+        }
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(metrics.navBarHeight)
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (alignLeading) Arrangement.Start else Arrangement.Center,
+                .background(if (glassSupported) Color.Transparent else ios.barBackground)
         ) {
-            Box(Modifier.width(84.dp), contentAlignment = Alignment.CenterStart) {
-                if (leading != null) leading() else Spacer(Modifier.width(1.dp))
-            }
-            Box(
-                Modifier.weight(1f),
-                contentAlignment = if (alignLeading) Alignment.CenterStart else Alignment.Center,
+            Spacer(Modifier.height(topInset))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(metrics.navBarHeight)
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (alignLeading) Arrangement.Start else Arrangement.Center,
             ) {
-                if (collapsed) {
-                    Text(
-                        text = title,
-                        style = titleStyle,
-                        color = ios.label,
-                        maxLines = 1,
-                        modifier = if (alignLeading) Modifier.padding(start = 4.dp) else Modifier,
-                    )
+                Box(Modifier.width(84.dp), contentAlignment = Alignment.CenterStart) {
+                    if (leading != null) leading() else Spacer(Modifier.width(1.dp))
+                }
+                Box(
+                    Modifier.weight(1f),
+                    contentAlignment = if (alignLeading) Alignment.CenterStart else Alignment.Center,
+                ) {
+                    if (collapsed) {
+                        Text(
+                            text = title,
+                            style = titleStyle,
+                            color = ios.label,
+                            maxLines = 1,
+                            modifier = if (alignLeading) Modifier.padding(start = 4.dp) else Modifier,
+                        )
+                    }
+                }
+                Box(Modifier.width(84.dp), contentAlignment = Alignment.CenterEnd) {
+                    if (trailing != null) trailing()
                 }
             }
-            Box(Modifier.width(84.dp), contentAlignment = Alignment.CenterEnd) {
-                if (trailing != null) trailing()
+            if (metrics.barBorderWidth > 0.dp) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(metrics.barBorderWidth)
+                        .background(if (collapsed) ios.barBorder else Color.Transparent)
+                )
             }
-        }
-        if (metrics.barBorderWidth > 0.dp) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(metrics.barBorderWidth)
-                    .background(if (collapsed) ios.barBorder else Color.Transparent)
-            )
         }
     }
 }

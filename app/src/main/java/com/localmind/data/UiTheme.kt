@@ -203,6 +203,11 @@ object UiTokens {
         note = "capsule（玻璃胶囊）/ underline（下划线）/ dot（圆点）/ none",
     )
 
+    val uiKit = UiToken(
+        "uiKit", "液态玻璃组件库", TokenType.ENUM, "auto",
+        note = "auto（硬件支持则用 AndroidLiquidGlassView）/ library（强制组件库）/ compose（用内置降级）",
+    )
+
     val tabStyle = UiToken(
         "tabStyle", "标签栏样式", TokenType.ENUM, "glass",
         note = "glass（毛玻璃）/ plain（不透明）/ hidden（藏起来，但标签只剩一个时忽略）",
@@ -230,7 +235,7 @@ object UiTokens {
         bodySize, fontScale,
         // 导航与标签栏
         tabStyle, showTabBarLabels, navTitleAlign,
-        tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator,
+        tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator, uiKit,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }
@@ -241,6 +246,7 @@ object UiTokens {
         navTitleAlign.key to setOf("center", "leading"),
         tabBarShape.key to setOf("capsule", "rounded", "square"),
         tabBarIndicator.key to setOf("capsule", "underline", "dot", "none"),
+        uiKit.key to setOf("auto", "library", "compose"),
     )
 
     /** 合法的标签页 id。 */

@@ -58,6 +58,8 @@ import com.localmind.ui.Tab
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.motion.Motion
 import com.localmind.ui.theme.IosTheme
+import com.localmind.ui.design.LiquidGlassLayer
+import com.localmind.ui.design.rememberLiquidGlassSupport
 import com.localmind.ui.theme.LocalUiTokens
 import com.localmind.ui.theme.parseHexColor
 import kotlinx.coroutines.isActive
@@ -199,7 +201,15 @@ fun LiquidGlassTabBar(
                     barPos = IntOffset(p.x.toInt(), p.y.toInt())
                 },
         ) {
-            if (shader != null) {
+            val useLiquidGlass = rememberLiquidGlassSupport()
+            if (useLiquidGlass) {
+                LiquidGlassLayer(
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = corner,
+                    tint = tint,
+                    tintAlpha = if (ios.isDark) 0.16f else 0.06f,
+                )
+            } else if (shader != null) {
                 Canvas(Modifier.fillMaxSize()) {
                     drawIntoCanvas { canvas ->
                         val paint = Paint().apply {

@@ -47,3 +47,13 @@ LocalMind 自身代码以 **MIT** 发布（见仓库根目录 [LICENSE](../LICEN
 
 * 表情包插件里的图片素材，其授权由**插件作者**负责；
 * 第三方插件的行为与内容由插件作者负责，安装前请阅读其 README。
+
+
+## AndroidLiquidGlassView（MIT）
+
+- 项目：https://github.com/QmDeve/AndroidLiquidGlassView
+- 文档：https://liquidglass.qmdeve.com/zh/
+- 版权：Copyright (c) 2025-2026 Donny Yale
+- 用途：底栏/导航栏的液态玻璃（RenderEffect + RuntimeShader 折射、色散、模糊）。
+- 依赖版本：`com.qmdeve.liquidglass:core:1.0.2`（1.1.0 要求 compileSdk 37，工程当前 35）。
+- 只在 Android 13+ 硬件渲染时启用；模拟器软渲染自动回退到内置实现。

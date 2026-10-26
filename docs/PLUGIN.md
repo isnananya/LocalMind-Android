@@ -979,6 +979,7 @@ CSS/JS 随便写，包括动画、渐变、暗色模式。
 | `tabBarTint` | 颜色（浅色/深色各一份） |
 | `tabBarIndicator` | capsule / underline / dot / none |
 | `tabStyle` | glass / plain / hidden |
+| `uiKit` | auto / library / compose（组件库玻璃 / 内置降级） |
 
 ---
 

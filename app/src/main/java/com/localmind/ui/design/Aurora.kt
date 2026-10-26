@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import com.localmind.ui.components.pressScale
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.motion.Motion
+import com.localmind.ui.design.LiquidGlassLayer
+import com.localmind.ui.design.rememberLiquidGlassSupport
 import com.localmind.ui.theme.IosTheme
 
 /**
@@ -125,7 +127,23 @@ fun AuroraNavBar(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val ios = IosTheme.palette
-    Column(modifier.fillMaxWidth().background(ios.groupedBackground.copy(alpha = 0.94f))) {
+    val glassSupported = rememberLiquidGlassSupport()
+    Box(modifier.fillMaxWidth()) {
+        if (glassSupported) {
+            LiquidGlassLayer(
+                modifier = Modifier.matchParentSize(),
+                cornerRadius = 0.dp,
+                refractionHeight = 12.dp,
+                blurRadius = 4f,
+                tint = ios.groupedBackground,
+                tintAlpha = if (ios.isDark) 0.10f else 0.06f,
+            )
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(if (glassSupported) Color.Transparent else ios.groupedBackground.copy(alpha = 0.94f))
+        ) {
         Spacer(Modifier.height(com.localmind.ui.components.statusBarTopPadding()))
         Row(
             Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 12.dp),
@@ -153,6 +171,7 @@ fun AuroraNavBar(
             }
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(ios.separator))
+        }
     }
 }
 
