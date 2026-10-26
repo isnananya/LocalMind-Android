@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateOf
 import com.localmind.BuildConfig
 import com.localmind.ui.components.IosNavigationBar
 import com.localmind.ui.components.IosSection
@@ -112,6 +113,47 @@ fun AboutScreen(onBack: () -> Unit, onOpenDebug: () -> Unit = {}) {
                                 "如果它对你有点用，那就是它存在的意义。",
                             style = IosTheme.typography.footnote,
                             color = ios.secondaryLabel,
+                        )
+                    }
+                }
+            }
+
+            // -------------------------------------------------- 支持作者
+            //
+            // 赞赏码是作者自己的收款码，图片自带说明文字，所以这里不再解释"这是什么"。
+            // 点一下放大，方便对方用另一台设备扫。深色模式下垫一层白底：这张图本身
+            // 是白底海报，直接贴在黑背景上会变成一块刺眼的白方块。
+            item {
+                var showQr by remember { mutableStateOf(false) }
+                IosSection(header = "支持作者", footer = "扫码赞赏，金额随意。") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(com.localmind.R.drawable.author_reward),
+                            contentDescription = "作者的赞赏码",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier
+                                .width(300.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(androidx.compose.ui.graphics.Color.White)
+                                .clickable { showQr = true },
+                        )
+                    }
+                }
+                if (showQr) {
+                    androidx.compose.ui.window.Dialog(onDismissRequest = { showQr = false }) {
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(com.localmind.R.drawable.author_reward),
+                            contentDescription = "作者的赞赏码",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable { showQr = false },
                         )
                     }
                 }

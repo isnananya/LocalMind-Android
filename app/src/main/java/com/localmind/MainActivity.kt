@@ -1,14 +1,11 @@
 package com.localmind
 
-import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -18,12 +15,8 @@ import com.localmind.ui.theme.LocalMindTheme
 
 class MainActivity : ComponentActivity() {
 
-    /** onCreate 里赋值，requestBasePermissions 与 onDestroy 都要用。 */
+    /** onCreate 里赋值，onResume / onDestroy 都要用。 */
     private lateinit var app: LocalMindApp
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* results surface through the feature screens themselves */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,8 +27,6 @@ class MainActivity : ComponentActivity() {
         if (app.storage.keepScreenOn()) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-
-        requestBasePermissions()
 
         setContent {
             // 深浅色：以用户选的 theme_mode 为准，system 就跟系统走。
@@ -102,32 +93,4 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /**
-     * 启动时只申请**通知**权限，不申请麦克风。
-     *
-     * 麦克风改成"按住说话时才申请"（见 VoiceScreen）。理由：全新安装的第一次打开，
-     * 用户看到的第一个东西如果是「允许 LocalMind 录音吗？」，他还没搞清楚这个应用
-     * 是干什么的就会被问要不要交出麦克风 —— 拒绝是正常反应，而一旦拒绝，系统就
-     * 不再弹了，语音功能等于永久失效，他只会觉得"语音是坏的"。
-     *
-     * 通知权限留着：它只在开启「本机 API 服务」时才有实际作用，但那个时间点
-     * 太深了，用户不会主动去找；而这个弹窗本身不含隐私含义。
-     */
-    private fun requestBasePermissions() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        // ⚠️ 通知权限**一辈子只问一次**。
-        //
-        // Android 13+ 的 POST_NOTIFICATIONS 与别的权限不同：用户点了「不允许」
-        // 之后系统**还会**再弹，所以「每次启动都申请」的真实表现是
-        // **每次打开应用都弹同一个窗**（模拟器实测：第一次拒绝，第二次启动照弹）。
-        // 用户对这个的解读只有一个 —— 这软件像广告。
-        //
-        // 弹窗本身确实没有隐私含义，但它要有意义：只有开了「本机 API 服务」
-        //（前台服务要挂通知）才用得上，所以问到一次就够了，之后想开去系统设置。
-        val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (granted || app.storage.notificationAsked()) return
-        app.storage.setNotificationAsked()
-        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-    }
 }

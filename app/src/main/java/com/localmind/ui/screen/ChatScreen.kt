@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,7 +87,7 @@ import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.icons.AppIconsAutoMirrored
 import com.localmind.ui.motion.Motion
 import com.localmind.ui.motion.appearIn
-import com.localmind.ui.motion.pressScale
+import com.localmind.ui.components.pressScale
 import com.localmind.ui.theme.IosTheme
 import com.localmind.util.Formatters
 import com.localmind.util.TextUtils
@@ -101,354 +102,7 @@ import java.util.Locale
  */
 @Composable
 fun ChatScreen(viewModel: AppViewModel, sharedText: String? = null) {
-    val inChat by viewModel.inChat.collectAsState()
-
-    if (inChat) {
-        ChatThread(viewModel, sharedText)
-    } else {
-        ConversationList(viewModel)
-    }
-}
-
-/* ------------------------------------------------------------------ list */
-
-@Composable
-private fun ConversationList(viewModel: AppViewModel) {
-    val ios = IosTheme.palette
-    val conversations by viewModel.conversations.collectAsState()
-    val engineState by viewModel.engineState.collectAsState()
-    val backend by viewModel.backend.collectAsState()
-    // 新建对话要先选类型，见下面的 Dialog。
-    var creating by remember { mutableStateOf(false) }
-    val providers by viewModel.providers.collectAsState()
-    // Each row shows the persona the thread belongs to, so the list reflects "who
-    // you were talking to" instead of one generic glyph for every conversation.
-    val personas by viewModel.personas.collectAsState()
-    val activePersonaId by viewModel.activePersonaId.collectAsState()
-    val fallbackPersona = remember(personas, activePersonaId) {
-        personas.firstOrNull { it.id == activePersonaId } ?: PersonaPresets.default
-    }
-
-    var query by remember { mutableStateOf("") }
-    val remote = providers.firstOrNull { it.id == backend && it.enabled }
-
-    val filtered = remember(conversations, query) {
-        if (query.isBlank()) conversations
-        else conversations.filter { conv ->
-            conv.title.contains(query, true) ||
-                conv.messages.any { it.content.contains(query, true) }
-        }
-    }.sortedByDescending { it.updatedAt }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(ios.groupedBackground)
-    ) {
-        IosNavigationBar(
-            title = "对话",
-            collapsed = true,
-            topInset = statusBarTopPadding(),
-            leading = {
-                Icon(
-                    AppIcons.Tune,
-                    contentDescription = "设置",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(23.dp)
-                        .clickable { viewModel.openSettings(true) },
-                )
-            },
-            trailing = {
-                Icon(
-                    AppIcons.Add,
-                    contentDescription = "新对话",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clickable { creating = true },
-                )
-            },
-        )
-        IosLargeTitle("对话")
-
-        // Search field, iOS style
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 10.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(ios.fillSecondary)
-                .padding(horizontal = 9.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(AppIcons.Search, contentDescription = null, tint = ios.tertiaryLabel, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Box(Modifier.weight(1f)) {
-                if (query.isEmpty()) {
-                    Text("搜索", style = IosTheme.typography.subheadline, color = ios.tertiaryLabel)
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    textStyle = LocalTextStyle.current.merge(IosTheme.typography.subheadline).copy(color = ios.label),
-                    cursorBrush = SolidColor(ios.blue),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-
-        // Which engine will answer — one quiet line, not a banner.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val ready = engineState.canChat
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(
-                        when {
-                            remote != null -> ios.indigo
-                            ready -> ios.green
-                            else -> ios.orange
-                        }
-                    )
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = when {
-                    remote != null -> "云端 · ${remote.name} / ${remote.model}"
-                    ready -> "本地 · ${engineState.modelName}"
-                    else -> "未加载本地模型"
-                },
-                style = IosTheme.typography.caption1,
-                color = ios.secondaryLabel,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (!ready && remote == null) {
-                Text(
-                    "去加载",
-                    style = IosTheme.typography.caption1,
-                    color = ios.blue,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable { viewModel.selectTab(Tab.MODELS) },
-                )
-            }
-        }
-
-        // ---- 新建对话：**先选类型，再创建** ----
-        //
-        // 两种对话是两种东西（AI 对话无人设、要最快；人设聊天有人机恋那套
-        // 记忆与情绪），而且**建好之后不能改** —— 切换类型要处理"已有的记忆
-        // 怎么办"，那是个产品难题，不如在建的时候问一次。
-        //
-        // 用 Dialog 而不是自己画浮层：它是独立窗口，不参与这一页的布局，
-        // 也就不需要把整个函数包进一个 Box 里。
-        if (creating) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { creating = false }) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(ios.secondaryGroupedBackground)
-                        .padding(18.dp),
-                ) {
-                    Text("新对话", style = IosTheme.typography.title3, color = ios.label)
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        "类型建好之后不能改",
-                        style = IosTheme.typography.caption1,
-                        color = ios.secondaryLabel,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    CreateKindRow(
-                        title = "AI 对话",
-                        subtitle = "无人设、不留记忆，直接调模型 —— 最快",
-                        tint = ios.blue,
-                    ) {
-                        creating = false
-                        viewModel.newConversation(com.localmind.data.ChatMode.AI)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    CreateKindRow(
-                        title = "人设聊天",
-                        subtitle = "有名字、有记忆、有情绪，像在和一个具体的人相处",
-                        tint = ios.pink,
-                    ) {
-                        creating = false
-                        viewModel.newConversation(com.localmind.data.ChatMode.COMPANION)
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "取消",
-                        style = IosTheme.typography.footnote,
-                        color = ios.secondaryLabel,
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { creating = false }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
-
-        if (filtered.isEmpty()) {
-            EmptyMessages(
-                hasQuery = query.isNotBlank(),
-                onNew = { creating = true },
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = scrollBottomPadding(tabBarVisible = true, base = 24.dp)),
-            ) {
-                itemsIndexed(filtered, key = { _, c -> c.id }) { index, conv ->
-                    ConversationRow(
-                        conversation = conv,
-                        // 用**这个对话自己的**身份，不是去人设库里按 personaId 查。
-                        //
-                        // 「本对话设置」把人设写进的是对话自己的字段（personaName /
-                        // personaAvatarEmoji…），而 personaId 只在新建对话时记了一次、
-                        // 之后改身份并不会更新。按 id 去全局库里查，改了头像和名字这一行
-                        // 当然不会变 —— 这就是"对话列表的名字和头像没法显示"。
-                        persona = conv.persona(fallbackPersona),
-                        onClick = { viewModel.openConversation(conv.id) },
-                        onDelete = { viewModel.deleteConversation(conv.id) },
-                        index = index,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** 新建对话里的一个类型选项。 */
-@Composable
-private fun CreateKindRow(
-    title: String,
-    subtitle: String,
-    tint: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit,
-) {
-    val ios = IosTheme.palette
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(tint.copy(alpha = 0.12f))
-            .clickable(onClick = onClick)
-            .padding(14.dp),
-    ) {
-        Text(title, style = IosTheme.typography.body, color = tint)
-        Spacer(Modifier.height(2.dp))
-        Text(subtitle, style = IosTheme.typography.caption1, color = ios.secondaryLabel)
-    }
-}
-
-@Composable
-private fun ConversationRow(
-    conversation: Conversation,
-    persona: Persona,
-    onClick: () -> Unit,
-    onDelete: () -> Unit,
-    index: Int = 0,
-) {
-    val ios = IosTheme.palette
-    val last = conversation.messages.lastOrNull()
-    val interaction = remember { MutableInteractionSource() }
-
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .pressScale(interaction)
-                .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-                .background(ios.groupedBackground)
-                .padding(horizontal = 16.dp, vertical = 11.dp)
-                // 列表项错峰入场。间隔 28ms，10 条也就 0.28s，不会让人等。
-                .appearIn(index = index),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Avatar bubble — the persona this thread talks to
-            PersonaAvatar(
-                emoji = persona.avatarEmoji,
-                colorIndex = persona.avatarColor,
-                size = 46,
-                imagePath = persona.avatarImage,
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 还没聊过（标题还是默认值）时显示**这个对话的 AI 名字**。
-                    // 列表里这一行回答的是"我在和谁聊"，人设名比"新对话"有用得多。
-                    val displayName = if (conversation.title == Conversation.DEFAULT_TITLE) {
-                        persona.name.ifBlank { conversation.title }
-                    } else {
-                        conversation.title
-                    }
-                    Text(
-                        text = displayName,
-                        style = IosTheme.typography.body,
-                        fontWeight = FontWeight.SemiBold,
-                        color = ios.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    // 类型徽标：列表里两条对话看起来可能一模一样（同样的头像、
-                    // 同样一句话的开头），但它们是两种东西 —— 一个有人设和记忆，
-                    // 一个没有。不标出来，用户只能点进去才知道自己开的是哪种。
-                    IosPill(
-                        if (conversation.companionMode) "人设" else "AI",
-                        if (conversation.companionMode) ios.pink else ios.blue,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = Formatters.dateTime(conversation.updatedAt),
-                        style = IosTheme.typography.caption2,
-                        color = ios.tertiaryLabel,
-                    )
-                }
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = last?.let { (if (it.role == Role.USER) "我：" else "") + TextUtils.preview(it.content, 46) }
-                        ?: "还没有消息",
-                    style = IosTheme.typography.subheadline,
-                    color = ios.secondaryLabel,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "删除",
-                style = IosTheme.typography.caption1,
-                color = ios.red,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(7.dp))
-                    .clickable(onClick = onDelete)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 74.dp)
-                .height(0.5.dp)
-                .background(ios.separator)
-        )
-    }
+    ChatThread(viewModel, sharedText)
 }
 
 /**
@@ -513,51 +167,6 @@ private fun ClarificationBar(
                     .padding(horizontal = 11.dp, vertical = 9.dp),
             ) {
                 Text(option, style = IosTheme.typography.footnote, color = ios.label)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyMessages(hasQuery: Boolean, onNew: () -> Unit) {    val ios = IosTheme.palette
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            AppIcons.Memory,
-            contentDescription = null,
-            tint = ios.tertiaryLabel,
-            modifier = Modifier.size(52.dp),
-        )
-        Spacer(Modifier.height(14.dp))
-        Text(
-            text = if (hasQuery) "没有匹配的对话" else "开始一段对话",
-            style = IosTheme.typography.title3,
-            color = ios.label,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = if (hasQuery) "换个关键词试试" else "全部在本机离线运行",
-            style = IosTheme.typography.subheadline,
-            color = ios.secondaryLabel,
-        )
-        if (!hasQuery) {
-            Spacer(Modifier.height(18.dp))
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(ios.blue)
-                    .clickable(onClick = onNew)
-                    .padding(horizontal = 20.dp, vertical = 11.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(AppIcons.Add, contentDescription = null, tint = ios.onAccent, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("新对话", style = IosTheme.typography.headline, color = ios.onAccent)
             }
         }
     }
@@ -908,10 +517,7 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
             .background(ios.groupedBackground)
             .imePadding()
     ) {
-        IosNavigationBar(
-            // 标题显示**你在和谁说话**：还没聊过时用人设名（和列表那一行同一套判据），
-            // 聊过之后才换成由第一句话生成的标题。原来这里永远是"新对话"，
-            // 明明设置里写了名字却看不到。
+        com.localmind.ui.design.ThreadTopBar(
             title = conversation?.let { c ->
                 if (c.title == Conversation.DEFAULT_TITLE) {
                     c.persona(com.localmind.data.PersonaPresets.default).name.ifBlank { c.title }
@@ -919,38 +525,13 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
                     c.title
                 }
             } ?: "对话",
-            collapsed = true,
-            topInset = statusBarTopPadding(),
-            leading = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { viewModel.leaveConversation() }
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                ) {
-                    Icon(
-                        AppIconsAutoMirrored.ArrowBack,
-                        contentDescription = "返回",
-                        tint = ios.blue,
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text("对话", style = IosTheme.typography.body, color = ios.blue)
-                }
+            subtitle = when {
+                remote != null -> remote.name
+                engineState.ready -> engineState.modelName
+                else -> "未加载模型"
             },
-            trailing = {
-                // 这个按钮打开的是**本对话自己的**详情：AI 是谁 + 它现在的状态。
-                // 全局设置（生成参数、下载源、能力开关）在「我的」里。
-                Icon(
-                    AppIcons.Tune,
-                    contentDescription = "本对话设置",
-                    tint = ios.blue,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable { viewModel.openConversationDetail(true) },
-                )
-            },
+            onBack = { viewModel.leaveConversation() },
+            onSettings = { viewModel.openConversationDetail(true) },
         )
 
         // ---------------------------------------------------- 对话详情
@@ -971,43 +552,48 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
             )
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val messages = conversation?.messages.orEmpty()
-            if (messages.isEmpty()) {
-                item {
-                    ThreadHint(
-                        modelName = remote?.name ?: engineState.modelName,
-                        onSuggestion = { viewModel.send(it) },
-                        enabled = canSend,
-                    )
-                }
-            }
-            itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
-                MessageRow(
-                    message = message,
-                    streaming = chatState.streaming && message.id == messages.lastOrNull()?.id,
-                    onCopy = { viewModel.toast("已复制") },
-                    onSpeak = { viewModel.speak(message.content) },
-                    onOpenImage = { viewerPath = it },
-                    painterName = conversation?.personaName?.ifBlank { null } ?: "它",
-                    onSaveImage = { p ->
-                        val ok = com.localmind.ui.components.saveImageToGallery(context, java.io.File(p))
-                        viewModel.toast(if (ok) "已保存到相册" else "保存失败")
-                    },
-                    // 只给最后几条加入场动画。整个列表都动的话，往上翻历史时
-                    // 每一屏都在重播动画，反而看不清内容。
-                    animateIn = index >= messages.size - 3,
+        val messages = conversation?.messages.orEmpty()
+        if (messages.isEmpty()) {
+            // 空对话把问候放在**视觉中心**，而不是顶在导航栏下面。
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                ThreadHint(
+                    modelName = remote?.name ?: engineState.modelName,
+                    onSuggestion = { viewModel.send(it) },
+                    enabled = canSend,
                 )
             }
-            if (chatState.thinking) {
-                item { ThinkingIndicator() }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
+                    MessageRow(
+                        message = message,
+                        streaming = chatState.streaming && message.id == messages.lastOrNull()?.id,
+                        onCopy = { viewModel.toast("已复制") },
+                        onSpeak = { viewModel.speak(message.content) },
+                        onOpenImage = { viewerPath = it },
+                        painterName = conversation?.personaName?.ifBlank { null } ?: "它",
+                        onSaveImage = { p ->
+                            val ok = com.localmind.ui.components.saveImageToGallery(context, java.io.File(p))
+                            viewModel.toast(if (ok) "已保存到相册" else "保存失败")
+                        },
+                        animateIn = index >= messages.size - 3,
+                    )
+                }
+                if (chatState.thinking) {
+                    item { ThinkingIndicator() }
+                }
             }
         }
 
@@ -1146,7 +732,7 @@ private fun ThreadHint(modelName: String?, onSuggestion: (String) -> Unit, enabl
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 30.dp, start = 8.dp, end = 8.dp),
+            .padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // 空对话页那个大标题。主题的 `appName` 在这里生效 —— 它是整个应用里
@@ -1222,7 +808,7 @@ private fun NoModelBanner(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = error ?: "点这里去下载并加载（推荐 Qwen2.5 1.5B，1.1 GB）",
+                text = if (error != null) "加载失败，点这里重试" else "点这里挑一个模型",
                 style = IosTheme.typography.caption1,
                 color = ios.secondaryLabel,
             )
@@ -1243,39 +829,28 @@ private fun ThinkingIndicator() {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
     message: ChatMessage,
     streaming: Boolean,
     onCopy: () -> Unit,
     onSpeak: () -> Unit,
-    /** 点图片 → 全屏查看。由 ChatScreen 持有状态，这样整个列表共用一个查看器。 */
     onOpenImage: (String) -> Unit = {},
-    /** AI 的名字，用来标"XX 画的"。 */
     painterName: String = "它",
     onSaveImage: (String) -> Unit = {},
     animateIn: Boolean = false,
 ) {
     val ios = IosTheme.palette
     val clipboard = LocalClipboardManager.current
-
-    // 气泡入场：从下方 14px 上浮 + 淡入 + 轻微放大。
-    // 用户发的那条从右侧、AI 那条从左侧，方向暗示"谁在说" —— 比单纯淡入
-    // 更容易一眼看出这轮对话的顺序。
-    val entrance = if (animateIn) {
-        Modifier.appearIn(offsetY = 14)
-    } else {
-        Modifier
-    }
+    val entrance = if (animateIn) Modifier.appearIn(offsetY = 14) else Modifier
+    val bubbleShape = RoundedCornerShape(20.dp)
 
     when (message.role) {
         Role.USER -> Row(
             Modifier.fillMaxWidth().then(entrance),
             horizontalArrangement = Arrangement.End,
         ) {
-            // 图片和文字是**同一坨**内容（都是这条消息的一部分），所以竖着排、
-            // 共用右边的对齐线；但图片在外、文字在内，各用自己的圆角 ——
-            // 把图塞进彩色气泡里会让气泡变成一个奇怪的大色块。
             Column(
                 modifier = Modifier.widthIn(max = 300.dp),
                 horizontalAlignment = Alignment.End,
@@ -1290,9 +865,18 @@ private fun MessageRow(
                 if (message.content.isNotBlank()) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(IosTheme.metrics.bubbleCorner))
+                            .clip(bubbleShape)
                             .background(ios.bubbleUser)
-                            .padding(horizontal = 14.dp, vertical = 9.dp)
+                            .combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {},
+                                onLongClick = {
+                                    clipboard.setText(AnnotatedString(message.content))
+                                    onCopy()
+                                },
+                            )
+                            .padding(horizontal = 15.dp, vertical = 10.dp)
                     ) {
                         SelectionContainer {
                             Text(
@@ -1307,47 +891,60 @@ private fun MessageRow(
         }
 
         Role.ASSISTANT -> Row(Modifier.fillMaxWidth().then(entrance)) {
-            Column(Modifier.widthIn(max = 320.dp)) {
+            Column(Modifier.widthIn(max = 330.dp)) {
                 message.reasoning?.takeIf { it.isNotBlank() }?.let { reasoning ->
                     ReasoningFold(reasoning = reasoning, streaming = streaming)
                     Spacer(Modifier.height(6.dp))
                 }
+                var menu by remember { mutableStateOf(false) }
                 if (message.content.isNotBlank() || streaming) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(IosTheme.metrics.bubbleCorner))
+                            .clip(bubbleShape)
                             .background(ios.bubbleAi)
-                            .border(
-                                IosTheme.metrics.barBorderWidth,
-                                ios.bubbleAiBorder,
-                                RoundedCornerShape(IosTheme.metrics.bubbleCorner),
+                            .border(0.5.dp, ios.bubbleAiBorder, bubbleShape)
+                            .combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {},
+                                onLongClick = { menu = true },
                             )
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .padding(horizontal = 15.dp, vertical = 11.dp)
                     ) {
                         MarkdownText(message.content.ifEmpty { if (streaming) "..." else "" })
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = menu,
+                            onDismissRequest = { menu = false },
+                        ) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("复制") },
+                                onClick = {
+                                    menu = false
+                                    clipboard.setText(AnnotatedString(message.content))
+                                    onCopy()
+                                },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("朗读") },
+                                onClick = {
+                                    menu = false
+                                    onSpeak()
+                                },
+                            )
+                        }
                     }
                 }
 
-                // AI 自己画的图。
-                //
-                // 出处标记要在**图上方**，并且给一个「保存」—— 这是图出来之后
-                // 最自然的下一步。以前标记在图下面、且没有保存入口，用户想留下
-                // 这张图只能截图。
                 message.generatedImagePath?.takeIf { it.isNotBlank() }?.let { path ->
                     Spacer(Modifier.height(8.dp))
                     com.localmind.ui.components.AiMessageImage(
                         path = path,
-                        label = "$painterName 画的",
+                        label = painterName + " 画的",
                         onClick = { onOpenImage(path) },
                         onSave = { onSaveImage(path) },
                     )
                 }
 
-                // 表情渲染在气泡**外面**，读起来像"语气"而不是正文的一部分。
-                //
-                // 两种形态：
-                //  * `file://…` = 表情包插件的**图片梗图**，按图片画（这才是"发表情包"）
-                //  * 其它 = 一个 emoji 字符，直接当文字画
                 message.emoji?.takeIf { it.isNotBlank() }?.let { e ->
                     Spacer(Modifier.height(6.dp))
                     if (e.startsWith("file://")) {
@@ -1356,44 +953,13 @@ private fun MessageRow(
                         Text(e, style = IosTheme.typography.title2)
                     }
                 }
-                Row(
-                    modifier = Modifier.padding(start = 6.dp, top = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (message.tokensPerSecond != null && message.tokensPerSecond > 0) {
-                        IosPill(
-                            text = String.format(Locale.US, "%.1f tok/s", message.tokensPerSecond),
-                            color = ios.gray,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text(
-                        text = Formatters.time(message.createdAt),
-                        style = IosTheme.typography.caption2,
-                        color = ios.tertiaryLabel,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Icon(
-                        AppIcons.ContentCopy,
-                        contentDescription = "复制",
-                        tint = ios.tertiaryLabel,
-                        modifier = Modifier
-                            .size(14.dp)
-                            .clickable {
-                                clipboard.setText(AnnotatedString(message.content))
-                                onCopy()
-                            },
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Icon(
-                        AppIcons.GraphicEq,
-                        contentDescription = "朗读",
-                        tint = ios.tertiaryLabel,
-                        modifier = Modifier
-                            .size(14.dp)
-                            .clickable(onClick = onSpeak),
-                    )
-                }
+
+                Text(
+                    text = Formatters.time(message.createdAt),
+                    style = IosTheme.typography.caption2,
+                    color = ios.tertiaryLabel,
+                    modifier = Modifier.padding(start = 6.dp, top = 4.dp),
+                )
             }
         }
 
@@ -1565,155 +1131,23 @@ private fun ChatInputBar(
             .fillMaxWidth()
             .background(ios.barBackground)
     ) {
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(ios.barBorder))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 38.dp, max = 132.dp)
-                    .clip(RoundedCornerShape(IosTheme.metrics.controlCorner * 1.9f))
-                    .border(
-                        IosTheme.metrics.barBorderWidth,
-                        ios.separator,
-                        RoundedCornerShape(IosTheme.metrics.controlCorner * 1.9f),
-                    )
-                    // 输入区底色走令牌。之前写死 secondaryGroupedBackground，
-                    // 于是"卡片色"和"输入框色"永远绑死，主题改不动。
-                    .background(ios.composerBackground)
-                    .padding(horizontal = 14.dp, vertical = 9.dp)
-            ) {
-                if (value.isEmpty()) {
-                    Text(
-                        text = if (enabled) "发消息…" else "先加载模型",
-                        style = IosTheme.typography.body,
-                        color = ios.tertiaryLabel,
-                    )
-                }
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    enabled = enabled && !streaming,
-                    textStyle = LocalTextStyle.current.merge(IosTheme.typography.body).copy(color = ios.label),
-                    cursorBrush = SolidColor(ios.blue),
-                    maxLines = 6,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Send,
-                    ),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                        onSend = { if (value.isNotBlank() && enabled && !streaming) onSend() },
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            Spacer(Modifier.width(8.dp))
-
-            // 加号：发图。
-            //
-            // 这里原来是「上网」和「Agent」两个能力开关。删掉的理由：
-            //  * 它们是**模式开关**，属于这个对话的设置，不是每次发消息都要碰的东西。
-            //    放在输入框旁边会让人以为"这次发消息要勾一下"，而实际上它是持久的。
-            //  * 「能力」那一段仍然在对话设置里（`onOpenCaps`），位置更合适。
-            //  * 空出来的位置给**发图** —— 那才是每次发消息真的可能用到的东西。
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(ios.fill)
-                    .clickable(enabled = enabled, onClick = onPickImage),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    AppIcons.Add,
-                    contentDescription = "发图",
-                    tint = if (enabled) ios.label else ios.tertiaryLabel,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
-
-            Spacer(Modifier.width(8.dp))
-
-            if (streaming) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(ios.red)
-                        .clickable(onClick = onStop),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(AppIcons.Stop, contentDescription = "停止", tint = ios.onAccent, modifier = Modifier.size(18.dp))
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (value.isBlank() || !enabled) ios.fill else ios.blue)
-                        .clickable(enabled = value.isNotBlank() && enabled, onClick = onSend),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        AppIconsAutoMirrored.Send,
-                        contentDescription = "发送",
-                        tint = if (value.isBlank() || !enabled) ios.secondaryLabel else ios.onAccent,
-                        modifier = Modifier.size(17.dp),
-                    )
-                }
-            }
-
-            if (voiceEnabled) {
-                Spacer(Modifier.width(6.dp))
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(ios.green)
-                        .clickable(onClick = onOpenVoice),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(AppIcons.GraphicEq, contentDescription = "语音", tint = ios.onAccent, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
-
-        AnimatedVisibility(visible = streaming && (tokens > 0 || usingApi)) {
+        if (streaming && tokens > 0) {
             Text(
-                text = if (usingApi) {
-                    "API 直连 · 推理在云端，本机不加载模型"
-                } else {
-                    "$tokens tokens · " + String.format(Locale.US, "%.1f tok/s", tps) +
-                        if (cacheHit > 0) " · 缓存命中 $cacheHit%（这就是不再重算整段提示词的部分）" else ""
-                },
+                text = "生成中 · " + String.format(Locale.US, "%.1f", tps) + " tok/s",
                 style = IosTheme.typography.caption2,
                 color = ios.tertiaryLabel,
-                modifier = Modifier.padding(start = 18.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 24.dp, top = 6.dp),
             )
         }
-    }
-}
-
-@Composable
-private fun CapabilityChip(active: Boolean, label: String, onClick: () -> Unit) {
-    val ios = IosTheme.palette
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (active) ios.green.copy(alpha = 0.18f) else ios.fillSecondary)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            style = IosTheme.typography.caption2,
-            color = if (active) ios.green else ios.secondaryLabel,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+        com.localmind.ui.design.ChatComposer(
+            value = value,
+            onValueChange = onValueChange,
+            streaming = streaming,
+            enabled = enabled,
+            onSend = onSend,
+            onStop = onStop,
+            onPickImage = onPickImage,
         )
     }
 }
+

@@ -256,8 +256,7 @@ class ModelStore(private val storage: Storage) {
                     license = "见原始仓库",
                     publisher = "本机文件",
                     family = "GGUF",
-                    description = "这个文件在模型库里没有对应条目（清单更新过，或者是手动放进来的）。" +
-                        "可以直接加载；不用了就删掉腾空间。",
+                    description = "手动放进来的模型，可以直接加载。",
                     tags = listOf("本机文件"),
                     recommendedRamGb = (f.length() / (1024L * 1024 * 1024)).toInt() + 2,
                     imported = true,
@@ -353,15 +352,12 @@ object ModelCatalog {
     const val HF_ORIGINAL = "https://huggingface.co"
 
     /**
-     * 内置模型清单**故意为空**。
+     * 内置的推荐清单（6 条小模型，只有地址没有权重）。
      *
-     * 模型库现在是一份可通过插件导入的 JSON（`官方模型库插件.zip`，83 条）。主程序不自带清单的三个理由：地址会失效、每改一次都要
-     * 发 APK、以及"APK 只是运行时"这件事应该对用户诚实。
-     *
-     * 保留这个空 list 而不是删掉它，是为了让 `ModelStore.resolveAll()` 不必
-     * 到处判空 —— 没装模型库插件时，用户仍然可以导入本地 .gguf 或用云端 API。
+     * 1.0.5 起不再**完全为空**：全新安装的用户至少能在这里下到一个模型并开始对话，
+     * 而不是先去找一个 zip 插件。更大的清单仍然走「官方模型库插件」。
      */
-    val models: List<LocalModel> = emptyList()
+    val models: List<LocalModel> = RecommendedModels.models
 
     /** Models that are plausible on a typical 2024-2026 phone, best first. */
     fun recommendedFor(totalRamGb: Double): List<LocalModel> =

@@ -87,28 +87,6 @@ object Motion {
 }
 
 /**
- * 按下去会轻微缩小的点击反馈。
- *
- * 用 [Modifier.pressScale] 而不是每个地方自己写 `animateFloatAsState`：
- * 缩放的**时长和曲线**必须一致，否则同一个界面里两个按钮按下去的手感会不一样。
- *
- * 注意它只是**视觉**反馈，点击本身仍由调用方的 `clickable` 处理 —— 这样
- * 需要自定义点击语义（长按、禁用态）的地方可以只借这个 Modifier。
- */
-fun Modifier.pressScale(
-    interactionSource: MutableInteractionSource,
-    pressedScale: Float = Motion.PRESS_SCALE,
-): Modifier = composed {
-    val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) pressedScale else 1f,
-        animationSpec = Motion.smooth(140),
-        label = "pressScale",
-    )
-    this.scale(scale)
-}
-
-/**
  * 入场动画：从下方轻微上浮 + 淡入 + 从略小放大。
  *
  * 三件事一起做才像 iOS 的"出现"。只做淡入会显得平；只做位移会显得飘。

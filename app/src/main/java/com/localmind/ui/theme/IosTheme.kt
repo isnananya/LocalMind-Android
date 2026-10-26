@@ -21,34 +21,6 @@ import androidx.compose.ui.unit.sp
  * Values follow Apple's Human Interface Guidelines so the UI reads as "iOS"
  * rather than "Material with round corners".
  */
-object IosColors {
-    val systemBlueLight = Color(0xFF007AFF)
-    val systemBlueDark = Color(0xFF0A84FF)
-    val systemGreen = Color(0xFF34C759)
-    val systemGreenDark = Color(0xFF30D158)
-    val systemIndigo = Color(0xFF5856D6)
-    val systemIndigoDark = Color(0xFF5E5CE6)
-    val systemOrange = Color(0xFFFF9500)
-    val systemOrangeDark = Color(0xFFFF9F0A)
-    val systemPink = Color(0xFFFF2D55)
-    val systemPinkDark = Color(0xFFFF375F)
-    val systemPurple = Color(0xFFAF52DE)
-    val systemPurpleDark = Color(0xFFBF5AF2)
-    val systemRed = Color(0xFFFF3B30)
-    val systemRedDark = Color(0xFFFF453A)
-    val systemTeal = Color(0xFF5AC8FA)
-    val systemTealDark = Color(0xFF64D2FF)
-    val systemYellow = Color(0xFFFFCC00)
-    val systemYellowDark = Color(0xFFFFD60A)
-    val systemGray = Color(0xFF8E8E93)
-    val systemGray2 = Color(0xFFAEAEB2)
-    val systemGray3 = Color(0xFFC7C7CC)
-    val systemGray4 = Color(0xFFD1D1D6)
-    val systemGray5 = Color(0xFFE5E5EA)
-    val systemGray6 = Color(0xFFF2F2F7)
-    val systemGray6Dark = Color(0xFF1C1C1E)
-}
-
 data class IosPalette(
     val blue: Color,
     val green: Color,

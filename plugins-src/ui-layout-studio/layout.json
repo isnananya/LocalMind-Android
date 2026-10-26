@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "packId": "com.localmind.layout.studio",
+  "packName": "控制台首页",
+  "author": "LocalMind",
+  "description": "首页由插件自己声明：问候卡、快捷入口、列表、最近对话、状态。",
+  "appName": "LocalMind",
+  "subtitle": "本机运行，断网也能用",
+  "tabs": [
+    {
+      "id": "home",
+      "label": "控制台",
+      "icon": "bolt"
+    },
+    {
+      "id": "chat",
+      "label": "对话",
+      "icon": "bubble"
+    },
+    {
+      "id": "models",
+      "label": "模型",
+      "icon": "memory"
+    },
+    {
+      "id": "me",
+      "label": "我的",
+      "icon": "person"
+    }
+  ],
+  "startTab": "home",
+  "overrides": {
+    "home": "console"
+  },
+  "screens": {
+    "console": {
+      "title": "控制台",
+      "subtitle": "这一页完全由插件排版",
+      "blocks": [
+        {
+          "type": "hero",
+          "title": "今天想做什么？",
+          "text": "下面的入口和分组都写在 layout.json 里",
+          "icon": "sparkle"
+        },
+        {
+          "type": "actions",
+          "title": "快捷入口",
+          "items": [
+            {
+              "label": "新对话",
+              "icon": "chat",
+              "open": "new"
+            },
+            {
+              "label": "模型",
+              "icon": "memory",
+              "open": "models"
+            },
+            {
+              "label": "语音",
+              "icon": "mic",
+              "open": "voice"
+            },
+            {
+              "label": "插件",
+              "icon": "extension",
+              "open": "plugins"
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "title": "更多",
+          "items": [
+            {
+              "label": "设置",
+              "icon": "tune",
+              "open": "settings"
+            },
+            {
+              "label": "我的",
+              "icon": "person",
+              "open": "me"
+            }
+          ]
+        },
+        {
+          "type": "recent",
+          "title": "最近对话",
+          "limit": 3
+        },
+        {
+          "type": "status",
+          "title": "本机状态"
+        }
+      ]
+    }
+  }
+}

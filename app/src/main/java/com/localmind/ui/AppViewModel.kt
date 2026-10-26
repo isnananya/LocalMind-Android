@@ -2645,7 +2645,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
                 // Chain-of-thought (DeepSeek-R1 / Qwen3) goes into its own field so the
                 // bubble can fold it, exactly like the official apps.
-                val split = TextUtils.splitReasoning(buffer.toString())
+                val split = TextUtils.splitReasoning(TextUtils.stripControlTokens(buffer.toString()))
                 val reasoningSoFar = when {
                     split.reasoning.isBlank() -> ""
                     split.thinking -> split.reasoning
@@ -3821,7 +3821,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val installedIds = activePluginsFor(com.localmind.data.PluginAbilities.UI_LAYOUT)
             .map { it.manifest.id }.toSet()
         val chosen = storage.activeLayoutId()
+        // 只装了一个布局插件时自动生效：装完没变化，普通用户只会以为插件坏了。
         val layout = layoutPacks[chosen]?.takeIf { chosen in installedIds }
+            ?: layoutPacks[installedIds.singleOrNull()]
         _uiLayout.value = layout
         _installedLayouts.value = layoutPacks.filterKeys { it in installedIds }
 

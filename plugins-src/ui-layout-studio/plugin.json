@@ -1,0 +1,11 @@
+{
+  "id": "com.localmind.layout.studio",
+  "name": "示例：控制台首页",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "用 ui_layout 的 screens / overrides 把首页整页换成插件自己排的版式。",
+  "abilities": [
+    "ui_layout"
+  ],
+  "requires": []
+}

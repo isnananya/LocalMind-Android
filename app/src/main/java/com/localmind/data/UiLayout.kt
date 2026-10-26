@@ -71,6 +71,24 @@ data class LayoutBlock(
     val limit: Int = 3,
 )
 
+/**
+ * 插件自己定义的一整页。
+ *
+ * 这是「插件替换源码」的落点：一个 `ui_layout` 插件可以在 `screens` 里写一页，
+ * 再用 `overrides` 把它挂到某个内置页面上（chat / models / me / home …）。
+ * 挂上之后，那个页面**完全不画主程序原有的排版**，只按这里声明的块渲染。
+ *
+ * 块类型与首页相同（见 [Layouts.BLOCK_TYPES]），所以能力边界是可预期的：
+ * 最坏情况是「这块不显示」，不会白屏，也不会执行插件代码。
+ */
+@Serializable
+data class UiScreen(
+    val title: String = "",
+    /** 标题下面的一行小字。留空更干净。 */
+    val subtitle: String = "",
+    val blocks: List<LayoutBlock> = emptyList(),
+)
+
 /** 一个完整的界面布局包。 */
 @Serializable
 data class UiLayout(
@@ -88,6 +106,13 @@ data class UiLayout(
     val startTab: String = "",
     /** 首页的块。空 = 首页用主程序的默认样子（对话列表）。 */
     val home: List<LayoutBlock> = emptyList(),
+    /** 插件自定义的整页：id → 内容。 */
+    val screens: Map<String, UiScreen> = emptyMap(),
+    /**
+     * 用插件页面替换某个内置页面。键是内置页面名（见 [Layouts.SCREENS]），
+     * 值是 [screens] 里的 id。被替换的页面不再绘制主程序原有排版。
+     */
+    val overrides: Map<String, String> = emptyMap(),
     /** 外观令牌覆盖，键名与 [UiTokens] 相同。 */
     val tokens: Map<String, String> = emptyMap(),
     val darkTokens: Map<String, String> = emptyMap(),
@@ -120,7 +145,7 @@ object Layouts {
     )
 
     /** 首页块类型。 */
-    val BLOCK_TYPES: Set<String> = setOf("hero", "actions", "text", "recent", "status")
+    val BLOCK_TYPES: Set<String> = setOf("hero", "actions", "text", "recent", "status", "list")
 
     /** 动作名（除了页面名之外）。 */
     val ACTIONS: Set<String> = setOf("new", "settings", "plugins_import", "debug")
@@ -174,14 +199,50 @@ object Layouts {
                     "只能是 ${BLOCK_TYPES.joinToString("、")}"
             )
         }
+        fun targetOk(target: String): Boolean =
+            target.isBlank() || target in SCREENS || target in ACTIONS || target in layout.screens ||
+                target == "back" || target.startsWith("http://") || target.startsWith("https://")
+
         for (block in layout.home) {
-            val badActions = block.items.filter { it.open.isNotBlank() && it.open !in SCREENS && it.open !in ACTIONS }
+            val badActions = block.items.filterNot { targetOk(it.open) }
             if (badActions.isNotEmpty()) {
                 return ParseResult.Failed(
-                    "home 里「${block.type}」块的动作打开了不存在的目标：" +
+                    "home 里「" + block.type + "」块的动作打开了不存在的目标：" +
                         badActions.joinToString { it.open }
                 )
             }
+        }
+
+        // ---- 插件自定义页面 ----
+        val badScreenIds = layout.screens.keys.filter { id ->
+            id.isBlank() || id.any { !(it.isLetterOrDigit() || it == '_' || it == '-') }
+        }
+        if (badScreenIds.isNotEmpty()) {
+            return ParseResult.Failed("screens 的 id 只能用字母/数字/下划线/短横线：" + badScreenIds.joinToString())
+        }
+        if (layout.screens.size > 12) {
+            return ParseResult.Failed("screens 最多 12 页，现在是 " + layout.screens.size + " 页")
+        }
+        val badScreenBlocks = layout.screens.flatMap { (id, screen) ->
+            screen.blocks.filter { it.type !in BLOCK_TYPES }.map { id + ":" + it.type }
+        }
+        if (badScreenBlocks.isNotEmpty()) {
+            return ParseResult.Failed("screens 里有不认识的块：" + badScreenBlocks.joinToString() + "。只能是 " + BLOCK_TYPES.joinToString("、"))
+        }
+        for ((id, screen) in layout.screens) {
+            val bad = screen.blocks.flatMap { it.items }.filterNot { targetOk(it.open) }
+            if (bad.isNotEmpty()) {
+                return ParseResult.Failed(
+                    "screens." + id + " 里的动作打开了不存在的目标：" + bad.joinToString { it.open }
+                )
+            }
+        }
+        val badOverrides = layout.overrides.filter { (screen, id) -> screen !in SCREENS || id !in layout.screens }
+        if (badOverrides.isNotEmpty()) {
+            return ParseResult.Failed(
+                "overrides 只能指向内置页面和 screens 里的页：" +
+                    badOverrides.entries.joinToString { it.key + "→" + it.value }
+            )
         }
 
         val unknownTabs = layout.tabs.filter { it.icon.isNotBlank() && it.icon !in ICONS }

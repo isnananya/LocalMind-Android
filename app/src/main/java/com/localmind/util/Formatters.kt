@@ -60,6 +60,26 @@ object Formatters {
 
 /** Small helpers used by the OpenAI-compatible API and the downloader. */
 object TextUtils {
+
+    /**
+     * 去掉模型吐出来的**控制标记**（<|im_end|>、<|endoftext|> 这类）。
+     *
+     * 为什么要在前端兜一层：这些是 chat template 的分隔符，正常应该由推理侧
+     * 当作 EOS 停掉。但不同模型（尤其 ERNIE / 一些转换版）用的模板不一样，
+     * 漏一个就会原样显示在气泡里 —— 用户看到 "你好<|im_end|>" 只会觉得是 bug。
+     *
+     * 这里只处理**看起来像标记**的片段：以 <| 开头、到 |> 结束（流式时可能还没
+     * 结束，所以也接受"到字符串末尾"）。正文里的 < 和 | 不受影响。
+     */
+    fun stripControlTokens(text: String): String {
+        if (!text.contains("<|") && !text.contains("</s>") && !text.contains("<s>")) return text
+        return text
+            .replace(Regex("<\\|[^>]{0,64}(\\|>|$)"), "")
+            .replace("</s>", "")
+            .replace("<s>", "")
+            .trimEnd()
+    }
+
     fun preview(text: String, max: Int = 120): String {
         val flat = text.replace('\n', ' ').trim()
         return if (flat.length <= max) flat else flat.take(max) + "…"

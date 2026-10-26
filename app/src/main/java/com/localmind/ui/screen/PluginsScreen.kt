@@ -41,7 +41,7 @@ import com.localmind.ui.components.statusBarTopPadding
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.motion.Motion
 import com.localmind.ui.motion.appearIn
-import com.localmind.ui.motion.pressScale
+import com.localmind.ui.components.pressScale
 import com.localmind.ui.theme.IosTheme
 
 /**

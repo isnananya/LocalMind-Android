@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -57,7 +58,7 @@ import com.localmind.ui.theme.IosTheme
  * 不做"参数大全"—— 参数在插件里声明，用户改的是插件，不是这里。
  */
 @Composable
-fun PipelineScreen(viewModel: AppViewModel) {
+fun PipelineScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
     val ios = IosTheme.palette
     val st by viewModel.pipelineUi.collectAsState()
     var input by remember { mutableStateOf("") }
@@ -70,16 +71,17 @@ fun PipelineScreen(viewModel: AppViewModel) {
             topInset = statusBarTopPadding(),
             leading = {
                 Row(
-                    modifier = Modifier.clickable { viewModel.selectTab(Tab.HOME) },
+                    modifier = Modifier.clickable(enabled = onBack != null) { onBack?.invoke() },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        AppIcons.ChevronRight,
-                        contentDescription = null,
+                        com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
+                        contentDescription = "返回",
                         tint = ios.blue,
-                        modifier = Modifier.width(18.dp).height(18.dp),
+                        modifier = Modifier.size(20.dp),
                     )
-                    Text("首页", style = IosTheme.typography.body, color = ios.blue)
+                    Spacer(Modifier.width(2.dp))
+                    Text("返回", style = IosTheme.typography.body, color = ios.blue)
                 }
             },
         )

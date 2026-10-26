@@ -1,5 +1,8 @@
 # LocalMind 插件开发指南
 
+> 版本：1.0.5 起。界面布局（screens / overrides / 首页块）另见 [UI-LAYOUT.md](UI-LAYOUT.md)；
+> 外观令牌参考见 [UI-PLUGIN.md](UI-PLUGIN.md)。
+
 > 一个插件 = **一个 zip + 几份 JSON**。
 > 不执行任何代码，所以"装个插件"永远不等于"装个后门"。
 >

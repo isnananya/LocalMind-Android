@@ -66,7 +66,7 @@ private val endpoints = listOf(
 )
 
 @Composable
-fun ApiScreen(viewModel: AppViewModel) {
+fun ApiScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
     val ios = IosTheme.palette
     val settings by viewModel.api.collectAsState()
     val state by viewModel.apiState.collectAsState()
@@ -91,7 +91,23 @@ fun ApiScreen(viewModel: AppViewModel) {
             collapsed = true,
             topInset = statusBarTopPadding(),
             leading = {
-                Icon(AppIcons.Api, contentDescription = null, tint = ios.teal, modifier = Modifier.size(20.dp))
+                if (onBack != null) {
+                    Row(
+                        modifier = Modifier.clickable { onBack() },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            com.localmind.ui.icons.AppIconsAutoMirrored.ArrowBack,
+                            contentDescription = "返回",
+                            tint = ios.blue,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text("返回", style = IosTheme.typography.body, color = ios.blue)
+                    }
+                } else {
+                    Icon(AppIcons.Api, contentDescription = null, tint = ios.teal, modifier = Modifier.size(20.dp))
+                }
             },
             trailing = {
                 Icon(
