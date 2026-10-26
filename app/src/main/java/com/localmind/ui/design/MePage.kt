@@ -1,5 +1,6 @@
 package com.localmind.ui.design
 
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -95,6 +96,7 @@ fun MePage(viewModel: AppViewModel) {
         ) {
             item {
                 ProfileCard(
+                    photo = profile.avatarImage,
                     emoji = profile.avatarEmoji,
                     colorIndex = profile.avatarColor,
                     name = profile.nickname.ifBlank { "我" },
@@ -163,12 +165,6 @@ fun MePage(viewModel: AppViewModel) {
                         leading = { AuroraIcon(AppIcons.Info, ios.blue) },
                         onClick = { route = MeRoute.ABOUT },
                     )
-                    AuroraDivider(indent = 58.dp)
-                    AuroraRow(
-                        title = "重新看一遍引导",
-                        leading = { AuroraIcon(AppIcons.RestartAlt, ios.green) },
-                        onClick = { viewModel.restartOnboarding() },
-                    )
                 }
                 Spacer(Modifier.height(20.dp))
                 Text(
@@ -188,10 +184,11 @@ fun MePage(viewModel: AppViewModel) {
             nickname = profile.nickname,
             emoji = profile.avatarEmoji,
             colorIndex = profile.avatarColor,
+            photo = profile.avatarImage,
             onDismiss = { editing = false },
-            onSave = { name, emoji, color ->
+            onSave = { name, emoji, color, photoPath ->
                 viewModel.updateUserProfile {
-                    it.copy(nickname = name, avatarEmoji = emoji, avatarColor = color)
+                    it.copy(nickname = name, avatarEmoji = emoji, avatarColor = color, avatarImage = photoPath)
                 }
                 editing = false
             },
@@ -201,6 +198,7 @@ fun MePage(viewModel: AppViewModel) {
 
 @Composable
 private fun ProfileCard(
+    photo: String = "",
     emoji: String,
     colorIndex: Int,
     name: String,
@@ -220,7 +218,21 @@ private fun ProfileCard(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PersonaAvatar(emoji = emoji, colorIndex = colorIndex, size = 56)
+        if (photo.isNotBlank()) {
+            val bmp = remember(photo) { android.graphics.BitmapFactory.decodeFile(photo) }
+            if (bmp != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.size(56.dp).clip(CircleShape),
+                )
+            } else {
+                PersonaAvatar(emoji = emoji, colorIndex = colorIndex, size = 56)
+            }
+        } else {
+            PersonaAvatar(emoji = emoji, colorIndex = colorIndex, size = 56)
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(name, style = IosTheme.typography.title3, color = ios.label)
@@ -237,14 +249,30 @@ private fun ProfileEditSheet(
     nickname: String,
     emoji: String,
     colorIndex: Int,
+    photo: String = "",
     onDismiss: () -> Unit,
-    onSave: (String, String, Int) -> Unit,
+    onSave: (String, String, Int, String) -> Unit,
 ) {
     val ios = IosTheme.palette
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember { mutableStateOf(nickname) }
     var pickedEmoji by remember { mutableStateOf(emoji.ifBlank { "😀" }) }
     var pickedColor by remember { mutableStateOf(colorIndex.coerceAtLeast(0)) }
+    var pickedPhoto by remember { mutableStateOf(photo) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                val file = java.io.File(context.filesDir, "avatar_" + System.currentTimeMillis() + ".jpg")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    file.outputStream().use { out -> input.copyTo(out) }
+                }
+                pickedPhoto = file.absolutePath
+            }
+        }
+    }
     val emojis = listOf("😀", "🙂", "😎", "🐱", "🐶", "🦊", "🐰", "🐼", "🌸", "⭐️", "🍀", "🌙")
 
     ModalBottomSheet(
@@ -257,7 +285,21 @@ private fun ProfileEditSheet(
             Text("编辑资料", style = IosTheme.typography.title2, color = ios.label)
             Spacer(Modifier.height(18.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PersonaAvatar(emoji = pickedEmoji, colorIndex = pickedColor, size = 62)
+                if (pickedPhoto.isNotBlank()) {
+                    val bmp = remember(pickedPhoto) { android.graphics.BitmapFactory.decodeFile(pickedPhoto) }
+                    if (bmp != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.size(62.dp).clip(CircleShape),
+                        )
+                    } else {
+                        PersonaAvatar(emoji = pickedEmoji, colorIndex = pickedColor, size = 62)
+                    }
+                } else {
+                    PersonaAvatar(emoji = pickedEmoji, colorIndex = pickedColor, size = 62)
+                }
                 Spacer(Modifier.width(16.dp))
                 Column(
                     Modifier
@@ -279,7 +321,31 @@ private fun ProfileEditSheet(
                     )
                 }
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "从相册选择照片",
+                    style = IosTheme.typography.footnote,
+                    color = ios.blue,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ios.blue.copy(alpha = 0.10f))
+                        .clickable { picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+                if (pickedPhoto.isNotBlank()) {
+                    Text(
+                        "清除照片",
+                        style = IosTheme.typography.footnote,
+                        color = ios.red,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { pickedPhoto = "" }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
             Text("头像", style = IosTheme.typography.footnote, color = ios.secondaryLabel)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -323,7 +389,7 @@ private fun ProfileEditSheet(
             Spacer(Modifier.height(26.dp))
             AuroraButton(
                 text = "保存",
-                onClick = { onSave(name.trim(), pickedEmoji, pickedColor) },
+                onClick = { onSave(name.trim(), pickedEmoji, pickedColor, pickedPhoto) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

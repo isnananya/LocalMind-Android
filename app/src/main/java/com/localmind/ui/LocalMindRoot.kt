@@ -138,6 +138,14 @@ fun LocalMindRoot(
         }
     }
 
+    val tabStyleTop = uiTokens["tabStyle"] ?: "glass"
+    val canHideTop = tabs.size > 1
+    val subPageTop = showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
+        showPluginDocs || showDebug || showSettings || meFullPage ||
+        (showImageStudio && tab == Tab.MODELS)
+    val immersiveTop = tab == Tab.CHAT && inChat
+    val barVisibleTop = !subPageTop && !immersiveTop && !(tabStyleTop == "hidden" && canHideTop)
+
     Box(Modifier.fillMaxSize()) {
         AuroraBackground {
             Box(Modifier.fillMaxSize()) {
@@ -257,10 +265,10 @@ fun LocalMindRoot(
                 }
             }
 
-                val tabStyle = uiTokens["tabStyle"] ?: "glass"
+                val tabStyle = tabStyleTop
                 val showLabels = (uiTokens["showTabBarLabels"] ?: "true").toBooleanStrictOrNull() ?: true
-                val canHideTabBar = tabs.size > 1
-                val barVisible = !subPage && !immersiveChat && !(tabStyle == "hidden" && canHideTabBar)
+                val canHideTabBar = canHideTop
+                val barVisible = barVisibleTop
                 androidx.compose.runtime.LaunchedEffect(barVisible, hideTabBar) {
                     viewModel.setBarVisible(barVisible)
                 }
