@@ -1,6 +1,7 @@
 package com.localmind.ui.components
 
 import android.graphics.Bitmap
+import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
@@ -37,7 +38,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -55,6 +58,8 @@ import com.localmind.ui.Tab
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.motion.Motion
 import com.localmind.ui.theme.IosTheme
+import com.localmind.ui.theme.LocalUiTokens
+import com.localmind.ui.theme.parseHexColor
 import kotlinx.coroutines.isActive
 
 private data class BarItem(val tab: Tab, val icon: ImageVector)
@@ -72,18 +77,7 @@ private val tabIconOf: Map<Tab, ImageVector> = mapOf(
 
 private val defaultTabs = listOf(Tab.CHAT, Tab.MODELS, Tab.ME)
 
-/**
- * 底部「液态玻璃」栏。
- *
- * 视觉层次（从下到上）：
- *  1. 真实背景模糊 —— 窗口内容抓 1/6 缩略图做三次 box blur，只取栏所在那一条。
- *  2. 染色 —— 浅色半透明白，深色半透明黑。纯色会让玻璃"死掉"。
- *  3. 高光边 —— 上缘亮、下缘暗，模拟玻璃厚度。
- *  4. 选中胶囊 —— 白玻璃 + 细边，用弹簧滑动。
- *  5. 图标与文字。
- *
- * 动效只做两处：胶囊滑动的回弹、按下时 0.9 缩放。整个栏一起弹会晕。
- */
+/** 底部液态玻璃栏：模糊 + AGSL 折射 + 材质；形状/留白/染色/指示器走 ui_theme 令牌。 */
 @Composable
 fun LiquidGlassTabBar(
     selected: Tab,
@@ -96,21 +90,31 @@ fun LiquidGlassTabBar(
     style: String = "glass",
 ) {
     val ios = IosTheme.palette
+    val metrics = IosTheme.metrics
     val view = LocalView.current
     val haptics = LocalHapticFeedback.current
+    val tokens = LocalUiTokens.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
+    val shapeKind = (tokens["tabBarShape"] ?: "capsule").lowercase()
+    val margin = (tokens["tabBarMargin"]?.toFloatOrNull() ?: 18f).dp
+    val lift = (tokens["tabBarLift"]?.toFloatOrNull() ?: 8f).dp
+    val blurPct = (tokens["tabBarBlur"]?.toFloatOrNull() ?: 100f).coerceIn(0f, 100f)
+    val tint = tokens["tabBarTint"]?.let { runCatching { parseHexColor(it) }.getOrNull() }
+        ?: if (ios.isDark) Color(0xFF171A20) else Color(0xFFF2F6FB)
+    val indicator = (tokens["tabBarIndicator"] ?: "capsule").lowercase()
 
     val specs = items.mapNotNull { tab ->
         (icons[tab] ?: tabIconOf[tab])?.let { BarItem(tab, it) }
     }.ifEmpty { defaultTabs.map { BarItem(it, tabIconOf.getValue(it)) } }
 
-    // ---- 背景采样 ----
     var backdrop by remember { mutableStateOf<Bitmap?>(null) }
     var barSize by remember { mutableStateOf(IntSize.Zero) }
     var barPos by remember { mutableStateOf(IntOffset.Zero) }
     var srcRect by remember { mutableStateOf(Rect.Zero) }
     val decorView = remember(view) { GlassBackdrop.findDecor(view) }
 
-    LaunchedEffect(selected, ios.isDark, style) {
+    LaunchedEffect(selected, ios.isDark, style, blurPct) {
         GlassBackdrop.invalidate()
         while (isActive) {
             val bmp = GlassBackdrop.capture(decorView)
@@ -128,11 +132,10 @@ fun LiquidGlassTabBar(
                 srcRect = Rect(x, y, x + w, y + h)
                 backdrop = bmp
             }
-            kotlinx.coroutines.delay(180)
+            kotlinx.coroutines.delay(150)
         }
     }
 
-    // ---- 选中胶囊 ----
     val count = specs.size
     val selectedIndex = specs.indexOfFirst { it.tab == selected }.coerceAtLeast(0)
     var widthPx by remember { mutableStateOf(0f) }
@@ -140,28 +143,51 @@ fun LiquidGlassTabBar(
     LaunchedEffect(selectedIndex, widthPx, count) {
         if (widthPx > 0f && count > 0) {
             val slot = widthPx / count
-            // 胶囊按**中心点**定位：slot 中心 = (i + 0.5) * slot。
             pillX.animateTo(slot * (selectedIndex + 0.5f), Motion.bouncy())
         }
     }
 
-    val shape = RoundedCornerShape(percent = 50)
+    val barHeight = metrics.tabBarHeight
+    val corner = when (shapeKind) {
+        "square" -> 0.dp
+        "rounded" -> 26.dp
+        else -> barHeight / 2
+    }
+    val shape = RoundedCornerShape(corner)
+    val cornerPx = with(density) { corner.toPx() }
+
+    val shader = remember(backdrop, srcRect, barSize, cornerPx, tint, ios.isDark, blurPct, style) {
+        val bmp = backdrop ?: return@remember null
+        if (style == "plain" || blurPct <= 1f) return@remember null
+        GlassShader.create(
+            bitmap = bmp,
+            src = if (srcRect.width > 1f) srcRect else Rect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat()),
+            width = barSize.width,
+            height = barSize.height,
+            radius = cornerPx,
+            refraction = 8f + 6f * (blurPct / 100f),
+            tint = (tint.value shr 32).toInt(),
+            tintAlpha = if (ios.isDark) 0.26f else 0.30f,
+            highlight = if (ios.isDark) 0.10f else 0.35f,
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 18.dp)
-            .padding(bottom = bottomInset + 8.dp),
+            .padding(horizontal = margin)
+            .padding(bottom = bottomInset + lift),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(60.dp)
+                .height(barHeight)
                 .shadow(
                     elevation = 18.dp,
                     shape = shape,
-                    ambientColor = Color.Black.copy(alpha = if (ios.isDark) 0.4f else 0.10f),
-                    spotColor = Color.Black.copy(alpha = if (ios.isDark) 0.5f else 0.14f),
+                    ambientColor = Color.Black.copy(alpha = if (ios.isDark) 0.45f else 0.12f),
+                    spotColor = Color.Black.copy(alpha = if (ios.isDark) 0.55f else 0.16f),
                 )
                 .clip(shape)
                 .onSizeChanged {
@@ -173,10 +199,26 @@ fun LiquidGlassTabBar(
                     barPos = IntOffset(p.x.toInt(), p.y.toInt())
                 },
         ) {
-            // 1. 背景模糊
-            if (style != "plain") {
+            if (shader != null) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().apply {
+                            this.shader = shader
+                            isAntiAlias = true
+                        }
+                        val r = corner.toPx()
+                        canvas.nativeCanvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
+                    }
+                }
+            } else {
                 backdrop?.let { bmp ->
-                    Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = if (ios.isDark) 0.42f else 0.55f }) {
+                    Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                alpha = if (ios.isDark) 0.62f else 0.72f
+                            }
+                    ) {
                         val src = if (srcRect.width > 1f) srcRect else Rect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat())
                         drawImage(
                             image = bmp.asImageBitmap(),
@@ -191,30 +233,24 @@ fun LiquidGlassTabBar(
                         )
                     }
                 }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (ios.isDark) Color(0xFF141416).copy(alpha = if (style == "plain") 0.96f else 0.58f)
+                            else Color.White.copy(alpha = if (style == "plain") 0.96f else 0.52f)
+                        )
+                )
             }
 
-            // 2. 染色
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        if (ios.isDark) {
-                            Color(0xFF141416).copy(alpha = if (style == "plain") 0.96f else 0.62f)
-                        } else {
-                            Color.White.copy(alpha = if (style == "plain") 0.96f else 0.40f)
-                        }
-                    )
-            )
-
-            // 3. 高光与厚度
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0f to (if (ios.isDark) Color.White.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.70f)),
-                            0.42f to Color.Transparent,
-                            1f to (if (ios.isDark) Color.Black.copy(alpha = 0.20f) else Color.Black.copy(alpha = 0.05f)),
+                            0f to Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.38f),
+                            0.35f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = if (ios.isDark) 0.22f else 0.05f),
                         )
                     )
             )
@@ -222,46 +258,67 @@ fun LiquidGlassTabBar(
                 Modifier
                     .fillMaxSize()
                     .border(
-                        width = 0.7.dp,
+                        width = metrics.barBorderWidth,
                         brush = Brush.verticalGradient(
                             listOf(
-                                Color.White.copy(alpha = if (ios.isDark) 0.22f else 0.98f),
-                                Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.30f),
-                                Color.Black.copy(alpha = if (ios.isDark) 0.35f else 0.06f),
+                                Color.White.copy(alpha = if (ios.isDark) 0.22f else 0.95f),
+                                Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.25f),
+                                Color.Black.copy(alpha = if (ios.isDark) 0.30f else 0.06f),
                             )
                         ),
                         shape = shape,
                     )
             )
 
-            // 4. 选中胶囊
-            Box(
-                modifier = Modifier
-                    .graphicsLayer {
-                        // 减去半个胶囊宽度，让 pillX 表示中心而不是左边缘。
-                        translationX = pillX.value - 37.dp.toPx()
-                        alpha = if (pillX.value > 0f) 1f else 0f
-                    }
-                    .width(74.dp)
-                    .height(46.dp)
-                    .align(Alignment.CenterStart)
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                if (ios.isDark) Color.White.copy(alpha = 0.13f) else ios.blue.copy(alpha = 0.14f),
-                                if (ios.isDark) Color.White.copy(alpha = 0.04f) else ios.blue.copy(alpha = 0.08f),
+            when (indicator) {
+                "underline" -> Box(
+                    Modifier
+                        .graphicsLayer {
+                            translationX = pillX.value - 14.dp.toPx()
+                        }
+                        .align(Alignment.BottomStart)
+                        .padding(bottom = 8.dp)
+                        .width(28.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(ios.blue),
+                )
+                "dot" -> Box(
+                    Modifier
+                        .graphicsLayer { translationX = pillX.value - 3.dp.toPx() }
+                        .align(Alignment.BottomStart)
+                        .padding(bottom = 7.dp)
+                        .size(6.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(ios.blue),
+                )
+                "none" -> Unit
+                else -> Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = pillX.value - 37.dp.toPx()
+                            alpha = if (pillX.value > 0f) 1f else 0f
+                        }
+                        .width(74.dp)
+                        .height(46.dp)
+                        .align(Alignment.CenterStart)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    if (ios.isDark) Color.White.copy(alpha = 0.14f) else ios.blue.copy(alpha = 0.16f),
+                                    if (ios.isDark) Color.White.copy(alpha = 0.04f) else ios.blue.copy(alpha = 0.08f),
+                                )
                             )
                         )
-                    )
-                    .border(
-                        0.6.dp,
-                        if (ios.isDark) Color.White.copy(alpha = 0.14f) else ios.blue.copy(alpha = 0.16f),
-                        RoundedCornerShape(percent = 50),
-                    )
-            )
+                        .border(
+                            0.6.dp,
+                            if (ios.isDark) Color.White.copy(alpha = 0.14f) else ios.blue.copy(alpha = 0.18f),
+                            RoundedCornerShape(999.dp),
+                        )
+                )
+            }
 
-            // 5. 内容
             Row(
                 modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,

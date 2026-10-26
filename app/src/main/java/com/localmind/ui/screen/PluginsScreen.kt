@@ -62,6 +62,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val plugins by viewModel.plugins.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     var pendingDelete by remember { mutableStateOf<InstalledPlugin?>(null) }
+    var pendingCode by remember { mutableStateOf<java.io.File?>(null) }
     var showDev by remember { mutableStateOf(false) }
 
     val pickZip = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -73,9 +74,19 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { out -> input.copyTo(out) }
             } ?: return@runCatching
-            val msg = viewModel.installPluginZip(tmp)
-            tmp.delete()
-            viewModel.toast(msg)
+            // 带 classes.dex 的包会执行代码，先让用户确认一次。
+            val hasCode = runCatching {
+                java.util.zip.ZipFile(tmp).use { z ->
+                    z.entries().toList().any { it.name.endsWith(".dex", ignoreCase = true) }
+                }
+            }.getOrDefault(false)
+            if (hasCode) {
+                pendingCode = tmp
+            } else {
+                val msg = viewModel.installPluginZip(tmp)
+                tmp.delete()
+                viewModel.toast(msg)
+            }
         }.onFailure { viewModel.toast("导入失败：" + (it.message?.take(80) ?: "")) }
     }
 
@@ -215,6 +226,37 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         }
     }
 
+    pendingCode?.let { file ->
+        AlertDialog(
+            onDismissRequest = {
+                file.delete()
+                pendingCode = null
+            },
+            title = { Text("安装代码插件？", style = IosTheme.typography.headline) },
+            text = {
+                Text(
+                    "这个 zip 里有 classes.dex，安装后会执行其中的 Java 代码。" +
+                        "只安装你信任的来源。代码以主程序同等权限运行。",
+                    style = IosTheme.typography.subheadline,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val msg = viewModel.installPluginZip(file)
+                    file.delete()
+                    pendingCode = null
+                    viewModel.toast(msg)
+                }) { Text("仍然安装", color = ios.red) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    file.delete()
+                    pendingCode = null
+                }) { Text("取消") }
+            },
+        )
+    }
+
     pendingDelete?.let { plugin ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -253,6 +295,7 @@ private fun PluginRow(
         PluginAbilities.EMOJI_PACK.id -> ios.orange
         PluginAbilities.TTS_VOICE.id, PluginAbilities.TTS_ENGINE.id -> ios.green
         PluginAbilities.PIPELINE.id -> ios.yellow
+        PluginAbilities.CODE_PLUGIN.id -> ios.indigo
         else -> ios.gray
     }
     val icon = when (primary) {
@@ -261,6 +304,7 @@ private fun PluginRow(
         PluginAbilities.EMOJI_PACK.id -> AppIcons.AutoAwesome
         PluginAbilities.TTS_VOICE.id, PluginAbilities.TTS_ENGINE.id -> AppIcons.Mic
         PluginAbilities.PIPELINE.id -> AppIcons.Bolt
+        PluginAbilities.CODE_PLUGIN.id -> AppIcons.Psychology
         else -> AppIcons.Extension
     }
 

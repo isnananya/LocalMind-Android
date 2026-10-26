@@ -89,10 +89,11 @@ object PluginInstall {
         // 落点只能是 filesDir/native/<abi>/：只有那下面的 .so 能被 System.load。
         val abi = com.localmind.service.NativeLibraryInstaller.currentAbi()
         val assetsDir = File(File(storage.pluginsDir, probeId), "assets")
+        val codeDir = File(File(storage.pluginsDir, probeId), "code")
         val libDir = File(storage.nativeDir, abi)
         // libAbi 必须一起传：通用包里有 lib/arm64-v8a 和 lib/x86_64 两份同名 .so，
         // 不按本机 ABI 选就会后一份覆盖前一份，最后校验失败、后端消失。
-        val contents = PluginArchive.read(file, assetsDir, libDir, abi).getOrElse {
+        val contents = PluginArchive.read(file, assetsDir, libDir, abi, codeDir).getOrElse {
             return Outcome.Failed("展开压缩包失败：${it.message?.take(90)}")
         }
         if (contents.isEmpty) {
@@ -100,6 +101,13 @@ object PluginInstall {
         }
 
         val report = mutableListOf<String>()
+
+        if (contents.code.isNotEmpty()) {
+            val dex = contents.code["classes.dex"]
+            if (dex != null) {
+                report += "代码插件 classes.dex（" + (dex.length() / 1024) + " KB，可执行）"
+            }
+        }
 
         // 通用包不是错误：装的时候只取本机那一份，其余架构如实说明。
         if (contents.otherAbis.isNotEmpty()) {
@@ -270,6 +278,15 @@ object PluginInstall {
                     ?: theme?.description.orEmpty(),
                 abilities = abilities,
             )
+        }
+
+        // 代码目录按 **manifest.id** 归一：运行时按插件 id 找 classes.dex。
+        if (contents.code.isNotEmpty() && probeId != manifest.id) {
+            val target = File(File(storage.pluginsDir, manifest.id), "code")
+            target.parentFile?.mkdirs()
+            if (target.exists()) target.deleteRecursively()
+            codeDir.copyRecursively(target, overwrite = true)
+            codeDir.deleteRecursively()
         }
 
         // ---- 第四步：落库 ----

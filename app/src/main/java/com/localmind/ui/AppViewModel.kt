@@ -2809,7 +2809,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // 不做任何 trim）。它要存进消息里，下一轮重建历史时逐字节还原 ——
                 // 只有这样，上一轮的回复才落在 KV cache 里（见 docs/SPEED.md）。
                 val rawGenerated = finalText.ifBlank { buffer.toString() }
-                val split = TextUtils.splitReasoning(rawGenerated)
+                // 显示与 TTS 用去掉控制标记的文本；rawContent 仍保存原文（KV cache）。
+                val split = TextUtils.splitReasoning(TextUtils.stripControlTokens(rawGenerated))
                 val fullReasoning = split.reasoning.ifBlank { null }
 
                 // 解析 AI 主动发图/发表情的标记。标记不会显示给用户，
@@ -3819,11 +3820,53 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val enabled = activePluginsFor(com.localmind.data.PluginAbilities.CHAT_ACTION)
             .map { it.manifest.id }.toSet()
         val packs = storage.loadChatActionPacks()
-        _chatActions.value = packs.filterKeys { it in enabled }.values
+        val declared = packs.filterKeys { it in enabled }.values
             .flatMap { it.actions }
             .filter { it.placement == "composer" }
             .distinctBy { it.id }
-            .take(6)
+
+        // ---- 代码插件：加载 dex，把它注册的动作并进同一条动作栏 ----
+        //
+        // 每次刷新都重建：插件启停、重装、改 dex 都能立刻生效。加载失败只记日志，
+        // 不影响已装的其他插件；动作 id 用 code:<插件 id>:<动作 id> 前缀，
+        // 点击时据此找回插件实例。
+        com.localmind.service.PluginRuntime.clear()
+        val codeActions = mutableListOf<com.localmind.data.ChatAction>()
+        activePluginsFor(com.localmind.data.PluginAbilities.CODE_PLUGIN).forEach { plugin ->
+            val id = plugin.manifest.id
+            val dex = java.io.File(storage.pluginsDir, id + "/code/classes.dex")
+            val entryClass = plugin.manifest.config["entryClass"].orEmpty()
+            val cache = java.io.File(localApp.codeCacheDir, "plugin-" + id.replace(':', '_'))
+            val loaded = com.localmind.service.PluginRuntime.load(id, dex, entryClass, cache) { line ->
+                android.util.Log.i("PluginRuntime", id + ": " + line)
+            }
+            loaded.onSuccess { l ->
+                l.actions.forEach { (actionId, label) ->
+                    codeActions += com.localmind.data.ChatAction(
+                        id = "code:" + id + ":" + actionId,
+                        label = label,
+                        prompt = "",
+                        mode = "send",
+                    )
+                }
+            }.onFailure { e ->
+                android.util.Log.w("PluginRuntime", "加载失败 " + id + ": " + (e.message ?: e.javaClass.simpleName))
+            }
+        }
+
+        _chatActions.value = (declared + codeActions)
+            .distinctBy { it.id }
+            .take(8)
+    }
+
+    /** 代码插件动作：返回要发送的文本；插件不存在/抛异常时返回 null。 */
+    fun runCodeAction(actionId: String, input: String): String? {
+        if (!actionId.startsWith("code:")) return null
+        val rest = actionId.removePrefix("code:")
+        val pluginId = rest.substringBefore(':')
+        val localId = rest.substringAfter(':', "")
+        if (pluginId.isBlank() || localId.isBlank()) return null
+        return com.localmind.service.PluginRuntime.runAction(pluginId, localId, input)
     }
 
     fun useLayout(packId: String) {

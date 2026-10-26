@@ -58,6 +58,8 @@ object PluginArchive {
     /** 条目数上限。 */
     private const val MAX_ENTRIES = 512
 
+    private const val MAX_DEX_BYTES = 16L * 1024 * 1024
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; prettyPrint = true }
 
     /** 从 zip 里读出来的内容。 */
@@ -74,6 +76,8 @@ object PluginArchive {
          * 才能被 `System.load`。混在一起的话安装器得靠文件名猜，很脆。
          */
         val libs: Map<String, File> = emptyMap(),
+        /** 代码插件：文件名 → 已落盘的 .dex。 */
+        val code: Map<String, File> = emptyMap(),
         /** 被跳过的条目，用来在界面上如实告诉用户"我忽略了什么"。 */
         val skipped: List<String> = emptyList(),
         /**
@@ -84,7 +88,7 @@ object PluginArchive {
     ) {
         fun text(name: String): String? = files[name]
         val manifestText: String? get() = files[MANIFEST_FILE]
-        val isEmpty: Boolean get() = files.isEmpty() && assets.isEmpty() && libs.isEmpty()
+        val isEmpty: Boolean get() = files.isEmpty() && assets.isEmpty() && libs.isEmpty() && code.isEmpty()
     }
 
     /** 这个 zip 路径是插件的资源（`assets/` 下）。 */
@@ -128,6 +132,7 @@ object PluginArchive {
         assetDir: File?,
         libDir: File? = null,
         libAbi: String? = null,
+        codeDir: File? = null,
     ): Result<Contents> = runCatching {
         require(zip.isFile) { "文件不存在：${zip.name}" }
         require(zip.length() > 0) { "文件是空的" }
@@ -135,6 +140,7 @@ object PluginArchive {
         val texts = mutableMapOf<String, String>()
         val assets = mutableMapOf<String, File>()
         val libs = mutableMapOf<String, File>()
+        val code = mutableMapOf<String, File>()
         val otherAbis = mutableSetOf<String>()
         val skipped = mutableListOf<String>()
         var entries = 0
@@ -161,11 +167,35 @@ object PluginArchive {
                 val base = raw.substringAfterLast('/')
                 val isAsset = PluginAbilities.isAsset(raw)
                 val isLib = isLibPath(raw)
+                val isDex = base.endsWith(".dex", ignoreCase = true)
                 val isKnownText = base == MANIFEST_FILE || base in DOC_FILES ||
                     PluginAbilities.ALL.any { PluginAbilities.matchesContent(it, raw) }
 
-                if (!isKnownText && !isAsset && !isLib) {
+                if (!isKnownText && !isAsset && !isLib && !isDex) {
                     skipped += raw
+                    continue
+                }
+
+                // 代码插件：dex 直接落盘，安装时**不加载**；加载发生在启用之后。
+                if (isDex) {
+                    if (codeDir == null) {
+                        skipped += raw + "（未提供代码目录）"
+                        continue
+                    }
+                    if (entry.size > MAX_DEX_BYTES) {
+                        skipped += raw + "（超过 " + MAX_DEX_BYTES / 1024 / 1024 + " MB）"
+                        continue
+                    }
+                    codeDir.mkdirs()
+                    val out = File(codeDir, base)
+                    out.outputStream().use { os -> zis.copyTo(os) }
+                    if (out.length() <= 0L) {
+                        out.delete()
+                        skipped += raw + "（空文件）"
+                        continue
+                    }
+                    out.setReadOnly()
+                    code[base] = out
                     continue
                 }
 
@@ -284,6 +314,7 @@ object PluginArchive {
             files = texts,
             assets = assets,
             libs = libs,
+            code = code,
             skipped = skipped,
             otherAbis = otherAbis,
         )

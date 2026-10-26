@@ -186,6 +186,23 @@ object UiTokens {
     val fontScale = UiToken("fontScale", "整体字号缩放", TokenType.NUMBER, "1.0", 0.8, 1.4)
 
     // ---------------------------------------------------------------- 导航与标签栏
+    val tabBarShape = UiToken(
+        "tabBarShape", "标签栏形状", TokenType.ENUM, "capsule",
+        note = "capsule（胶囊）/ rounded（圆角矩形）/ square（直角）",
+    )
+    val tabBarMargin = UiToken("tabBarMargin", "标签栏左右留白", TokenType.NUMBER, "18", 0.0, 48.0, "dp")
+    val tabBarLift = UiToken("tabBarLift", "标签栏离底距离", TokenType.NUMBER, "8", 0.0, 40.0, "dp")
+    val tabBarBlur = UiToken(
+        "tabBarBlur", "玻璃模糊强度", TokenType.NUMBER, "100", 0.0, 100.0,
+        note = "0 = 不模糊（纯半透明），100 = 最强",
+    )
+    val tabBarTint = UiToken("tabBarTint", "玻璃染色", TokenType.COLOR, "#FFFFFF",
+        note = "深色主题用 darkTokens 覆盖成深色")
+    val tabBarIndicator = UiToken(
+        "tabBarIndicator", "选中指示器", TokenType.ENUM, "capsule",
+        note = "capsule（玻璃胶囊）/ underline（下划线）/ dot（圆点）/ none",
+    )
+
     val tabStyle = UiToken(
         "tabStyle", "标签栏样式", TokenType.ENUM, "glass",
         note = "glass（毛玻璃）/ plain（不透明）/ hidden（藏起来，但标签只剩一个时忽略）",
@@ -213,6 +230,7 @@ object UiTokens {
         bodySize, fontScale,
         // 导航与标签栏
         tabStyle, showTabBarLabels, navTitleAlign,
+        tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }
@@ -221,6 +239,8 @@ object UiTokens {
     val enumValues: Map<String, Set<String>> = mapOf(
         tabStyle.key to setOf("glass", "plain", "hidden"),
         navTitleAlign.key to setOf("center", "leading"),
+        tabBarShape.key to setOf("capsule", "rounded", "square"),
+        tabBarIndicator.key to setOf("capsule", "underline", "dot", "none"),
     )
 
     /** 合法的标签页 id。 */

@@ -624,9 +624,14 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
                 actions = chatActions,
                 draft = chatState.draft,
                 onRun = { action ->
-                    val rendered = com.localmind.data.ChatActions.render(action.prompt, chatState.draft)
-                    if (action.mode == "insert") viewModel.setDraft(rendered)
-                    else viewModel.send(rendered)
+                    if (action.id.startsWith("code:")) {
+                        val produced = viewModel.runCodeAction(action.id, chatState.draft)
+                        if (produced != null) viewModel.send(produced)
+                    } else {
+                        val rendered = com.localmind.data.ChatActions.render(action.prompt, chatState.draft)
+                        if (action.mode == "insert") viewModel.setDraft(rendered)
+                        else viewModel.send(rendered)
+                    }
                 },
             )
         }

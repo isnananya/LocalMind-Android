@@ -196,7 +196,24 @@ object PluginAbilities {
         description = "一次导入多个人设",
     )
 
-        /**
+            /**
+     * 代码插件：zip 里带一份 classes.dex，安装后由 DexClassLoader 加载。
+     *
+     * 这是本项目第一次开放**可执行代码**。风险由用户承担，所以安装前会弹一次
+     * 明确的确认框；加载失败只会把插件的状态置为 FAILED，不影响主程序。
+     *
+     * 入口类写在 plugin.json 的 config.entryClass 里，必须实现
+     * com.localmind.plugin.PluginEntry。能做的事情见 PluginApi.kt。
+     */
+    val CODE_PLUGIN = PluginAbility(
+        id = "code_plugin",
+        label = "代码插件",
+        description = "加载 classes.dex，注册动作 / 处理输入（可执行代码，谨慎安装）",
+        contentFiles = setOf("classes.dex"),
+        implemented = true,
+    )
+
+/**
      * 聊天快捷动作：在输入框上方加几个一键提示词。
      *
      * 内容文件 actions.json。动作只有两种语义（直接发送 / 填进输入框），
@@ -268,7 +285,7 @@ object PluginAbilities {
     val ALL: List<PluginAbility> = listOf(
         EMOJI_PACK, MODEL_LIBRARY, MODEL_SOURCE, TTS_VOICE, TTS_ENGINE,
         NATIVE_BACKEND, REMOTE_PROVIDER, IMAGE_BACKEND, WEB_TOOL, MCP_SERVER,
-        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, PIPELINE, API_ENDPOINT,
+        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, CODE_PLUGIN, PIPELINE, API_ENDPOINT,
     )
 
     fun fromId(id: String): PluginAbility? = ALL.firstOrNull { it.id == id }

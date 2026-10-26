@@ -34,6 +34,8 @@ object GlassBackdrop {
     private var lastCapture = 0L
     private var lastWidth = 0
     private var lastHeight = 0
+    private var loggedFailure = false
+    private var loggedSuccess = false
 
     /** Minimum gap between captures; the bar re-reads the cached bitmap in between. */
     private const val MIN_INTERVAL_MS = 90L
@@ -78,11 +80,19 @@ object GlassBackdrop {
             canvas.restoreToCount(save)
 
             stackBlur(target, BLUR_RADIUS)
+            if (!loggedSuccess) {
+                loggedSuccess = true
+                android.util.Log.i("GlassBackdrop", "capture ok " + target.width + "x" + target.height)
+            }
             lastCapture = now
             lastWidth = w
             lastHeight = h
             target
         } catch (t: Throwable) {
+            if (!loggedFailure) {
+                loggedFailure = true
+                android.util.Log.w("GlassBackdrop", "capture 失败：" + (t.message ?: t.javaClass.simpleName))
+            }
             // A capture failure must never take the UI down; the bar falls back to
             // its translucent tint.
             null
@@ -172,13 +182,18 @@ object GlassBackdrop {
 
     /** Walks up from a Compose view to the window decor view. */
     fun findDecor(view: View?): View? {
+        // 一直走到"父级不是 View"的那一层，最后一个 View 就是 DecorView。
+        // 旧实现判断 parent.parent == null，在 Compose + ViewRootImpl 的结构下
+        // 永远不成立（DecorView 的 parent 是 ViewRootImpl，不是 View），
+        // 于是 capture 一直返回 null，底栏从来没有真正模糊过。
         var v: View? = view
+        var last: View? = null
         while (v != null) {
-            if (v.parent is ViewGroup && (v.parent as ViewGroup).parent == null) return v
+            last = v
             val p = v.parent
             v = if (p is View) p else null
         }
-        return null
+        return last
     }
 
     @Suppress("unused")
