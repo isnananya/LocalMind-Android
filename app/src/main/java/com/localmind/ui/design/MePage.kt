@@ -77,6 +77,7 @@ fun MePage(viewModel: AppViewModel) {
                 MeRoute.ABOUT -> AboutScreen(
                     onBack = { route = null },
                     onOpenDebug = { viewModel.openDebug(true) },
+                    viewModel = viewModel,
                 )
                 null -> Unit
             }

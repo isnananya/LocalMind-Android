@@ -7,6 +7,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +44,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -53,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localmind.ui.Tab
@@ -146,6 +152,8 @@ fun LiquidGlassTabBar(
     val selectedIndex = specs.indexOfFirst { it.tab == selected }.coerceAtLeast(0)
     var widthPx by remember { mutableStateOf(0f) }
     val pillX = remember { Animatable(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(selectedIndex, widthPx, count) {
         if (widthPx > 0f && count > 0) {
             val slot = widthPx / count
@@ -161,7 +169,9 @@ fun LiquidGlassTabBar(
     }
     val shape = RoundedCornerShape(corner)
     // 参考 LiquidTab：紧凑胶囊，不是通栏。3 个 240dp，4 个 312dp，最多 360dp。
+    val widthMode = tokens["tabBarWidth"] ?: "compact"
     val compactWidth = minOf(360, 72 * count + 24).dp
+    var dragY by remember { mutableFloatStateOf(0f) }
     val cornerPx = with(density) { corner.toPx() }
 
     val shader = remember(backdrop, srcRect, barSize, cornerPx, tint, ios.isDark, blurPct, style) {
@@ -182,8 +192,22 @@ fun LiquidGlassTabBar(
 
     Box(
         modifier = Modifier
-            .width(compactWidth)
-            .padding(bottom = bottomInset + lift),
+            .then(if (widthMode == "full") Modifier.fillMaxWidth().padding(horizontal = margin) else Modifier.width(compactWidth))
+            .padding(bottom = bottomInset + lift)
+            .graphicsLayer { translationY = dragY }
+            .pointerInput(widthMode) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    },
+                    onDrag = { change: androidx.compose.ui.input.pointer.PointerInputChange, amount: androidx.compose.ui.geometry.Offset ->
+                        change.consume()
+                        dragY = (dragY + amount.y).coerceIn((-160).dp.toPx(), 0f)
+                    },
+                    onDragEnd = {},
+                    onDragCancel = {},
+                )
+            },
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -208,73 +232,21 @@ fun LiquidGlassTabBar(
                 .drawWithContent { if (!GlassBackdrop.capturing) drawContent() },
         ) {
             // 真折射：采样时不画底栏自己（见 capturing 开关），所以不会重影。
-            if (shader != null) {
-                Canvas(Modifier.fillMaxSize()) {
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().apply {
-                            this.shader = shader
-                            isAntiAlias = true
-                        }
-                        val r = corner.toPx()
-                        canvas.nativeCanvas.drawRoundRect(0f, 0f, size.width, size.height, r, r, paint)
-                    }
-                }
-            } else {
-                backdrop?.let { bmp ->
-                    Canvas(
-                        Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { alpha = if (ios.isDark) 0.55f else 0.65f }
-                    ) {
-                        val src = if (srcRect.width > 1f) srcRect else Rect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat())
-                        drawImage(
-                            image = bmp.asImageBitmap(),
-                            srcOffset = IntOffset(src.left.toInt().coerceAtLeast(0), src.top.toInt().coerceAtLeast(0)),
-                            srcSize = IntSize(
-                                src.width.toInt().coerceIn(1, bmp.width),
-                                src.height.toInt().coerceIn(1, bmp.height),
-                            ),
-                            dstOffset = IntOffset(-3, -3),
-                            dstSize = IntSize(
-                                size.width.toInt().coerceAtLeast(1) + 6,
-                                size.height.toInt().coerceAtLeast(1) + 6,
-                            ),
-                            filterQuality = FilterQuality.Low,
-                        )
-                    }
-                }
-            }
-            // 极淡染色，给玻璃一点乳感，不遮住折射。
+            // 底栏本体是磨砂白，不是液态玻璃；液态玻璃只做选中框。
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(tint.copy(alpha = if (ios.isDark) 0.32f else 0.46f))
+                    .background(tint.copy(alpha = if (ios.isDark) 0.62f else 0.74f))
             )
-
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.22f),
-                            0.35f to Color.Transparent,
-                            1f to Color.Black.copy(alpha = if (ios.isDark) 0.22f else 0.05f),
+                            0f to Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.35f),
+                            0.4f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = if (ios.isDark) 0.20f else 0.04f),
                         )
-                    )
-            )
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .border(
-                        width = metrics.barBorderWidth,
-                        brush = Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = if (ios.isDark) 0.22f else 0.95f),
-                                Color.White.copy(alpha = if (ios.isDark) 0.06f else 0.25f),
-                                Color.Black.copy(alpha = if (ios.isDark) 0.30f else 0.06f),
-                            )
-                        ),
-                        shape = shape,
                     )
             )
 
@@ -306,29 +278,76 @@ fun LiquidGlassTabBar(
                         .graphicsLayer {
                             translationX = pillX.value - 27.dp.toPx()
                             alpha = if (pillX.value > 0f) 1f else 0f
+                            val stretch = if (dragging) 1.16f else 1f
+                            scaleX = stretch
+                            scaleY = if (dragging) 0.94f else 1f
                         }
                         .width(54.dp)
                         .height(54.dp)
                         .align(Alignment.CenterStart)
+                        .shadow(
+                            10.dp,
+                            RoundedCornerShape(999.dp),
+                            ambientColor = Color.Black.copy(alpha = 0.10f),
+                            spotColor = Color.Black.copy(alpha = 0.12f),
+                        )
                         .clip(RoundedCornerShape(999.dp))
                         .background(
-                            Brush.verticalGradient(
+                            Brush.linearGradient(
                                 listOf(
-                                    if (ios.isDark) Color.White.copy(alpha = 0.16f) else Color(0xFFD9D9D9).copy(alpha = 0.66f),
-                                    if (ios.isDark) Color.White.copy(alpha = 0.06f) else Color(0xFFD9D9D9).copy(alpha = 0.52f),
+                                    Color.White.copy(alpha = if (ios.isDark) 0.26f else 0.92f),
+                                    (if (ios.isDark) Color(0xFF6C9BFF) else Color(0xFFDCE9FF)).copy(alpha = 0.55f),
+                                    Color.White.copy(alpha = if (ios.isDark) 0.10f else 0.62f),
                                 )
                             )
                         )
                         .border(
-                            0.6.dp,
-                            if (ios.isDark) Color.White.copy(alpha = 0.14f) else ios.blue.copy(alpha = 0.18f),
+                            1.dp,
+                            Brush.linearGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.95f),
+                                    Color.White.copy(alpha = 0.25f),
+                                    Color.Black.copy(alpha = 0.10f),
+                                )
+                            ),
                             RoundedCornerShape(999.dp),
                         )
                 )
             }
 
             Row(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(count, widthPx, indicator) {
+                        if (indicator != "capsule") return@pointerInput
+                        detectDragGestures(
+                            onDragStart = {
+                                dragging = true
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            },
+                            onDrag = { change: androidx.compose.ui.input.pointer.PointerInputChange, amount: androidx.compose.ui.geometry.Offset ->
+                                change.consume()
+                                val slot = widthPx / count
+                                scope.launch {
+                                    pillX.snapTo((pillX.value + amount.x).coerceIn(slot / 2f, widthPx - slot / 2f))
+                                }
+                            },
+                            onDragEnd = {
+                                val slot = widthPx / count
+                                val target = ((pillX.value / slot).toInt()).coerceIn(0, count - 1)
+                                specs.getOrNull(target)?.let { if (it.tab != selected) onSelect(it.tab) }
+                                scope.launch {
+                                    pillX.animateTo(slot * (target + 0.5f), Motion.bouncy())
+                                }
+                                dragging = false
+                            },
+                            onDragCancel = {
+                                dragging = false
+                                val slot = widthPx / count
+                                scope.launch { pillX.animateTo(slot * (selectedIndex + 0.5f), Motion.bouncy()) }
+                            },
+                        )
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {

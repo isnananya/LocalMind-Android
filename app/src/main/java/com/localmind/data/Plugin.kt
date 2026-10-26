@@ -35,6 +35,10 @@ data class PluginManifest(
     val requires: List<String> = emptyList(),
     /** 任意键值参数，由具体能力自己解释。 */
     val config: Map<String, String> = emptyMap(),
+    /** 许可证标识（MIT / GPL-3.0 / ...），展示在开源声明里。 */
+    val license: String = "",
+    /** 源码地址，展示在开源声明里。 */
+    val sourceUrl: String = "",
     /** 清单格式版本，将来改字段时用。 */
     val manifestVersion: Int = 1,
 ) {
@@ -197,6 +201,18 @@ object PluginAbilities {
     )
 
                 /**
+     * 液态玻璃底栏模块：安装并启用后，把底栏切成 LiquidTab 风格的紧凑胶囊，
+     * 并在「外观 → 底栏」里提供预设。
+     */
+    val GLASS_BAR = PluginAbility(
+        id = "glass_bar",
+        label = "液态玻璃底栏",
+        description = "启用紧凑悬浮玻璃底栏（LiquidTab 风格预设）",
+        contentFiles = setOf("bar.json"),
+        implemented = true,
+    )
+
+    /**
      * 网页界面：zip 里带 web/index.html（可含 css/js）。
      *
      * 用 WebView 渲染，JS 桥只有四个动作：send / prompt / toast / copy。
@@ -299,7 +315,7 @@ object PluginAbilities {
     val ALL: List<PluginAbility> = listOf(
         EMOJI_PACK, MODEL_LIBRARY, MODEL_SOURCE, TTS_VOICE, TTS_ENGINE,
         NATIVE_BACKEND, REMOTE_PROVIDER, IMAGE_BACKEND, WEB_TOOL, MCP_SERVER,
-        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, CODE_PLUGIN, WEB_SCREEN, PIPELINE, API_ENDPOINT,
+        PERSONA_PACK, UI_THEME, UI_LAYOUT, CHAT_ACTION, CODE_PLUGIN, WEB_SCREEN, GLASS_BAR, PIPELINE, API_ENDPOINT,
     )
 
     fun fromId(id: String): PluginAbility? = ALL.firstOrNull { it.id == id }

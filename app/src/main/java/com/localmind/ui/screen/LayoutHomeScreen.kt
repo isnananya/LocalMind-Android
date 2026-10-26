@@ -56,6 +56,8 @@ fun LayoutHomeScreen(viewModel: AppViewModel, layout: UiLayout?) {
     val engine by viewModel.engineState.collectAsState()
     val plugins by viewModel.plugins.collectAsState()
     val breeze by viewModel.breeze.collectAsState()
+    val chat by viewModel.chat.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val blocks = layout?.home?.takeIf { it.isNotEmpty() } ?: defaultBlocks(layout)
 
@@ -106,6 +108,24 @@ fun LayoutHomeScreen(viewModel: AppViewModel, layout: UiLayout?) {
                         if (engine.ready && engine.lastTokensPerSecond > 0) {
                             add("上次速度" to "${"%.1f".format(engine.lastTokensPerSecond)} tok/s")
                         }
+                        val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+                        add(
+                            "设备内存" to String.format(
+                                "已用 %.1f / %.1f GB",
+                                (mi.totalMem - mi.availMem) / 1024.0 / 1024.0 / 1024.0,
+                                mi.totalMem / 1024.0 / 1024.0 / 1024.0,
+                            ),
+                        )
+                        add("模型" to (chat.currentModel ?: engine.modelName ?: "未加载"))
+                        add(
+                            "内部状态" to when {
+                                chat.streaming -> "生成中 · " + "%.1f".format(chat.lastTokensPerSecond) + " tok/s"
+                                chat.thinking -> "思考中"
+                                chat.reasoning -> "推理中"
+                                else -> "空闲"
+                            },
+                        )
                         add("语音引擎" to if (breeze.ready) (breeze.active?.spec?.label ?: "已就绪") else "系统 TTS")
                         add("插件" to "${plugins.count { it.value.isActive }} / ${plugins.size} 个启用")
                     },

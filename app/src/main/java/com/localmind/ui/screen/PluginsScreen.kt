@@ -296,6 +296,7 @@ private fun PluginRow(
         PluginAbilities.TTS_VOICE.id, PluginAbilities.TTS_ENGINE.id -> ios.green
         PluginAbilities.PIPELINE.id -> ios.yellow
         PluginAbilities.CODE_PLUGIN.id -> ios.indigo
+        PluginAbilities.GLASS_BAR.id -> ios.teal
         else -> ios.gray
     }
     val icon = when (primary) {
@@ -305,6 +306,7 @@ private fun PluginRow(
         PluginAbilities.TTS_VOICE.id, PluginAbilities.TTS_ENGINE.id -> AppIcons.Mic
         PluginAbilities.PIPELINE.id -> AppIcons.Bolt
         PluginAbilities.CODE_PLUGIN.id -> AppIcons.Psychology
+        PluginAbilities.GLASS_BAR.id -> AppIcons.AutoAwesome
         else -> AppIcons.Extension
     }
 

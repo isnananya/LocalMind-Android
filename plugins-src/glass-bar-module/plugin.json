@@ -1,0 +1,17 @@
+{
+  "id": "com.localmind.bar.liquidtab",
+  "name": "液态玻璃底栏",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "LiquidTab 风格的紧凑悬浮胶囊底栏；启用后在「外观 → 底栏」可调宽度与选中态。",
+  "abilities": [
+    "glass_bar"
+  ],
+  "license": "GPL-3.0",
+  "sourceUrl": "https://github.com/big-dictator/LiquidTab",
+  "config": {
+    "preset": "liquidtab"
+  },
+  "requires": [],
+  "manifestVersion": 1
+}

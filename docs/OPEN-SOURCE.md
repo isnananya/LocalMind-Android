@@ -57,3 +57,13 @@ LocalMind 自身代码以 **MIT** 发布（见仓库根目录 [LICENSE](../LICEN
 - 用途：底栏/导航栏的液态玻璃（RenderEffect + RuntimeShader 折射、色散、模糊）。
 - 依赖版本：`com.qmdeve.liquidglass:core:1.0.2`（1.1.0 要求 compileSdk 37，工程当前 35）。
 - 只在 Android 13+ 硬件渲染时启用；模拟器软渲染自动回退到内置实现。
+
+
+## LiquidTab（GPL-3.0，可选插件）
+
+- 项目：https://github.com/big-dictator/LiquidTab
+- 版权：LiquidTab 作者（big-dictator）
+- 用途：紧凑悬浮液态玻璃底栏的布局与交互参考。
+- 分发方式：**独立插件** `glass-bar-module.zip`，不是主程序的一部分。
+- 许可：插件模块按 GPL-3.0 声明；主程序仍是 MIT。
+- 插件清单里的 license / sourceUrl 会显示在「关于 → 插件开源声明」。

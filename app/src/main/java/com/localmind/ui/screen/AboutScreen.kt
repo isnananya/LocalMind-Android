@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -45,7 +46,11 @@ import com.localmind.ui.theme.IosTheme
  * （每引入一个第三方组件就要加一条），塞进主页会把其它设置挤下去。
  */
 @Composable
-fun AboutScreen(onBack: () -> Unit, onOpenDebug: () -> Unit = {}) {
+fun AboutScreen(
+    onBack: () -> Unit,
+    onOpenDebug: () -> Unit = {},
+    viewModel: com.localmind.ui.AppViewModel? = null,
+) {
     // 版本号连点三下进测试模式。
     //
     // 用**时间窗**而不是单纯计数：慢慢点三下不该进去（用户可能只是手抖点了两下
@@ -53,6 +58,11 @@ fun AboutScreen(onBack: () -> Unit, onOpenDebug: () -> Unit = {}) {
     var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var lastTapAt by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     val ios = IosTheme.palette
+    val installedPlugins = if (viewModel != null) {
+        viewModel.plugins.collectAsState().value
+    } else {
+        emptyMap()
+    }
 
     Column(
         Modifier
@@ -347,6 +357,46 @@ fun AboutScreen(onBack: () -> Unit, onOpenDebug: () -> Unit = {}) {
                         license = "CC BY 4.0",
                         note = "人设聊天的天气数据（open-meteo.com）—— 按许可要求在此署名",
                     )
+                }
+            }
+
+            // -------------------------------------------------- 插件开源声明
+            //
+            // 插件自己声明 license/sourceUrl，安装后自动出现在这里；
+            // 主程序不为插件的许可负责，但必须把声明摆出来。
+            if (installedPlugins.isNotEmpty()) {
+                item {
+                    IosSection(
+                        header = "插件开源声明",
+                        footer = "以下由已安装插件自行声明；未填写的插件不在这里列出。" +
+                            "插件的许可与源码地址以插件作者声明为准。",
+                    ) {
+                        val declared = installedPlugins.values.filter {
+                            it.manifest.license.isNotBlank() || it.manifest.sourceUrl.isNotBlank()
+                        }
+                        if (declared.isEmpty()) {
+                            LicenseRow(
+                                name = "已安装插件",
+                                license = "未声明",
+                                note = "插件清单里没有 license / sourceUrl",
+                            )
+                        } else {
+                            declared.forEachIndexed { index, plugin ->
+                                if (index > 0) Divider(ios.separator)
+                                LicenseRow(
+                                    name = plugin.manifest.name,
+                                    license = plugin.manifest.license.ifBlank { "未声明" },
+                                    note = buildString {
+                                        append(plugin.manifest.id)
+                                        if (plugin.manifest.sourceUrl.isNotBlank()) {
+                                            append(" · ")
+                                            append(plugin.manifest.sourceUrl)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

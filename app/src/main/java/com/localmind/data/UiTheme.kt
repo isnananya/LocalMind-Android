@@ -198,6 +198,11 @@ object UiTokens {
     )
     val tabBarTint = UiToken("tabBarTint", "玻璃染色", TokenType.COLOR, "#FFFFFF",
         note = "深色主题用 darkTokens 覆盖成深色")
+    val tabBarWidth = UiToken(
+        "tabBarWidth", "标签栏宽度", TokenType.ENUM, "compact",
+        note = "compact（悬浮紧凑胶囊）/ full（通栏）",
+    )
+
     val tabBarIndicator = UiToken(
         "tabBarIndicator", "选中指示器", TokenType.ENUM, "capsule",
         note = "capsule（玻璃胶囊）/ underline（下划线）/ dot（圆点）/ none",
@@ -235,7 +240,7 @@ object UiTokens {
         bodySize, fontScale,
         // 导航与标签栏
         tabStyle, showTabBarLabels, navTitleAlign,
-        tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator, uiKit,
+        tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator, tabBarWidth, uiKit,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }
@@ -246,6 +251,7 @@ object UiTokens {
         navTitleAlign.key to setOf("center", "leading"),
         tabBarShape.key to setOf("capsule", "rounded", "square"),
         tabBarIndicator.key to setOf("capsule", "underline", "dot", "none"),
+        tabBarWidth.key to setOf("compact", "full"),
         uiKit.key to setOf("auto", "library", "compose"),
     )
 

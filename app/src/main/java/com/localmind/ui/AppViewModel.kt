@@ -483,6 +483,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setPluginEnabled(pluginId: String, enabled: Boolean) {
+        if (enabled) {
+            val plugin = storage.loadPlugins()[pluginId]
+            if (plugin?.manifest?.abilities?.contains("glass_bar") == true) {
+                setThemeOverride("tabBarWidth", "compact")
+                setThemeOverride("tabStyle", "glass")
+            }
+        }
         val p = _plugins.value[pluginId] ?: return
         val next = p.copy(
             state = if (enabled) com.localmind.data.PluginState.ENABLED else com.localmind.data.PluginState.DISABLED,
