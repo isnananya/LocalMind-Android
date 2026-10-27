@@ -9,10 +9,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.drag
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +34,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,12 +42,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInWindow
@@ -180,10 +181,25 @@ fun LiquidGlassTabBar(
     val tilt = rememberTiltX()
     val glass = remember { LiquidBarGlass() }
     glass.density = density.density
+    // 底栏内容（图标 + 文字）的截图。胶囊折射的是这张图，不是底栏下面的页面。
+    val contentLayer = rememberGraphicsLayer()
+    var contentBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(contentLayer, selectedIndex, panelPx, showLabels, iconOnly, labels, ios.isDark) {
+        // 两帧：一帧让选中色/布局落到 Row，一帧让 record 拿到新内容。
+        withFrameNanos { }
+        withFrameNanos { }
+        contentBitmap = runCatching { contentLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+    }
 
     var dragY by remember { mutableFloatStateOf(0f) }
     var draggingBar by remember { mutableStateOf(false) }
-    var pressed by remember { mutableStateOf(false) }
+    // 按压态有两个来源：手指按在某个标签上（子级 clickable 的 press），
+    // 以及"正在拖胶囊"这个手势本身。拖到一半时 clickable 会因为超过 slop
+    // 取消 press，如果只看子级，拖起来就没有折射了 —— 用户看到的正是
+    // 「只有长按底框才有折射，拖不动」。
+    var childPressed by remember { mutableStateOf(false) }
+    var gesturePressed by remember { mutableStateOf(false) }
+    val pressed = childPressed || gesturePressed
     // LiquidTab：pressSpring 1000 临界阻尼；缩放弹簧 250 / 0.62 会明显过冲。
     // 按住时胶囊会长到 1.36 倍（原版 PRESSED_SCALE = 78/56 ≈ 1.39）。
     val press = remember { Animatable(0f) }
@@ -298,27 +314,6 @@ fun LiquidGlassTabBar(
                             lensBoost = 1f + grab * 0.5f,
                         )
                     }
-                    if (indicatorKind == "capsule" && slotPx > 0f) {
-                            // 每格的两侧各留 pillInset。原来写成 (w - 2*inset)/count/2，
-                            // 首尾两格的边距只剩 inset/3（≈2dp），胶囊看起来像被底板裁掉一角。
-                            val baseHalfW = (w / count.toFloat() - pillInset * 2f) / 2f
-                            val baseHalfH = (h - pillTop * 2f) / 2f
-                            val cx = pillX.value
-                            val cy = h / 2f
-                            // LiquidTab drawSelection：位移速度反向缩放宽/高，拖起来像液体。
-                            val velocity = (if (dragging) dragVelocity else pillX.velocity) / 10f
-                            val sx = pressScale.value / (1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f))
-                            val sy = pressScale.value * (1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f))
-                            glass.drawPill(
-                                canvas = nc, sharp = bd?.sharp, blurred = bd?.blurred, sample = GlassBackdrop.SAMPLE,
-                                winLeft = panelWindow.left, winTop = panelWindow.top + dragY,
-                                left = cx - baseHalfW * sx,
-                                top = cy - baseHalfH * sy,
-                                right = cx + baseHalfW * sx,
-                                bottom = cy + baseHalfH * sy,
-                                dark = ios.isDark, liquid = liquid, press = press.value, tiltX = tilt,
-                            )
-                    }
                 }
                 if (indicatorKind == "underline" || indicatorKind == "dot") {
                     val w2 = if (indicatorKind == "dot") 6.dp.toPx() else 28.dp.toPx()
@@ -336,54 +331,94 @@ fun LiquidGlassTabBar(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
+                    .drawWithContent {
+                        contentLayer.record { this@drawWithContent.drawContent() }
+                        drawLayer(contentLayer)
+                    }
                     .pointerInput(count, panelPx.width, indicatorKind) {
                         if (indicatorKind != "capsule") return@pointerInput
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            // 先等长按：长按 = 抓起整条底栏（放大 + 阴影 + 折射加强）；
-                            // 长按前就开始横向拖 = 拖选中胶囊。
-                            val longPress = awaitLongPressOrCancellation(down.id)
-                            if (longPress != null) {
-                                draggingBar = true
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                drag(longPress.id) { change ->
-                                    change.consume()
-                                    dragY = (dragY + change.positionChange().y)
-                                        .coerceIn((-160).dp.toPx(), 0f)
+                            // ---- 手写手势循环，而不是 awaitLongPressOrCancellation / await*Slop ----
+                            //
+                            // 原因：标签按钮自己是 clickable，**它会把 DOWN 事件吃掉**。
+                            // Compose 的 awaitHorizontalTouchSlopOrCancellation 和
+                            // awaitLongPressOrCancellation 一看到 isConsumed 就取消，
+                            // 于是挂在 Row 上的手势永远不会进入拖动分支 —— 表现就是
+                            // 「长按只亮一下按压态，拖不动胶囊」。
+                            //
+                            // 这里直接读指针流（不因 consumed 退出），自己判定方向与长按：
+                            //  * 起手在选中胶囊上 + 横向过 slop → 拖胶囊（无需长按）；
+                            //  * 长按之后 → 横向拖胶囊 / 纵向拖整条底栏；
+                            //  * 其它情况一律不接管，点按照常交给按钮。
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val slot = panelPx.width / count.toFloat()
+                            if (slot <= 0f) return@awaitEachGesture
+                            val minX = slot / 2f
+                            val maxX = panelPx.width - slot / 2f
+                            val pillHalf = slot / 2f - 4.dp.toPx()
+                            val startOnPill = abs(down.position.x - pillX.value) <= pillHalf
+                            val slop = viewConfiguration.touchSlop
+                            var totalX = 0f
+                            var totalY = 0f
+                            var axis = 0 // 0 未定 / 1 胶囊 / 2 底栏
+                            var grabbed = false
+                            var pointerDown = true
+                            // 长按用"另一个协程等 500ms"实现，而不是在指针作用域里
+                            // withTimeout —— AwaitPointerEventScope 是受限挂起作用域，
+                            // 不能把 awaitPointerEvent 包进别的 suspend lambda。
+                            val longPressJob = scope.launch {
+                                delay(viewConfiguration.longPressTimeoutMillis)
+                                if (pointerDown && axis == 0) {
+                                    grabbed = true
+                                    gesturePressed = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 }
-                                draggingBar = false
-                                if (abs(dragY) < 24.dp.toPx()) dragY = 0f
-                                return@awaitEachGesture
                             }
                             val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
-                            var pillDrag = false
-                            drag(down.id) { change ->
-                                val delta = change.positionChange()
-                                if (!pillDrag && abs(delta.x) > abs(delta.y)) {
-                                    pillDrag = true
-                                    dragging = true
-                                    tracker.resetTracking()
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                }
-                                if (pillDrag) {
-                                    change.consume()
-                                    tracker.addPosition(change.uptimeMillis, change.position)
-                                    val slot = panelPx.width / count.toFloat()
-                                    if (slot > 0f) {
-                                        scope.launch {
-                                            pillX.snapTo(
-                                                (pillX.value + delta.x)
-                                                    .coerceIn(slot / 2f, panelPx.width - slot / 2f),
-                                            )
+                            try {
+                                while (true) {
+                                    // Initial 阶段读事件：子级 clickable 在 Main 阶段才会
+                                    // 消费 DOWN，所以在 Initial 里看得到"没被吃掉"的原始移动。
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    val d = change.positionChange()
+                                    totalX += d.x
+                                    totalY += d.y
+                                    if (axis == 0) {
+                                        val horizontal = abs(totalX) > slop && abs(totalX) > abs(totalY)
+                                        val vertical = abs(totalY) > slop && abs(totalY) >= abs(totalX)
+                                        when {
+                                            horizontal && (startOnPill || grabbed) -> {
+                                                axis = 1
+                                                dragging = true
+                                                gesturePressed = true
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                tracker.resetTracking()
+                                                tracker.addPosition(change.uptimeMillis, change.position)
+                                            }
+                                            grabbed && vertical -> {
+                                                axis = 2
+                                                draggingBar = true
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
+                                            else -> if ((horizontal && !startOnPill) || (!grabbed && vertical)) break
                                         }
                                     }
+                                    if (axis == 1) {
+                                        change.consume()
+                                        tracker.addPosition(change.uptimeMillis, change.position)
+                                        scope.launch {
+                                            pillX.snapTo((pillX.value + d.x).coerceIn(minX, maxX))
+                                        }
+                                    } else if (axis == 2) {
+                                        change.consume()
+                                        dragY = (dragY + d.y).coerceIn((-160).dp.toPx(), 0f)
+                                    }
                                 }
-                            }
-                            val slot = panelPx.width / count.toFloat()
-                            if (pillDrag) {
-                                dragVelocity = tracker.calculateVelocity().x
-                                if (slot > 0f) {
-                                    val target = ((pillX.value / slot).toInt()).coerceIn(0, count - 1)
+                                if (axis == 1) {
+                                    dragVelocity = tracker.calculateVelocity().x
+                                    val target = (pillX.value / slot).toInt().coerceIn(0, count - 1)
                                     specs.getOrNull(target)?.let { if (it.tab != selected) onSelect(it.tab) }
                                     scope.launch {
                                         pillX.animateTo(
@@ -392,11 +427,16 @@ fun LiquidGlassTabBar(
                                             initialVelocity = dragVelocity,
                                         )
                                     }
+                                } else if (axis == 2) {
+                                    if (abs(dragY) < 24.dp.toPx()) dragY = 0f
                                 }
+                            } finally {
+                                // 手势被取消（面板尺寸变化/重组）时，别把按压态和抓取态留在 true。
+                                pointerDown = false
+                                longPressJob.cancel()
                                 dragging = false
-                            } else if (slot > 0f) {
-                                // 没拖动只是点了一下：把胶囊弹回选中格。
-                                scope.launch { pillX.animateTo(slot * (selectedIndex + 0.5f), Motion.bouncy()) }
+                                draggingBar = false
+                                gesturePressed = false
                             }
                         }
                     },
@@ -419,9 +459,53 @@ fun LiquidGlassTabBar(
                                 onSelect(item.tab)
                             }
                         },
-                        onPressChanged = { p -> pressed = p },
+                        onPressChanged = { p -> childPressed = p },
                         modifier = Modifier.weight(1f),
                     )
+                }
+            }
+
+            // ---- 胶囊：画在图标/文字**之上** ----
+            //
+            // 顺序是 底板 → 内容 → 胶囊。胶囊先用底栏自己的磨砂底盖住这一格里的
+            // 原始图标，再把内容截图经过透镜着色器画上去 —— 被折射的是"我的/模型"
+            // 这些字和图标，底栏本身始终是连续的磨砂玻璃。
+            val bmp = contentBitmap
+            if (indicatorKind == "capsule" && slotPx > 0f && bmp != null) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawIntoCanvas { c ->
+                        val nc = c.nativeCanvas
+                        val baseHalfW = (w / count.toFloat() - pillInset * 2f) / 2f
+                        val baseHalfH = (h - pillTop * 2f) / 2f
+                        val cx = pillX.value
+                        val cy = h / 2f
+                        // LiquidTab drawSelection：位移速度反向缩放宽/高，拖起来像液体。
+                        val velocity = (if (dragging) dragVelocity else pillX.velocity) / 10f
+                        val sx = pressScale.value / (1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f))
+                        val sy = pressScale.value * (1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f))
+                        glass.drawPill(
+                            canvas = nc,
+                            base = backdrop?.blurred,
+                            content = bmp,
+                            sample = GlassBackdrop.SAMPLE,
+                            winLeft = panelWindow.left,
+                            winTop = panelWindow.top + dragY,
+                            // 内容截图和画布同源（都在底栏本地坐标里，左上角 = 0,0），
+                            // 着色器用 canvas 坐标 eval(content)，所以这里是 0。
+                            contentLeft = 0f,
+                            contentTop = 0f,
+                            left = cx - baseHalfW * sx,
+                            top = cy - baseHalfH * sy,
+                            right = cx + baseHalfW * sx,
+                            bottom = cy + baseHalfH * sy,
+                            dark = ios.isDark,
+                            liquid = liquid,
+                            press = press.value,
+                            tiltX = tilt,
+                            fillColor = fillColor,
+                            fillAlpha = 0.40f,
+                        )
+                    }
                 }
             }
         }

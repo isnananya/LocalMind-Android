@@ -163,6 +163,9 @@ class LocalMindApp : Application() {
         super.onCreate()
         instance = this
         storage = Storage(this)
+        // 1.0.6 的 Piper 崩溃修复：旧版本把「缺 espeak-ng-data」算成了音色的错，
+        // 把用户已经下好的音色拉黑了。清一次，让它们有机会在修复后跑起来。
+        storage.clearStaleNeuralBadVoicesOnce()
 
         // 诊断要**尽早**装上：启动期崩溃（模型加载、原生库、存储损坏）恰恰是
         // 内测里最难问清楚的一类，装晚了就抓不到。

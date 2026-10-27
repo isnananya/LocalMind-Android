@@ -89,6 +89,15 @@ object NeuralVoiceModels {
         // 有的干脆没有（靠 tokens 直接映射）。找不到就是空，sherpa 能跑。
         val lexicon = pick(files, base, "lexicon.txt", "lexicon-zh.txt")
 
+        // espeak-ng 的发音数据目录。**Piper 类模型（含 coqui/icefall）必需**：
+        // sherpa 的 VITS 前端在「不是 characters 前端、又没有 lexicon」时会走
+        // PiperPhonemizeLexicon，而那条路要 data_dir；给空就会走到最后的分支，
+        // 打一句 "Not a model using characters as modeling unit" 然后
+        // `SHERPA_ONNX_EXIT(-1)` —— 整个进程消失，Java 侧连异常都拿不到。
+        // 这正是「点了一个 Piper 音色，应用直接退出（exit 255）」的根因。
+        val espeakData = dir.walkTopDown()
+            .firstOrNull { it.isDirectory && it.name.equals("espeak-ng-data", true) }
+
         // 中文 VITS 的文本正则化：日期 / 数字 / 电话。给中文句子加"2026年"这种
         // 数字时才用得上；缺了不影响正常朗读，所以是可选的。
         val rules = listOf("date.fst", "number.fst", "phone.fst")
@@ -108,15 +117,42 @@ object NeuralVoiceModels {
         val comment = onnxMeta(model, "comment").orEmpty()
         val isVits = modelType.equals("vits", ignoreCase = true) || comment.isNotBlank()
 
+        // ---- 前端：这个模型怎么把文字变成音素 ----
+        //
+        // 判据来自 sherpa-onnx 自己的 offline-tts-vits-model.cc + vits-impl.h：
+        //  * frontend=="characters" / jieba / has_g2pw / melo → 不需要 espeak；
+        //  * comment 里有 piper/coqui/icefall/Inflect 且 data_dir 非空 → 用 espeak；
+        //  * 其余情况只有 lexicon 一条路，**没有 lexicon 就 exit(-1)**。
+        // 我们这边必须先算出来，因为那个 exit 发生在原生层，拦不住。
+        val frontend = onnxMeta(model, "frontend").orEmpty()
+        val jieba = onnxMeta(model, "jieba").orEmpty() == "1"
+        val g2pw = onnxMeta(model, "has_g2pw").orEmpty() == "1"
+        val piperLike = listOf("piper", "coqui", "icefall", "inflect")
+            .any { comment.contains(it, ignoreCase = true) }
+        val charFrontend = frontend.equals("characters", ignoreCase = true) ||
+            jieba || g2pw || comment.contains("melo", ignoreCase = true)
+        val canPhonemize = charFrontend || (piperLike && espeakData != null) || lexicon != null
+
+        val blockedReason = when {
+            !isVits -> "这是 " + modelType.ifBlank { comment }.ifBlank { "未知架构" } +
+                " 架构的音色，主程序目前只接了 VITS 引擎，装上也发不出声"
+            !canPhonemize -> "这个音色缺少发音数据（espeak-ng-data 或 lexicon.txt）；" +
+                "原生引擎加载它会直接结束进程，已拦下"
+            else -> ""
+        }
+
         return Layout(
             modelDir = base,
             model = model.name,
             tokens = tokens?.name.orEmpty(),
             lexicon = lexicon?.name.orEmpty(),
+            dataDir = espeakData?.absolutePath.orEmpty(),
             ruleFsts = rules.joinToString(",") { it.absolutePath },
             sizeBytes = files.sumOf { it.length() },
             modelType = modelType.ifBlank { comment }.ifBlank { "未知架构" },
-            playable = isVits,
+            frontend = frontend,
+            playable = blockedReason.isEmpty(),
+            blockedReason = blockedReason,
         )
     }
 
@@ -184,23 +220,31 @@ object NeuralVoiceModels {
         val model: String,
         val tokens: String,
         val lexicon: String,
+        /** espeak-ng-data 的绝对路径（Piper / Coqui / icefall 这类音素的模型必需）。 */
+        val dataDir: String = "",
         val ruleFsts: String,
         val sizeBytes: Long,
         /** ONNX metadata 里的 model_type（或 comment）—— 就是"这是什么架构"。 */
         val modelType: String = "",
+        /** ONNX metadata 的 frontend（characters / 空）。诊断用。 */
+        val frontend: String = "",
         /**
          * 能不能用主程序**现有的** VITS 路径念出来。
          *
-         * false = 文件在、也算"已安装"，但装上也发不出声（Matcha / Kokoro…）。
+         * false = 文件在、也算"已安装"，但装上也发不出声（Matcha / Kokoro…），
+         * 或者会**直接把进程带走**（Piper 缺 espeak-ng-data、非 characters 且无 lexicon）。
          * 这两种状态必须分开：用户要能删掉它，但不该被允许"使用"它 ——
-         * 允许的代价是整个进程消失（见 [onnxMeta] 的说明）。
+         * 允许的代价是整个进程消失（见 [onnxMeta] 与 [resolve] 的说明）。
          */
         val playable: Boolean = true,
+        /** playable=false 的具体原因（给用户看）。 */
+        val blockedReason: String = "",
     ) {
         /** 给用户看的、为什么用不了；能用时是 null。 */
         val unsupportedReason: String?
-            get() = if (playable) null else
+            get() = if (playable) null else blockedReason.ifBlank {
                 "这是 $modelType 架构的音色，主程序目前只接了 VITS 引擎，装上也发不出声"
+            }
     }
 }
 
@@ -321,7 +365,9 @@ class NeuralTtsEngine(
                             model = "$dir/${layout.model}",
                             lexicon = layout.lexicon.takeIf { it.isNotEmpty() }?.let { "$dir/$it" } ?: "",
                             tokens = layout.tokens.takeIf { it.isNotEmpty() }?.let { "$dir/$it" } ?: "",
-                            dataDir = "",
+                            // Piper / Coqui / icefall 靠 espeak 做音素转换；这条路径
+                            // 不给 dataDir 就会被原生库 exit(-1) 掉（见 resolve 的注释）。
+                            dataDir = layout.dataDir,
                         ),
                         // VITS 很小：低端机 2 线程就够（给多了和 llama 抢核），
                         // 8 核以上才放到 4 —— 合成一整段音频的延迟能少 20%~35%。

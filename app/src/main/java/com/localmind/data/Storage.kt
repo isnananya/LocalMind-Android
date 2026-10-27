@@ -356,6 +356,25 @@ class Storage(private val context: Context) {
     }
 
     /**
+     * 一次性清掉旧版本误拉黑的音色。
+     *
+     * 1.0.6 之前，Piper 类音色（`vits-piper-*`）加载时没给 sherpa 传
+     * `espeak-ng-data`，原生库直接 `exit(-1)`（进程码 255），看门狗于是把
+     * 它写进黑名单。用户再点只会看到「上次加载这个音色时应用被强制退出，已停用」，
+     * 而根因其实在程序这边。
+     *
+     * 这一次修好了根因（见 NeuralVoiceModels.resolve），旧黑名单不该继续冤枉它们：
+     * 清一次。真再崩，看门狗会重新写回来 —— 拉黑机制本身不变。
+     */
+    fun clearStaleNeuralBadVoicesOnce() {
+        if (prefs.getBoolean("neural_bad_cleared_v2", false)) return
+        prefs.edit()
+            .putBoolean("neural_bad_cleared_v2", true)
+            .putStringSet("neural_bad_voices", emptySet())
+            .apply()
+    }
+
+    /**
      * Long-term companion state per persona (memory / mood / drifting traits).
      * Separate file from `personas.json` on purpose: this grows continuously while a
      * persona definition is small and rarely written.

@@ -41,8 +41,19 @@
   - 胶囊静止：模糊图 + 10% 白/黑 + 16% 轻透镜；按压：缩放 1.36 + 清晰图 + 色散透镜；
   - 长按拖动：整条放大 8%、阴影 12→22dp、透镜 ×1.5、**采样要加 dragY**；
   - 默认模糊 10dp，抓图 `SAMPLE = 3`。
-- 手势统一在标签行的 `awaitEachGesture` 里：长按 → 拖底栏；长按前横向拖 → 拖胶囊。
-  **不要把长按拖动挂到面板上**，会被子级 clickable 吃掉。
+- 手势（1.0.6 二次修正，**别再退回 Compose 的现成检测器**）：标签按钮是 clickable，
+  它会消费 DOWN，于是 `awaitLongPressOrCancellation` / `awaitHorizontalTouchSlopOrCancellation`
+  一看 isConsumed 就取消 —— 表现就是"长按只放大、拖不动"。现在是自己写的指针循环：
+  在 **PointerEventPass.Initial** 读事件（子级还没消费），自己判方向/长按；长按用
+  `scope.launch { delay(longPressTimeout) }` 置 `grabbed`，**不要**在指针作用域里
+  `withTimeout`（AwaitPointerEventScope 是 @RestrictsSuspension）。
+  - 起手在选中胶囊上 + 横向过 slop → 拖胶囊（不用先长按）；
+  - 长按之后 → 横向拖胶囊 / 纵向拖整条底栏；
+  - 其它情况一律不接管，点按照常给按钮。
+- 胶囊折射的是**底栏上的内容**（图标/文字），不是底下的页面：Row 用 GraphicsLayer 录一份
+  内容位图（`rememberGraphicsLayer` + `drawWithContent`），胶囊画在 Row **之上**：
+  先铺底栏自己的磨砂底（盖住原始图标）→ 内容位图过透镜 → 10% 叠色/高光。
+  旧实现直接采样窗口截图，胶囊就成了底栏上的一个"洞"，透出页面内容。
 
 ### 1.2 外观设置（顺序固定）
 `ThemeScreen.kt`：宽度（悬浮胶囊/通栏）、选中态（圆形/下划线/圆点/无）、液态底栏、底部渐变模糊、
@@ -66,6 +77,13 @@
   「我的」页（`ui/design/MePage.kt`）本来就没有 Breeze 入口。
 - 插件里的 `url / mirrors` **现在真的生效**：下载器改走 `VoiceCatalog.urlsFor(voice)`，
   之前按 id 现拼 URL，插件的镜像字段是死的。
+- **修了一个会让进程直接消失的崩溃**：Piper 类音色（`vits-piper-*`）的包里带
+  `espeak-ng-data/`，旧代码只找 lexicon/tokens、`data_dir` 传空 → sherpa 的 VITS 前端
+  落到最后一条分支，打一行 "Not a model using characters as modeling unit" 然后
+  `SHERPA_ONNX_EXIT(-1)`（真机上是 exit 255：没有 Java 栈、没有 tombstone）。
+  现在 `resolve()` 会找 `espeak-ng-data` 并传 `dataDir`；另加一道前端闸门：
+  非 characters 前端、又不是 piper+dataDir、又没有 lexicon 的音色直接标成"用不了"，
+  **绝不进原生**。旧版本因此被拉黑的音色，升级后清一次黑名单（看门狗仍然有效）。
 
 ### 1.4 低端模式（本轮 B，做完了）
 - `data/MemoryPlanner.kt` 的 `lowEndPolicy(context)`（按 `totalMem`）：
@@ -134,6 +152,12 @@
 - 语音引擎安装：40 MB+ 的包在模拟器上只下到一半（直连 GitHub 30–40 KB/s），
   完整「下载 → 试听 → 使用」没跑完；新增的 `.ok` 标记保证下次点击从干净状态重下。
   这一段建议真机 / 快网复核。
+- 真机（Xiaomi 24031PN0DC / Android 16）实测崩溃与修复：08:48 加载
+  `vits-piper-zh_CN-huayan-medium` 时进程 exit 255；修复后同一台机器
+  「音色就绪：vits-piper-zh_CN-huayan-medium 1 个说话人 @ 22050 Hz」，
+  华研与超文 int8 都能加载、应用不再退出。
+- 底栏手势在模拟器上验证过：快速横拖胶囊切页、长按胶囊再拖也切页；
+  折射内容在模拟器上走的是无 AGSL 的降级路径，真机 AGSL 效果需要目视确认。
 - 最终产物：`dist/LocalMind-1.0.6-arm64+armv7.apk`（release，44.4 MB，debug 签名）；
   模拟器装的是 x86_64 的 debug 包（release 只带 arm64/armv7）。
 

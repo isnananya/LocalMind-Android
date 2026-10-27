@@ -290,13 +290,33 @@ internal class LiquidBarGlass {
      * 按压 = 透镜拉满（色散）+ 白色光环 + 3% 暗部。与 LiquidTab 的
      * drawSelection / drawLiquidIndicatorLighting 一致。
      */
+    /**
+     * 选中胶囊。
+     *
+     * ## 折射的是**底栏自己的内容**，不是底栏下面的页面
+     *
+     * 旧实现把胶囊当成一块"取景器"：直接采样窗口截图（sharp/blurred），于是
+     * 胶囊区域变成底栏上的一个**洞** —— 下面的列表/背景透出来，看起来像底栏被
+     * 挖掉一块。正确的层次是：
+     *
+     *  1. 底栏底板：模糊背景 + 40% 填充（外面那圈，一直如此）；
+     *  2. 底栏内容：图标与文字（Compose 画的 Row）；
+     *  3. 胶囊：画在内容**之上**，用同样的磨砂底把下面的原始内容盖住，再把
+     *     内容的截图（[content]）经过透镜着色器画出来 —— 于是"被折射的是
+     *     我的/模型这些字和图标"，底栏本身始终是连续的磨砂玻璃。
+     *
+     * @param base 底栏的模糊背景（和底板同一张），用来铺出胶囊的磨砂底。
+     * @param content 底栏内容截图，原点在底栏左上角（contentLeft/contentTop）。
+     */
     fun drawPill(
         canvas: Canvas,
-        sharp: Bitmap?,
-        blurred: Bitmap?,
+        base: Bitmap?,
+        content: Bitmap?,
         sample: Int,
         winLeft: Float,
         winTop: Float,
+        contentLeft: Float,
+        contentTop: Float,
         left: Float,
         top: Float,
         right: Float,
@@ -305,6 +325,8 @@ internal class LiquidBarGlass {
         liquid: Boolean,
         press: Float,
         tiltX: Float,
+        fillColor: Int = 0xFFFFFFFF.toInt(),
+        fillAlpha: Float = 0.40f,
     ) {
         val w = right - left
         val h = bottom - top
@@ -316,17 +338,21 @@ internal class LiquidBarGlass {
         val p = press.coerceIn(0f, 1f)
         val save = canvas.save()
         canvas.clipPath(pillPath)
-        // 静止：磨砂（和底板同一张模糊图），不是能读字的透明窗口；
-        // 按下去：换成清晰图 + 色散透镜，液体才"活"。
+        // 1) 磨砂底：和底板完全一致，胶囊不会再"透出页面"。
+        if (base != null) {
+            drawBackdrop(canvas, base, sample, winLeft, winTop)
+            fillPaint.color = Color.argb((fillAlpha * 255f).toInt(), Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor))
+            canvas.drawRect(left, top, right, bottom, fillPaint)
+        }
+        // 2) 折射内容：只有按住/拖动时才拉满，静止时保留一点点。
         val pressing = p > 0.12f
-        val content = if (pressing) (sharp ?: blurred) else (blurred ?: sharp)
         if (content != null) {
             val lensP = if (liquid) (if (pressing) (0.16f + 0.84f * p) else 0.16f).coerceIn(0f, 1f) else 0f
             if (lensP > 0.001f && canShader && pillShader != null) {
                 val shader = pillShader!!
                 val bitmapShader = BitmapShader(content, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-                matrix.setScale(sample.toFloat(), sample.toFloat())
-                matrix.postTranslate(-winLeft, -winTop)
+                matrix.setScale(1f, 1f)
+                matrix.postTranslate(-contentLeft, -contentTop)
                 bitmapShader.setLocalMatrix(matrix)
                 shader.setInputShader("content", bitmapShader)
                 shader.setFloatUniform("size", w, h)
@@ -340,7 +366,9 @@ internal class LiquidBarGlass {
                 canvas.drawRect(left - radius, top - radius, right + radius, bottom + radius, lensPaint)
                 lensPaint.shader = null
             } else {
-                drawBackdrop(canvas, content, sample, winLeft, winTop)
+                // 没有 AGSL（模拟器 / 老系统）：原样铺内容，至少不会出现
+                // 「胶囊里没有图标」或「胶囊透到页面」。
+                canvas.drawBitmap(content, contentLeft, contentTop, null)
             }
         }
 
