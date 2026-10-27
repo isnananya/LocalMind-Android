@@ -82,8 +82,13 @@ class Storage(private val context: Context) {
         val seen = prefs.getInt(KEY_PROMPT_VERSION, 0)
         if (seen < GenerationSettings.PROMPT_VERSION) {
             prefs.edit().putInt(KEY_PROMPT_VERSION, GenerationSettings.PROMPT_VERSION).apply()
-            stored = stored.copy(systemPrompt = GenerationSettings.DEFAULT_SYSTEM_PROMPT)
-            saveGenerationSettings(stored)
+            // 1.0.5 的默认系统提示词会在这一轮被清空。但**只清"还停在旧默认值"
+            // 的那份**：用户自己写的人设/规则是他自己的东西，升级不该动。
+            val current = stored.systemPrompt
+            if (current.isBlank() || current == GenerationSettings.LEGACY_DEFAULT_SYSTEM_PROMPT) {
+                stored = stored.copy(systemPrompt = GenerationSettings.DEFAULT_SYSTEM_PROMPT)
+                saveGenerationSettings(stored)
+            }
         }
 
         // ---- 1.0.3 的推理默认值（只迁一次，且只迁「还停在旧默认值」的那份）----

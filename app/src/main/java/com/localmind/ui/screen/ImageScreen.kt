@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -326,6 +327,44 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
                             onValueChange = { prompt = it },
                             textStyle = LocalTextStyle.current.merge(IosTheme.typography.body).copy(color = ios.label),
                             cursorBrush = SolidColor(ios.blue),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    // 说明英文这件事比再给一个开关重要：SD/SDXL 的 CLIP 只认英文，
+                    // 中文提示词在它眼里接近噪声 —— 用户会以为"模型太差"。
+                    Text(
+                        "扩散模型只认英文提示词。中文写出来也能出图，但那基本是随机画面；" +
+                            "想要精美，用英文描述（例：a cat sitting by the window, sunlight, detailed fur）。",
+                        style = IosTheme.typography.caption2,
+                        color = ios.tertiaryLabel,
+                    )
+
+                    Spacer(Modifier.height(12.dp))
+                    Text("负面提示词（可选）", style = IosTheme.typography.footnote, color = ios.secondaryLabel)
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(ios.fillSecondary)
+                            .padding(12.dp)
+                    ) {
+                        if (settings.negativePrompt.isEmpty()) {
+                            Text(
+                                "留空 = 自动排除：低清 / 糊 / 水印 / 畸形手",
+                                style = IosTheme.typography.footnote,
+                                color = ios.tertiaryLabel,
+                            )
+                        }
+                        BasicTextField(
+                            value = settings.negativePrompt,
+                            onValueChange = { v -> viewModel.updateImage { it.copy(negativePrompt = v) } },
+                            textStyle = LocalTextStyle.current.merge(IosTheme.typography.footnote).copy(color = ios.label),
+                            cursorBrush = SolidColor(ios.blue),
+                            maxLines = 3,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

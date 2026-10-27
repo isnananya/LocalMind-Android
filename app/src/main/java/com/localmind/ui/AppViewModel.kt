@@ -115,12 +115,12 @@ private const val DECISION_THREADS = 2
 /**
  * AI 对话在用户没写自己的系统提示词时用的那一句。
  *
- * 刻意**很短**：AI 对话的定位是"问事"，它不需要人格、不需要规则清单。
- * 每多一个字都是每轮都要重新 prefill 的成本，直接反映在"第一个字多久出来"上。
- * 身份类的问题（"你是谁"）由界面上那句"本机运行"回答，不必写进提示词。
+ * **现在是空串**：用户明确要求"不要给模型塞初始提示词"。模型就是模型本身，
+ * 它想说自己是 Qwen / DeepSeek 都随它 —— 那是事实，不是 bug。
+ * 只有用户自己在对话设置里写了额外要求，或开了发图/表情这类**能力**时，
+ * 才会有内容进 system prompt（能力说明是功能必需的，不是人格设定）。
  */
-private const val AI_CHAT_DEFAULT_PROMPT =
-    "你是一个直接、准确的助手。用用户的语言简洁回答，需要时用 Markdown。"
+private const val AI_CHAT_DEFAULT_PROMPT = ""
 
 /**
  * 「主动来找你说话」的静默门槛：超过这么久没聊，打开对话时它先开口。
@@ -2786,7 +2786,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             val history = buildList {
-                add(Role.SYSTEM to systemPrompt)
+                // 空系统提示词就不要发：空的 system 占位既浪费一次 prefill，
+                // 也会让模型以为"上面还有一段没显示给我的规则"。
+                if (systemPrompt.isNotBlank()) add(Role.SYSTEM to systemPrompt)
                 historyWindow(priorMessages).forEach { m ->
                     // 短话连发拆出来的后续片段不重复进提示词（见 ChatMessage.promptSkip）。
                     if (m.promptSkip) return@forEach

@@ -250,7 +250,9 @@ fun LiquidGlassTabBar(
         var dragging by remember { mutableStateOf(false) }
         var dragVelocity by remember { mutableFloatStateOf(0f) }
         LaunchedEffect(selectedIndex, slotPx, count) {
-            if (slotPx > 0f) {
+            // 拖动中不要被"选中项变了"拉回去：拖动本身就随时在改选中项，
+            // 让它跟着手指走，松手时再吸附。
+            if (slotPx > 0f && !dragging) {
                 pillX.animateTo(slotPx * (selectedIndex + 0.5f), Motion.bouncy())
             }
         }
@@ -363,6 +365,9 @@ fun LiquidGlassTabBar(
                             var axis = 0 // 0 未定 / 1 胶囊 / 2 底栏
                             var grabbed = false
                             var pointerDown = true
+                            // 拖动过程中胶囊经过的格子 = 实时选中的页面。
+                            // 只在"换格"时回调，避免每一帧都触发一次页面切换。
+                            var liveTarget = -1
                             // 长按用"另一个协程等 500ms"实现，而不是在指针作用域里
                             // withTimeout —— AwaitPointerEventScope 是受限挂起作用域，
                             // 不能把 awaitPointerEvent 包进别的 suspend lambda。
@@ -409,7 +414,14 @@ fun LiquidGlassTabBar(
                                         change.consume()
                                         tracker.addPosition(change.uptimeMillis, change.position)
                                         scope.launch {
-                                            pillX.snapTo((pillX.value + d.x).coerceIn(minX, maxX))
+                                            val next = (pillX.value + d.x).coerceIn(minX, maxX)
+                                            pillX.snapTo(next)
+                                            // 实时切页：拖到哪一格就显示哪一页（LiquidTab 的手感）。
+                                            val live = (next / slot).toInt().coerceIn(0, count - 1)
+                                            if (live != liveTarget) {
+                                                liveTarget = live
+                                                specs.getOrNull(live)?.let { onSelect(it.tab) }
+                                            }
                                         }
                                     } else if (axis == 2) {
                                         change.consume()

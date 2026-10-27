@@ -157,15 +157,31 @@ object ImageEngine {
      *  * 普通 SD 1.5 / 2.1 / SDXL → **12 步**（这本来就超过多数模型的收益拐点）
      */
     fun autoStepsFor(modelPath: String?): Int {
-        if (modelPath.isNullOrBlank()) return 12
+        if (modelPath.isNullOrBlank()) return 24
         val name = File(modelPath).name.lowercase(Locale.US)
         if (ONESTEP_HINTS.any { name.contains(it) }) return 2
         if (TURBO_HINTS.any { name.contains(it) }) return 4
-        return 12
+        // 12 步是"能看"，24 步才是"好看"：SD1.5 在 20–30 步之间细节才真正出来，
+        // 而 CPU 上 24 步 512² 仍然在可接受范围（真机 8 Gen 3 约 30–50 秒）。
+        return if (isSdxlName(name)) 25 else 24
     }
 
-    /** LCM 家族：用 LCM 采样器 + LCM 调度器才像样（默认 Euler 在 2-4 步下会糊）。 */
-    private val LCM_HINTS = listOf("lcm", "hyper", "lightning", "tcd", "dmd")
+    /**
+     * LCM 家族：用 LCM 采样器 + LCM 调度器才像样。
+     *
+     * ⚠️ **lightning / dmd 不在里面**：SDXL-Lightning 是"少步蒸馏"，
+     * 但它按 Euler a / DPM++ 采样训练，配 LCM 采样器会直接花掉。
+     */
+    private val LCM_HINTS = listOf("lcm", "hyper", "tcd")
+
+    /** 少步蒸馏（非 LCM）：Euler a + 离散调度最稳。 */
+    private val FEW_STEP_HINTS = listOf("turbo", "lightning", "dmd", "schnell", "flash")
+
+    fun isSdxl(modelPath: String?): Boolean =
+        isSdxlName(File(modelPath.orEmpty()).name.lowercase(Locale.US))
+
+    private fun isSdxlName(name: String): Boolean =
+        name.contains("xl") || name.contains("sdxl")
 
     /**
      * 「通用版」插件要的采样器 / 调度器（sd.cpp 自己的字符串词表）。
@@ -178,7 +194,15 @@ object ImageEngine {
     fun samplerFor(modelPath: String?): Pair<String, String> {
         if (modelPath.isNullOrBlank()) return "" to ""
         val name = File(modelPath).name.lowercase(Locale.US)
-        return if (LCM_HINTS.any { name.contains(it) }) "lcm" to "lcm" else "" to ""
+        return when {
+            // LCM 系必须用 LCM 采样器 + LCM 调度器，2–4 步才像样。
+            LCM_HINTS.any { name.contains(it) } -> "lcm" to "lcm"
+            // SDXL-Lightning / SD-Turbo / DMD 这类少步蒸馏：Euler a + 离散调度最稳。
+            FEW_STEP_HINTS.any { name.contains(it) } -> "euler_a" to "discrete"
+            // 普通 SD1.5 / 2.1 / SDXL：DPM++ 2M Karras 是公认的"细节最好"那一档，
+            // 比 sd.cpp 默认的 Euler a 明显更锐、更少糊边。
+            else -> "dpm++2m" to "karras"
+        }
     }
 
     /** 实际步数：用户显式选了就用他的。 */
@@ -237,20 +261,37 @@ object ImageEngine {
                 //  3. CFG > 1 时每步跑两遍：耗时再乘 2。
                 //
                 // 所以 512² 12 步 cfg 3.5 ≈ 768² 20 步 cfg 3.5 的 1/3.7。
-                val wantW = settings.width.coerceIn(64, 1024)
-                val wantH = settings.height.coerceIn(64, 1024)
-                // 快速放大：目标比 512 大时，先按 512 的长边算，再放大。
+                // SDXL 在 512² 下会糊、构图也散（它的训练分辨率就是 1024²），
+                // 这里直接把目标抬到 1024 —— 用户看到的是"同一段提示词，图变清楚了"，
+                // 而不是"我选的模型怎么不如别人"。
+                val sdxl = isSdxl(resolved)
+                val wantW = if (sdxl) maxOf(settings.width, 1024).coerceIn(64, 1024)
+                else settings.width.coerceIn(64, 1024)
+                val wantH = if (sdxl) maxOf(settings.height, 1024).coerceIn(64, 1024)
+                else settings.height.coerceIn(64, 1024)
+                // 快速放大：目标比 512 大时，先按 512 的长边算，再放大（SDXL 除外 ——
+                // 把 SDXL 压到 512 再放大，等于把它最强的细节先扔掉）。
                 val longSide = maxOf(wantW, wantH)
-                val scale = if (settings.fastUpscale && longSide > 512) 512f / longSide else 1f
+                val scale = if (!sdxl && settings.fastUpscale && longSide > 512) 512f / longSide else 1f
                 val renderW = align8((wantW * scale).toInt().coerceAtLeast(64))
                 val renderH = align8((wantH * scale).toInt().coerceAtLeast(64))
                 val useSteps = effectiveSteps(settings, resolved)
                 val useGuidance = effectiveGuidance(settings, resolved)
                 val startedAt = System.currentTimeMillis()
                 val (samplerName, schedulerName) = samplerFor(resolved)
+                // 提示词是**这一轮的重点**：风格词 + 质量词 + 默认负面词都在这里合进去。
+                // 之前在界面上选「电影感」只影响程序化渲染器，扩散链路完全没吃到。
+                val positive = ImagePrompts.positive(prompt, settings.style)
+                val negative = ImagePrompts.negative(settings)
+                android.util.Log.i(
+                    "ImageEngine",
+                    "提示词：" + positive +
+                        if (negative.isNotBlank()) " ｜负面：" + negative else "",
+                )
                 val bitmap = ImageBridge.diffusionRender(
                     modelPath = resolved,
-                    prompt = prompt,
+                    prompt = positive,
+                    negative = negative,
                     width = renderW,
                     height = renderH,
                     seed = seed,

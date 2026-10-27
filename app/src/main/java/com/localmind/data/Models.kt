@@ -540,16 +540,24 @@ data class GenerationSettings(
 
     companion object {
         /** Bump when [DEFAULT_SYSTEM_PROMPT] changes so saved copies get refreshed. */
-        const val PROMPT_VERSION = 2
+        const val PROMPT_VERSION = 3
 
         /**
-         * Identity is pinned explicitly. Small models (and R1 distillations especially)
-         * happily invent a vendor when asked "who are you" — Qwen would answer as
-         * Alibaba, and users saw answers claiming to be built by Huawei etc. Naming the
-         * assistant and forbidding vendor claims is the fix; it is not a code bug but it
-         * looks like one to the user.
+         * 默认系统提示词：**空**。
+         *
+         * 用户明确要求不要给模型塞初始提示词。以前这里有一段"你是 LocalMind，
+         * 不许说是某家公司训练的"的身份设定 —— 它让模型答身份题时不诚实，
+         * 也把每轮的 prefill 里塞进了一段用户没写过的字。
+         *
+         * 现在默认什么都不加；要人格就自己在对话设置里写。
          */
-        const val DEFAULT_SYSTEM_PROMPT =
+        const val DEFAULT_SYSTEM_PROMPT = ""
+
+        /**
+         * 1.0.5 及以前的默认值。只用于**迁移时识别**：如果用户保存的还是这一份，
+         * 说明他没改过，可以安全清空；自己写过的提示词绝不能被升级覆盖。
+         */
+        const val LEGACY_DEFAULT_SYSTEM_PROMPT =
             "你是 LocalMind，一个完全运行在用户手机本地的 AI 助手。\n" +
                 "规则：\n" +
                 "1. 用用户所用的语言回答，简洁直接。\n" +
@@ -727,7 +735,7 @@ data class ImageSettings(
      * 给 3.5 不但慢一倍，出来的图还会发糊发焦。这条规则由
      * [ImageEngine.guidanceFor] 在执行时兜住，不指望用户知道。
      */
-    val guidance: Float = 3.5f,
+    val guidance: Float = 7f,
     /**
      * 大图先用 512 出、再放大到目标尺寸。
      *
@@ -745,6 +753,13 @@ data class ImageSettings(
      */
     val flashAttn: Boolean = true,
     val seed: Int = -1,
+    /**
+     * 负面提示词。留空 = 用 [com.localmind.service.ImagePrompts.DEFAULT_NEGATIVE]。
+     *
+     * 负面词是「画面像不像 AI 垃圾」的主要开关，但绝大多数用户不会写；
+     * 默认给一份通用的（模糊/水印/畸形手/多肢体），想覆盖再填。
+     */
+    val negativePrompt: String = "",
     val customModelPath: String? = null,
     val externalEndpoint: String = "",
     val externalApiKey: String = "",

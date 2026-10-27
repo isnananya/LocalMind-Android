@@ -544,13 +544,25 @@ private fun NeuralVoiceRow(
         }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(voice.label, style = IosTheme.typography.body, color = ios.label, maxLines = 1)
+                // 标题必须让位给徽标：Row 会先量非加权子项（徽标），剩下的才给标题。
+                // 之前标题把整行吃满，徽标拿到的宽度只剩几个像素，于是
+                // "使用中" / "多说话人" 被逐字折行、看起来像错位的怪东西。
+                Text(
+                    voice.label,
+                    style = IosTheme.typography.body,
+                    color = ios.label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
                 if (voice.badge.isNotBlank()) {
                     Spacer(Modifier.width(6.dp))
                     Text(
                         voice.badge,
                         style = IosTheme.typography.caption2,
                         color = ios.purple,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(ios.purple.copy(alpha = 0.12f))
@@ -563,6 +575,8 @@ private fun NeuralVoiceRow(
                         "使用中",
                         style = IosTheme.typography.caption2,
                         color = ios.blue,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(ios.blue.copy(alpha = 0.12f))
