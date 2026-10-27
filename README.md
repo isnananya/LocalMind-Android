@@ -129,6 +129,30 @@
   徽标 `softWrap=false`，不再被压成竖排。
 - 底栏拖动**实时切页**：胶囊经过哪一格就调 `onSelect`（只在换格时），
   拖动中 `LaunchedEffect` 不再把胶囊拉回旧位置。
+- **底栏固定**：去掉了"长按抓起整条底栏上下拖"（`dragY` 恒 0、无放大/加深阴影）。
+  只有胶囊可以横拖；长按只对胶囊生效。
+- **作品全屏预览 + 保存相册**：点缩略图 → 全屏（Fit/黑底/关闭）；长按 → 保存/取消；
+  保存走 MediaStore `Pictures/LocalMind/`（< Android 10 退回文件 + MediaScanner）。
+  实现在 `ui/screen/ImageScreen.kt` 的 `ImagePreviewDialog` + `util/GallerySaver.kt`。
+- **API 生图走扩散**：`POST /v1/images/generations` 以前只调程序化渲染器；
+  现在同一条 `generateWithSettings` 链路，响应带 `via: diffusion|procedural`。
+- **探针缓存**：`hasDiffusionBackend / hasExtendedDiffusion / hasUniversalDiffusion`
+  以前每次都进原生拿 sd.cpp 全局锁，生图中主线程一读就 ANR；改成进程内缓存。
+- **SDXL 按可用内存定边长**：≥6GB → 1024²，≥4GB → 768²，否则 640²
+  （实测 1024² 会把 16GB 手机拖进 lowmemorykiller）。
+
+### 1.7 这台机器的实测记录（生图）
+- 手机（Xiaomi 24031PN0DC / 16GB，arm64）：先装 SDXL-Lightning 4 步 Q4（2.5GB），
+  1024² 一次生成被 LMK 杀掉；DreamShaper 7 LCM Q4（1.55GB）+ 512² 成功出图
+  （HTTP 200，`via=diffusion`），但 **70 秒/步、4 步共 281 秒** ——
+  性能明显不正常，下一轮优先查 sd.cpp 的线程/量化内核，不要在"换模型"上浪费时间。
+- 模拟器（x86_64 / SwiftShader）：全屏预览、长按出保存/取消、保存进相册
+  （`Pictures/LocalMind/img_…png`）全部通过。
+- ⚠️ **踩坑记录**：为打开 API 服务端，曾用 PowerShell `>` 抓 `shared_prefs/localmind.xml`
+  —— 它默认写 **UTF-16**，再 push 回去后应用读回默认值，**用户资料/外观偏好被重置**
+  （对话/模型/插件/音色文件在 `files/`，未受影响）。以后改 prefs 必须：
+  `exec-out ... > file` 用二进制安全写法（node spawn/bin），或直接让应用自己写；
+  写回前确认文件是 **UTF-8 无 BOM**。
 
 ## 2. 待办（下一轮）
 

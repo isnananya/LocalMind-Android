@@ -265,10 +265,23 @@ object ImageEngine {
                 // 这里直接把目标抬到 1024 —— 用户看到的是"同一段提示词，图变清楚了"，
                 // 而不是"我选的模型怎么不如别人"。
                 val sdxl = isSdxl(resolved)
-                val wantW = if (sdxl) maxOf(settings.width, 1024).coerceIn(64, 1024)
-                else settings.width.coerceIn(64, 1024)
-                val wantH = if (sdxl) maxOf(settings.height, 1024).coerceIn(64, 1024)
-                else settings.height.coerceIn(64, 1024)
+                // SDXL 的目标边长按**可用内存**决定：1024² 的峰值内存
+                //（2.5GB 权重 + 注意力/VAE）在 12–16GB 手机上都会被 LMK 杀掉，
+                // 实测一次 generation 直接触发 lowmemorykiller。
+                val availGb = com.localmind.data.MemoryPlanner
+                    .availableRamBytes(storage.appContext()) / (1024.0 * 1024.0 * 1024.0)
+                val sdxlSide = when {
+                    availGb >= 6.0 -> 1024
+                    availGb >= 4.0 -> 768
+                    else -> 640
+                }
+                val wantW = if (sdxl) sdxlSide.coerceIn(64, 1024) else settings.width.coerceIn(64, 1024)
+                val wantH = if (sdxl) sdxlSide.coerceIn(64, 1024) else settings.height.coerceIn(64, 1024)
+                if (sdxl) android.util.Log.i(
+                    "ImageEngine",
+                    "SDXL 目标边长 " + sdxlSide + "²（可用内存 " +
+                        String.format(Locale.US, "%.1f", availGb) + " GB）",
+                )
                 // 快速放大：目标比 512 大时，先按 512 的长边算，再放大（SDXL 除外 ——
                 // 把 SDXL 压到 512 再放大，等于把它最强的细节先扔掉）。
                 val longSide = maxOf(wantW, wantH)

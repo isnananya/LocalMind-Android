@@ -1,9 +1,11 @@
 package com.localmind.ui.screen
 
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,10 +42,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
+import com.localmind.util.GallerySaver
 import com.localmind.data.ImageStyle
 import com.localmind.service.ImageEngine
 import com.localmind.ui.AppViewModel
@@ -658,11 +666,7 @@ fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
     }
 
     preview?.let { file ->
-        ImagePreviewDialog(
-            file = file,
-            onDismiss = { preview = null },
-            onInfo = { viewModel.toast("已保存到 ${file.absolutePath}") },
-        )
+        ImagePreviewDialog(file = file, onDismiss = { preview = null })
     }
 }
 
@@ -688,46 +692,129 @@ private fun Thumbnail(file: File, onClick: () -> Unit) {
     }
 }
 
+/**
+ * 全屏预览：点开图 → 长按出「保存 / 取消」→ 保存进系统相册。
+ *
+ * 为什么不是原来那个小弹窗：用户要的是"看大图、存到相册"，小弹窗里
+ * 只能显示文件名和路径，既看不清图，也没法交给别的 App 用。
+ */
 @Composable
-private fun ImagePreviewDialog(file: File, onDismiss: () -> Unit, onInfo: () -> Unit) {
-    val ios = IosTheme.palette
-    val bitmap = remember(file.absolutePath) { decodeSampled(file, 1280) }
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(ios.secondaryGroupedBackground)
-                .padding(14.dp)
+private fun ImagePreviewDialog(file: File, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val bitmap = remember(file.absolutePath) { decodeSampled(file, 2048) }
+    var showActions by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black),
         ) {
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = file.name,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp)),
                     contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onLongPress = { showActions = true },
+                                // 点一下收起按钮；再点空白处也不会误关预览。
+                                onTap = { if (showActions) showActions = false },
+                            )
+                        },
+                )
+            } else {
+                Text(
+                    "图片读取失败",
+                    color = Color.White,
+                    style = IosTheme.typography.body,
+                    modifier = Modifier.align(Alignment.Center),
                 )
             }
-            Spacer(Modifier.height(10.dp))
-            Text(file.name, style = IosTheme.typography.caption1, color = ios.secondaryLabel, maxLines = 2)
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            // 关闭（不保存）。
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 24.dp, end = 18.dp)
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.16f))
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    AppIcons.Close,
+                    contentDescription = "关闭",
+                    tint = Color.White,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+
+            if (showActions) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(ios.blue.copy(alpha = 0.14f))
-                        .clickable(onClick = onInfo)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 46.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Icon(AppIcons.Share, contentDescription = null, tint = ios.blue, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("文件位置", style = IosTheme.typography.footnote, color = ios.blue, fontWeight = FontWeight.SemiBold)
+                    PreviewAction("保存", busy = saving) {
+                        if (saving) return@PreviewAction
+                        saving = true
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) { GallerySaver.save(context, file) }
+                            saving = false
+                            showActions = false
+                            Toast.makeText(
+                                context,
+                                if (ok) "已保存到相册" else "保存失败，请检查存储权限",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            if (ok) onDismiss()
+                        }
+                    }
+                    PreviewAction("取消") { showActions = false }
                 }
-                IosPill("种子可复现", ios.indigo)
+            } else {
+                Text(
+                    "长按图片可保存到相册",
+                    color = Color.White.copy(alpha = 0.62f),
+                    style = IosTheme.typography.footnote,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 48.dp),
+                )
             }
+        }
+    }
+}
+
+/** 预览页底部的胶囊按钮（保存 / 取消）。 */
+@Composable
+private fun PreviewAction(label: String, busy: Boolean = false, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.18f))
+            .clickable(enabled = !busy, onClick = onClick)
+            .padding(horizontal = 30.dp, vertical = 13.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(17.dp),
+                color = Color.White,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

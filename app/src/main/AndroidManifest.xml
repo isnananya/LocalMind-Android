@@ -27,6 +27,10 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- 保存生成图片到相册：Android 9 及以下需要写外部存储；10+ 走 MediaStore 不需要 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- 没有 GPS 的设备（平板、模拟器、部分车机）也要能装：定位是可选能力 -->

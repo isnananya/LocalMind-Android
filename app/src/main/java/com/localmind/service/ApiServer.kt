@@ -1721,9 +1721,17 @@ class ApiServer(
         val styleId = root["style"]?.jsonPrimitive?.intOrNull
             ?: ImageStyle.entries.firstOrNull { it.name.equals(defaults.style.name, true) }?.nativeId
             ?: defaults.style.nativeId
+        val style = ImageStyle.entries.firstOrNull { it.nativeId == styleId } ?: defaults.style
 
-        val generated = runBlocking { ImageEngine.generate(storage, prompt, w, h, seed, styleId) }
-        val file = generated.getOrElse { t ->
+        // ⚠️ 这里以前直接调 ImageEngine.generate（**程序化渲染器**），也就是说
+        // 通过 API 生图永远画不出真模型的内容 —— 客户端拿到的是一张"按关键词画色块"
+        // 的图。现在改走和界面同一条链路：有扩散模型就用扩散模型，
+        // 没有才退回程序化渲染，并如实报告 via。
+        val apiSettings = defaults.copy(width = w, height = h, style = style, seed = seed)
+        val generated = runBlocking {
+            ImageEngine.generateWithSettings(storage, prompt, apiSettings, seed = seed)
+        }
+        val result = generated.getOrElse { t ->
             writeJson(out, 500, errorJson("server_error", t.message ?: "render failed", "render_failed"))
             record("POST", "/v1/images/generations", 500, started, remote, TextUtils.preview(prompt), t.message)
             return
@@ -1733,9 +1741,11 @@ class ApiServer(
             put("created", System.currentTimeMillis() / 1000)
             put("data", buildJsonArray {
                 add(buildJsonObject {
-                    put("url", "http://${hostHeader(socket)}/v1/images/${file.name}")
+                    put("url", "http://${hostHeader(socket)}/v1/images/${result.file.name}")
                     put("revised_prompt", prompt)
                     put("seed", seed)
+                    // 说明这张图是扩散模型画的还是程序化渲染器的兜底。
+                    put("via", result.via.name.lowercase())
                 })
             })
         })

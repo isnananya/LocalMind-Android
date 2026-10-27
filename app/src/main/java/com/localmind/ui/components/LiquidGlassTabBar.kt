@@ -191,8 +191,9 @@ fun LiquidGlassTabBar(
         contentBitmap = runCatching { contentLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
     }
 
-    var dragY by remember { mutableFloatStateOf(0f) }
-    var draggingBar by remember { mutableStateOf(false) }
+    // 底栏是**固定**的：不再支持"抓起来上下拖"。这里保留 0 只是为了让
+    // 下面窗口坐标的写法不必全改（translation 恒为 0）。
+    val dragY = 0f
     // 按压态有两个来源：手指按在某个标签上（子级 clickable 的 press），
     // 以及"正在拖胶囊"这个手势本身。拖到一半时 clickable 会因为超过 slop
     // 取消 press，如果只看子级，拖起来就没有折射了 —— 用户看到的正是
@@ -209,14 +210,8 @@ fun LiquidGlassTabBar(
         press.animateTo(if (down) 1f else 0f, spring(dampingRatio = 1f, stiffness = 1000f))
         pressScale.animateTo(if (down) 1.36f else 1f, spring(dampingRatio = 0.62f, stiffness = 250f))
     }
-    // 长按拖底栏：整块放大 6% + 阴影加深 + 边缘折射加强（"抓起来"的手感）。
-    val grab by animateFloatAsState(
-        targetValue = if (draggingBar) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 260f),
-        label = "barGrab",
-    )
-    val barGrow = 1f + grab * 0.08f
-    val barShadow = (12f + grab * 10f).dp
+    // 底栏固定不动的阴影。以前拖动时会加深到 22dp，现在没有拖动，就固定 12dp。
+    val barShadow = 12.dp
 
     BoxWithConstraints(
         modifier = Modifier
@@ -261,7 +256,7 @@ fun LiquidGlassTabBar(
             modifier = Modifier
                 .width(panelWidth)
                 .height(barHeight)
-                .graphicsLayer { translationY = dragY; scaleX = barGrow; scaleY = barGrow }
+                .graphicsLayer { translationY = dragY }
                 .drawWithContent { if (!GlassBackdrop.capturing) drawContent() }
                 .shadow(
                     elevation = barShadow,
@@ -313,7 +308,7 @@ fun LiquidGlassTabBar(
                             fillAlpha = 0.40f,
                             tiltX = tilt,
                             // 拖动时把边缘折射再加强一点，移动中能明显看到内容被掰弯。
-                            lensBoost = 1f + grab * 0.5f,
+                            lensBoost = 1f,
                         )
                     }
                 }
@@ -362,7 +357,7 @@ fun LiquidGlassTabBar(
                             val slop = viewConfiguration.touchSlop
                             var totalX = 0f
                             var totalY = 0f
-                            var axis = 0 // 0 未定 / 1 胶囊 / 2 底栏
+                            var axis = 0 // 0 未定 / 1 胶囊（底栏本身固定，不再有 2）
                             var grabbed = false
                             var pointerDown = true
                             // 拖动过程中胶囊经过的格子 = 实时选中的页面。
@@ -371,9 +366,12 @@ fun LiquidGlassTabBar(
                             // 长按用"另一个协程等 500ms"实现，而不是在指针作用域里
                             // withTimeout —— AwaitPointerEventScope 是受限挂起作用域，
                             // 不能把 awaitPointerEvent 包进别的 suspend lambda。
+                            //
+                            // 只有**按在胶囊上**长按才有意义（放大 + 继续横拖）；
+                            // 按在底栏空白/别的标签上长按什么都不该发生 —— 底栏是固定的。
                             val longPressJob = scope.launch {
                                 delay(viewConfiguration.longPressTimeoutMillis)
-                                if (pointerDown && axis == 0) {
+                                if (pointerDown && axis == 0 && startOnPill) {
                                     grabbed = true
                                     gesturePressed = true
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -394,6 +392,8 @@ fun LiquidGlassTabBar(
                                         val horizontal = abs(totalX) > slop && abs(totalX) > abs(totalY)
                                         val vertical = abs(totalY) > slop && abs(totalY) >= abs(totalX)
                                         when {
+                                            // 起手在胶囊上（或长按过胶囊）才横拖；
+                                            // 竖向移动一律不接管：底栏不能上下动。
                                             horizontal && (startOnPill || grabbed) -> {
                                                 axis = 1
                                                 dragging = true
@@ -402,12 +402,7 @@ fun LiquidGlassTabBar(
                                                 tracker.resetTracking()
                                                 tracker.addPosition(change.uptimeMillis, change.position)
                                             }
-                                            grabbed && vertical -> {
-                                                axis = 2
-                                                draggingBar = true
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            }
-                                            else -> if ((horizontal && !startOnPill) || (!grabbed && vertical)) break
+                                            else -> if (vertical || horizontal) break
                                         }
                                     }
                                     if (axis == 1) {
@@ -423,9 +418,6 @@ fun LiquidGlassTabBar(
                                                 specs.getOrNull(live)?.let { onSelect(it.tab) }
                                             }
                                         }
-                                    } else if (axis == 2) {
-                                        change.consume()
-                                        dragY = (dragY + d.y).coerceIn((-160).dp.toPx(), 0f)
                                     }
                                 }
                                 if (axis == 1) {
@@ -439,15 +431,12 @@ fun LiquidGlassTabBar(
                                             initialVelocity = dragVelocity,
                                         )
                                     }
-                                } else if (axis == 2) {
-                                    if (abs(dragY) < 24.dp.toPx()) dragY = 0f
                                 }
                             } finally {
                                 // 手势被取消（面板尺寸变化/重组）时，别把按压态和抓取态留在 true。
                                 pointerDown = false
                                 longPressJob.cancel()
                                 dragging = false
-                                draggingBar = false
                                 gesturePressed = false
                             }
                         }

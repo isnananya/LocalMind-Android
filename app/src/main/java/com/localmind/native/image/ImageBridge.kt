@@ -100,17 +100,31 @@ object ImageBridge {
     /** 这个插件是不是「通用版」（支持采样器覆盖 + 进度回调）。 */
     private external fun nativeSdUniversal(): Boolean
 
+    // ---- 探测结果要缓存 ----
+    //
+    // 这三个 getter 以前每次调用都进原生：nativeSdUniversal / nativeSdLoad / nativeSdAccelInfo
+    // 全都会拿 sd.cpp 的**全局互斥锁**。生图进行时主线程只要碰一下（ImageScreen 在
+    // composition 里读 hasDiffusionBackend / hasExtendedDiffusion），就会阻塞在锁上 ——
+    // 实测就是一次 ANR（nativeSdAccelInfo+48 → getHasExtendedDiffusion），
+    // 随后进程被系统重启，正在生成的那张图一起没了。
+    //
+    // 这些值只跟"插件装没装/版本"有关，进程生命周期内不会变，缓存完全安全。
+    @Volatile private var universalProbed: Boolean? = null
     val hasUniversalDiffusion: Boolean
-        get() = runCatching { nativeSdUniversal() }.getOrDefault(false)
+        get() = universalProbed ?: runCatching { nativeSdUniversal() }
+            .getOrDefault(false).also { universalProbed = it }
 
     private external fun nativeSdAccelInfo(): String
 
-    /** 后端当前生效的 flash attention 模式等（诊断页用）。 */
+    /** 后端当前生效的 flash attention 模式等（诊断页用）。**会拿原生锁，别在主线程调。** */
     fun diffusionAccelInfo(): String = runCatching { nativeSdAccelInfo() }.getOrDefault("")
+
+    @Volatile private var extendedProbed: Boolean? = null
 
     /** 插件包是否支持新入口（带步数与加速）。旧的 14 MB 插件不支持。 */
     val hasExtendedDiffusion: Boolean
-        get() = runCatching { nativeSdAccelInfo(); true }.getOrDefault(false)
+        get() = extendedProbed ?: runCatching { nativeSdAccelInfo(); true }
+            .getOrDefault(false).also { extendedProbed = it }
 
     /**
      * 扩散后端是不是可用。
@@ -125,8 +139,11 @@ object ImageBridge {
      * 这比在 Kotlin 侧维护一份"装了没"的状态更可靠：那份状态会和真实
      * 加载结果分叉，而这个不会。
      */
+    @Volatile private var backendProbed: Boolean? = null
+
     val hasDiffusionBackend: Boolean
-        get() = runCatching { nativeSdLoad("") }.getOrDefault(false)
+        get() = backendProbed ?: runCatching { nativeSdLoad("") }
+            .getOrDefault(false).also { backendProbed = it }
 
     /**
      * 加载 [modelPath] 到常驻上下文。上下文跨调用存活，所以换图不会重读
