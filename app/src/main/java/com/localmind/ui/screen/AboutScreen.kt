@@ -233,13 +233,50 @@ fun AboutScreen(
                         )
                     }
                     Divider(ios.separator)
-                    Donors.list().forEachIndexed { index, donor ->
+                    // 优先用 GitHub 远程捐献榜（LocalMind-Data），拉不到就用内置兜底。
+                    // 两套 Donor 类型不同，统一映射成 UI 行；排序规则与后台一致：金额降序。
+                    val remoteBoard = viewModel?.remoteData?.donors?.collectAsState()?.value
+                    val donorRows: List<Triple<String, Int, String?>> = when {
+                        remoteBoard != null ->
+                            remoteBoard.sorted.map { Triple(it.name, it.yuan, it.avatarBase64) }
+                        else -> Donors.list().map { Triple(it.name, it.yuan, it.base64) }
+                    }
+                    donorRows.forEachIndexed { index, donor ->
                         if (index > 0) Divider(ios.separator)
                         DonorRow(
-                            name = donor.name,
-                            amount = donor.label,
-                            base64 = donor.base64,
+                            name = donor.first,
+                            amount = donor.second.toString() + " 元",
+                            base64 = donor.third,
                         )
+                    }
+                }
+            }
+
+            // -------------------------------------------------- 公告
+            //
+            // 启动时只在「有新公告」弹一次窗，其余时间在这里常驻展示。
+            item {
+                val ann = viewModel?.remoteData?.announcement?.collectAsState()?.value
+                if (ann != null && ann.enabled && ann.title.isNotBlank()) {
+                    IosSection(
+                        header = "公告",
+                        footer = ann.publishedAt.takeIf { it.isNotBlank() } ?: "",
+                    ) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Text(ann.title, style = IosTheme.typography.headline, color = ios.label)
+                            if (ann.content.isNotBlank()) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    ann.content,
+                                    style = IosTheme.typography.footnote,
+                                    color = ios.secondaryLabel,
+                                )
+                            }
+                        }
                     }
                 }
             }

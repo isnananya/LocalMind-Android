@@ -2,6 +2,7 @@ package com.localmind.ui
 
 import android.app.Application
 import android.content.Intent
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.localmind.LocalMindApp
@@ -163,6 +164,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val neuralTts get() = localApp.neuralTts
     /** 外部语音引擎客户端（Breeze TTS 2 等，见 [com.localmind.service.BreezeTts]）。 */
     val breezeTts get() = localApp.breeze
+    /** 远程应用数据（捐献榜 / 公告 / 版本下发），见 [com.localmind.service.RemoteDataService]。 */
+    val remoteData get() = localApp.remoteData
     val emoji get() = localApp.emoji
     val voiceDownloader get() = localApp.voiceDownloader
     val stt get() = localApp.stt
@@ -192,6 +195,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val barVisible: StateFlow<Boolean> = _barVisible.asStateFlow()
 
     fun setBarVisible(visible: Boolean) { _barVisible.value = visible }
+
+    // ------------------------------------------------------- 远程应用数据
+    //
+    // 一次性事件流：UI collect 到非空就弹窗，处理完调 consume*() 置空。
+    // 用 StateFlow 而不是 SharedFlow 是为了旋转屏幕后弹窗状态还在。
+
+    private val _pendingAnnouncement = MutableStateFlow<com.localmind.service.RemoteDataService.Announcement?>(null)
+    val pendingAnnouncement: StateFlow<com.localmind.service.RemoteDataService.Announcement?> = _pendingAnnouncement.asStateFlow()
+
+    private val _pendingUpdate = MutableStateFlow<com.localmind.service.RemoteDataService.ReleaseInfo?>(null)
+    val pendingUpdate: StateFlow<com.localmind.service.RemoteDataService.ReleaseInfo?> = _pendingUpdate.asStateFlow()
+
+    fun consumeAnnouncement() { _pendingAnnouncement.value = null }
+    fun consumeUpdate() { _pendingUpdate.value = null }
+
+    fun refreshRemoteData() {
+        viewModelScope.launch {
+            runCatching { remoteData.refreshAll() }.onFailure {
+                Log.w("AppViewModel", "远程数据刷新失败（不影响使用）：${it.message}")
+            }
+            _pendingAnnouncement.value = remoteData.pendingAnnouncement()
+            _pendingUpdate.value = remoteData.pendingUpdate(com.localmind.BuildConfig.VERSION_CODE)
+        }
+    }
+
+    fun dismissAnnouncementRead(id: String) {
+        remoteData.markAnnouncementRead(id)
+        _pendingAnnouncement.value = null
+    }
 
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
@@ -1023,6 +1055,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _activeId.value = null
         _inChat.value = false
         refreshModels()
+
+        // ---- 远程应用数据：捐献榜 / 公告 / 版本下发 ----
+        //
+        // 纯 best-effort：先吃本地缓存立即渲染，再后台拉网络刷新。
+        // 公告只在「有新公告」时弹一次窗；版本只在 versionCode 更高时弹更新框。
+        // 全部失败也无声无息 —— 这绝不能挡住启动。
+        refreshRemoteData()
 
         // ---- 内置插件：模型库 / 液态玻璃底栏 / 生图后端 ----
         //

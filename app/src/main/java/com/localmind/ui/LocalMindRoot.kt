@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -329,6 +331,73 @@ fun LocalMindRoot(
             toast = toast,
             bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 88.dp,
         )
+
+        // -------------------------------------------------- 公告弹窗
+        //
+        // 只有「远程公告 id 与本机已读不同」才会出现（见 RemoteDataService）。
+        // 确认后记为已读，下次启动不再弹；公告正文常驻在关于页。
+        val pendingAnnouncement by viewModel.pendingAnnouncement.collectAsState()
+        pendingAnnouncement?.let { ann ->
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissAnnouncementRead(ann.id) },
+                title = { Text(ann.title, style = IosTheme.typography.headline) },
+                text = {
+                    Text(
+                        ann.content + ann.publishedAt.takeIf { it.isNotBlank() }
+                            ?.let { "\n\n—— $it" }.orEmpty(),
+                        style = IosTheme.typography.subheadline,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.dismissAnnouncementRead(ann.id) }) { Text("知道了") }
+                },
+            )
+        }
+
+        // -------------------------------------------------- 更新弹窗
+        //
+        // 后台 release.json 的 versionCode 高于本机才弹；forceUpdate 时不给「稍后」。
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val pendingUpdate by viewModel.pendingUpdate.collectAsState()
+        pendingUpdate?.let { rel ->
+            AlertDialog(
+                onDismissRequest = { if (!rel.forceUpdate) viewModel.consumeUpdate() },
+                title = {
+                    Text(
+                        "发现新版本 " + rel.latestVersion,
+                        style = IosTheme.typography.headline,
+                    )
+                },
+                text = {
+                    Text(
+                        (rel.changelog.takeIf { it.isNotBlank() } ?: "暂无更新说明") +
+                            "\n\n当前版本：" + com.localmind.BuildConfig.VERSION_NAME,
+                        style = IosTheme.typography.subheadline,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(
+                                        rel.downloadUrl.takeIf { it.isNotBlank() }
+                                            ?: "https://github.com/isnananya/LocalMind-Android/releases",
+                                    ),
+                                ),
+                            )
+                        }
+                        viewModel.consumeUpdate()
+                    }) { Text("去更新", color = ios.pink) }
+                },
+                dismissButton = {
+                    if (!rel.forceUpdate) {
+                        TextButton(onClick = { viewModel.consumeUpdate() }) { Text("稍后") }
+                    }
+                },
+            )
+        }
     }
 }
 

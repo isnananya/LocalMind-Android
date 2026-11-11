@@ -99,6 +99,16 @@ class LocalMindApp : Application() {
         private set
 
     /**
+     * 远程应用数据（捐献榜 / 公告 / 版本下发）。
+     *
+     * 数据源是公开仓库 LocalMind-Data 的 raw JSON，由 GitHub Pages 管理后台维护。
+     * 纯 best-effort：拉不到就静默用缓存或内置数据，绝不影响启动与对话。
+     * 刷新由 AppViewModel init 触发（见 [com.localmind.ui.AppViewModel]）。
+     */
+    lateinit var remoteData: com.localmind.service.RemoteDataService
+        private set
+
+    /**
      * 后台学习结束时通知界面刷新「它现在的状态」。
      *
      * 为什么需要回调：学习从「等它跑完再画」改成了「扔后台就不管」，
@@ -202,6 +212,7 @@ class LocalMindApp : Application() {
         stt = SttEngine(this)
         // 外部语音引擎（Breeze TTS 2 等）：只发 HTTP 请求，不加载本机模型。
         breeze = com.localmind.service.BreezeTts(this)
+        remoteData = com.localmind.service.RemoteDataService(this)
         apiServer = ApiServer(storage, engine, tts, modelStore)
         remoteEngine = com.localmind.service.RemoteChatEngine()
         remoteApi = com.localmind.service.RemoteApi()
