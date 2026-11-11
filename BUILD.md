@@ -1,5 +1,45 @@
 # BUILD.md · 编译与验证
 
+## -1. 最省事：让 GitHub 帮你编
+
+不想在本机碰 NDK/CMake/llama.cpp 源码的话，**别本地编** —— 推上去让 Actions 编：
+
+```bash
+git push origin main                       # → Actions 自动出 APK
+gh run list --repo isnananya/LocalMind-Android
+gh run download <run-id> --repo isnananya/LocalMind-Android --name LocalMind-release-apk
+```
+
+要带版本号发正式包：
+
+```bash
+git tag v1.0.8 && git push origin v1.0.8   # → 自动发 Release，APK 挂在 Release 上
+```
+
+云端工作流（`.github/workflows/android.yml`）做的事：
+
+1. 克隆 **llama.cpp v0.6.0**（版本钉死，见下）；
+2. 装 JDK 17 + Android SDK 35 + NDK 27.0.12077973 + CMake 3.22.1；
+3. `assembleDebug` + `assembleRelease`（release 用 debug key 签名，仅供自用）；
+4. 两个 APK 都作为 artifact 上传。
+
+首次全新构建约 20 分钟（llama.cpp 有几百个 C++ 编译单元）；之后命中 CMake/Gradle
+缓存通常 5–8 分钟。
+
+**为什么版本要钉死**：native 层 `app/src/main/cpp/llama_jni.cpp` 是照着 llama.cpp
+**v0.6.0** 的 API 写的（`llama_init_from_model` / `llama_get_memory` /
+`llama_model_has_encoder` / `mtmd_*`）。上游到 v0.9.0 之间改过一批接口，
+克隆 main 会直接编译失败，而且是那种看不懂为什么的失败。
+本机 `third_party/llama.cpp` 是 v0.6.0 的源码快照，`include/llama.h` 与
+`tools/mtmd/mtmd.h` 的 blob 哈希与上游 v0.6.0 完全一致（`9bca8ee` / `bcd76a9`），
+所以钉住 v0.6.0 就是钉住本机验证过的那个版本。
+
+要升级 llama.cpp：**先在本机改 native 层并跑通**，再改工作流里的 `LLAMA_CPP_REF`，
+不要单独改版本号。
+
+生图后端（`prebuilt-sd.yml`）同理：钉在 sd.cpp `d763dae3b` + 仓库内的
+`third_party/patches/sd-conv-direct.patch`（本机验证过的是这个组合）。
+
 ## 0. 已验证的环境（本机实际跑通）
 
 | 组件 | 版本 / 路径 |
