@@ -115,9 +115,17 @@ fun MePage(viewModel: AppViewModel) {
                     )
                     AuroraDivider(indent = 58.dp)
                     AuroraRow(
-                        title = "TTS 测试",
+                        title = "语音与音色",
+                        subtitle = "音色库 · 声音克隆 · 语速音高",
                         leading = { AuroraIcon(AppIcons.Mic, ios.green) },
                         onClick = { viewModel.openVoiceScreen(true) },
+                    )
+                    AuroraDivider(indent = 58.dp)
+                    AuroraRow(
+                        title = "声音克隆",
+                        subtitle = "上传一段录音，复刻成你自己的音色",
+                        leading = { AuroraIcon(AppIcons.RecordVoiceOver, ios.pink) },
+                        onClick = { viewModel.openVoiceCloneScreen(true) },
                     )
                     AuroraDivider(indent = 58.dp)
                     AuroraRow(

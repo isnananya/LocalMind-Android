@@ -95,6 +95,8 @@ fun VoiceScreen(viewModel: AppViewModel) {
     val downloadStates by viewModel.voiceDownloadStates.collectAsState()
     val engineState by viewModel.voiceEngineState.collectAsState()
     val activeNeural by viewModel.activeNeuralVoice.collectAsState()
+    val clonedVoices by viewModel.clonedVoices.collectAsState()
+    val activeClone by viewModel.activeClone.collectAsState()
     val breeze by viewModel.breeze.collectAsState()
     val engineReady = viewModel.engineReady(engineState)
 
@@ -111,13 +113,14 @@ fun VoiceScreen(viewModel: AppViewModel) {
 
     val current = when {
         breeze.ready -> "Breeze · " + (breeze.active?.spec?.label ?: "")
+        activeClone != null -> "克隆音色 · " + (activeClone?.name ?: "")
         activeNeural.isNotBlank() -> "神经音色 · " + activeNeural
         else -> "系统 TTS" + (voice.voiceName?.takeIf { it.isNotBlank() }?.let { " · " + it } ?: "")
     }
 
     Column(Modifier.fillMaxSize()) {
         AuroraNavBar(
-            title = "TTS 测试",
+            title = "语音与音色",
             onBack = { viewModel.openVoiceScreen(false) },
             trailing = {
                 if (catalog.isNotEmpty()) {
@@ -364,6 +367,42 @@ fun VoiceScreen(viewModel: AppViewModel) {
                                 },
                             )
                         }
+                    }
+                }
+            }
+
+            item {
+                AuroraSectionLabel("我的克隆音色")
+                AuroraGroup {
+                    // 引导：克隆依赖底模，没下载时给个入口。
+                    if (!viewModel.cloneBaseInstalled()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AuroraIcon(AppIcons.Mic, ios.orange, size = 30.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("声音克隆底模未下载", style = IosTheme.typography.body, color = ios.label)
+                                Text(
+                                    "克隆功能需要先下载「声音克隆底模（中英 · 零样本）」，在上方音色列表里。",
+                                    style = IosTheme.typography.caption1,
+                                    color = ios.secondaryLabel,
+                                )
+                            }
+                        }
+                        AuroraDivider(indent = 16.dp)
+                    }
+                    AuroraRow(
+                        title = "新建克隆音色",
+                        subtitle = "上传一段你的录音 + 它念的文字，复刻你的音色",
+                        leading = { AuroraIcon(AppIcons.Add, ios.blue, size = 30.dp) },
+                        onClick = { viewModel.openVoiceCloneScreen(true) },
+                    )
+                    if (clonedVoices.isNotEmpty()) AuroraDivider(indent = 16.dp)
+                    clonedVoices.forEachIndexed { index, c ->
+                        if (index > 0) AuroraDivider(indent = 16.dp)
+                        ClonedVoiceRow(viewModel = viewModel, clone = c, selected = activeClone?.id == c.id)
                     }
                 }
             }

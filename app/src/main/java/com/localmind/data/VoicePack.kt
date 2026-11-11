@@ -65,6 +65,12 @@ data class VoiceEntry(
     /** 徽标，例如 "轻量" / "角色"。 */
     val badge: String = "",
     /**
+     * 这是声音克隆的「底模」吗（零样本克隆引擎，上传参考音频即可复刻音色）。
+     * 只有 ZipVoice2 这类零样本模型为 true；UI 据此在「我的克隆音色」里提示
+     * 「要先下载这个底模才能克隆」，插件也要能声明自己的克隆底模。
+     */
+    val clonable: Boolean = false,
+    /**
      * 压缩包地址。留空则按官方 Release 约定拼：
      * `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2`
      */

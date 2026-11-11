@@ -24,7 +24,10 @@ import com.localmind.data.PersonaPresets
 import com.localmind.data.UserProfile
 import com.localmind.data.RemoteProvider
 import com.localmind.data.Role
+import com.localmind.data.ClonedVoice
+import com.localmind.data.ClonedVoiceStore
 import com.localmind.data.VoiceSettings
+import com.localmind.util.AudioUtil
 import com.localmind.service.ApiForegroundService
 import com.localmind.service.ImageEngine
 import com.localmind.service.SelfTest
@@ -242,6 +245,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 聊天页的麦克风按钮和「我的」页的导航行。放在这里两边都能开。
      */
     private val _showVoiceScreen = MutableStateFlow(false)
+
+    /** 「新建克隆音色」整页（上传参考音频 + 文字，复刻音色）。 */
+    private val _showVoiceCloneScreen = MutableStateFlow(false)
+    val showVoiceCloneScreen: StateFlow<Boolean> = _showVoiceCloneScreen.asStateFlow()
+    fun openVoiceCloneScreen(open: Boolean) { _showVoiceCloneScreen.value = open }
 
     /** 「Breeze 语音」整页（外部语音引擎）。 */
     private val _showBreeze = MutableStateFlow(false)
@@ -1111,6 +1119,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 加载一个 VITS 模型要读几十上百 MB，init 跑在主线程上。
         // 音色清单来自插件，所以先把注册表建起来再恢复选择。
         refreshVoiceCatalog()
+        refreshClonedVoices()
         restoreNeuralVoice()
 
         // 把"多重思考"同步给拟人层：它决定经验/心事要不要用对话模型兜底提炼。
@@ -2404,7 +2413,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     conv.updatedAt = System.currentTimeMillis()
                     emitConversations()
                     persistConversations()
-                    if (conv.abilities.voice && _voice.value.enabled) tts.speakQueued(text, _voice.value)
+                    if (conv.abilities.voice && _voice.value.enabled) speakQueued(text, _voice.value)
                 }
             }
         }
@@ -3119,7 +3128,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (conv.abilities.voice && conv.ttsEnabled && voiceSettings.enabled && voiceSettings.autoSpeak) {
                     val tail = split.answer.substring(spokenUpTo.coerceAtMost(split.answer.length))
                     if (tail.isNotBlank()) {
-                        tts.speakQueued(
+                        speakQueued(
                             tail,
                             voiceSettings.copy(
                                 stylePrompt = conv.voicePrompt.ifBlank { voiceSettings.stylePrompt },
@@ -3630,9 +3639,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun speak(text: String) {
-        // 唯一用户侧 TTS = 开源本地神经音色 NeuralTts（sherpa-onnx，VITS/Matcha/Kokoro/Kitten）。
-        // 选中了本地音色且引擎已加载就直接走它；其余情况退系统 TTS。
-        // 不再经过云端 Breeze（原来的 TTS 逻辑已整体替换为开源 NeuralTts）。
+        // 第一优先：克隆音色（ZipVoice2 零样本）。它和普通神经音色互斥，且走的是
+        // 「底模 + 参考音频」这条独立链路，必须用 speakClone 而不是普通 speak。
+        val clone = _activeClone.value
+        if (clone != null && cloneAudio != null &&
+            neuralTts.loadedVoiceId == com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID
+        ) {
+            val v = _voice.value
+            val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+            viewModelScope.launch {
+                withContext(Dispatchers.Default) {
+                    neuralTts.speakClone(text, cloneAudio!!, cloneSampleRate, cloneText, rate, pitch, v.volume)
+                }
+            }
+            return
+        }
+        // 现有：选中的本地神经音色（VITS/Kokoro/...）且引擎已加载就直接走它；
+        // 其余情况退系统 TTS。唯一用户侧 TTS = 开源本地神经音色 NeuralTts。
         val neural = _activeNeuralVoice.value
         if (neural.isNotBlank() && neuralTts.loadedVoiceId == neural) {
             val v = _voice.value
@@ -3646,6 +3669,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         tts.init { }
         tts.speak(text, _voice.value)
+    }
+
+    /**
+     * 对话自动朗读用：克隆/神经音色优先，否则退回系统 TTS（排队播报）。
+     * 把原来各调用点的 `tts.speakQueued` 收口到这里，让「自定义音色念回复」真正生效。
+     */
+    fun speakQueued(text: String, settings: VoiceSettings) {
+        val clone = _activeClone.value
+        if (clone != null && cloneAudio != null &&
+            neuralTts.loadedVoiceId == com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID
+        ) {
+            val (rate, pitch) = tts.effective(settings.speed, settings.pitch, settings.emotion)
+            viewModelScope.launch {
+                withContext(Dispatchers.Default) {
+                    neuralTts.speakClone(text, cloneAudio!!, cloneSampleRate, cloneText, rate, pitch, settings.volume)
+                }
+            }
+            return
+        }
+        val neural = _activeNeuralVoice.value
+        if (neural.isNotBlank() && neuralTts.loadedVoiceId == neural) {
+            val (rate, pitch) = tts.effective(settings.speed, settings.pitch, settings.emotion)
+            viewModelScope.launch {
+                withContext(Dispatchers.Default) { neuralTts.speak(text, speed = rate, pitch = pitch, volume = settings.volume) }
+            }
+            return
+        }
+        tts.speakQueued(text, settings)
     }
 
     fun stopSpeaking() {
@@ -3662,6 +3713,220 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 现在真正加载着的神经音色 id；空串表示在用系统 TTS。 */
     private val _activeNeuralVoice = MutableStateFlow("")
     val activeNeuralVoice: StateFlow<String> = _activeNeuralVoice.asStateFlow()
+
+    // ---- 声音克隆（零样本）：上传参考音频复刻音色 ----
+    //
+    // 克隆不是一种「独立的音色」，而是「ZipVoice2 底模 + 一段参考音频」。所以状态分两层：
+    //  * `_clonedVoices`：用户存过的所有克隆音色（持久化在 cloned_voices.json）；
+    //  * 运行期把选中的那个克隆解析成「参考音频 FloatArray + 采样率 + 文字」，缓存到
+    //    [cloneAudio]/[cloneSampleRate]/[cloneText]，speak 时直接喂给 ZipVoice2。
+    // 选中克隆时会把底模加载进来（loadedVoiceId == ZIPVOICE_CLONE_BASE_ID），
+    // 这样 speak() 一眼就能判断「现在该走克隆链路还是普通神经链路」。
+
+    /** 用户存过的克隆音色列表（UI 展示用）。 */
+    private val _clonedVoices = MutableStateFlow<List<ClonedVoice>>(emptyList())
+    val clonedVoices: StateFlow<List<ClonedVoice>> get() = _clonedVoices.asStateFlow()
+
+    /** 当前选中的克隆音色（元数据，UI 显示「使用中」用）。 */
+    private val _activeClone = MutableStateFlow<ClonedVoice?>(null)
+    val activeClone: StateFlow<ClonedVoice?> get() = _activeClone.asStateFlow()
+
+    /** 选中的克隆音色解析后的参考音频（已重采样到 [cloneSampleRate]）。 */
+    @Volatile private var cloneAudio: FloatArray? = null
+    @Volatile private var cloneSampleRate: Int = 24000
+    @Volatile private var cloneText: String? = null
+
+    /** 刷新克隆音色列表（从磁盘）。装应用 / 切到语音页时调。 */
+    fun refreshClonedVoices() {
+        _clonedVoices.value = ClonedVoiceStore.list(storage)
+    }
+
+    /** 克隆音色要用的 ZipVoice2 底模是否已下载。 */
+    fun cloneBaseInstalled(): Boolean {
+        val base = com.localmind.data.BuiltinVoices.byId(com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID)
+            ?: return false
+        return com.localmind.service.NeuralVoiceModels.isInstalled(storage, base)
+    }
+
+    /**
+     * 选中克隆音色后解析出的运行期数据：参考音频已重采样到 24000 Hz。
+     * 不是 @Serializable，不持久化 —— 每次选中都从 ClonedVoice.audioPath 重新读。
+     */
+    private class CloneRuntime(
+        val id: String,
+        val name: String,
+        val audio: FloatArray,
+        val sampleRate: Int,
+        val referenceText: String?,
+    )
+
+    /** 把 ClonedVoice 的参考音频读出来、重采样到 24000 Hz（ZipVoice2 约定采样率）。 */
+    private fun buildCloneRuntime(clone: ClonedVoice): CloneRuntime? {
+        val (samples, rate) = AudioUtil.readWavToMonoFloat(clone.audioPath) ?: return null
+        val audio = AudioUtil.resample(samples, rate, 24000)
+        return CloneRuntime(
+            id = clone.id,
+            name = clone.name,
+            audio = audio,
+            sampleRate = 24000,
+            referenceText = clone.transcript.takeIf { it.isNotBlank() },
+        )
+    }
+
+    /** 加载克隆底模（会释放当前加载的其他音色）。失败返回 false。 */
+    private fun loadCloneBase(): Boolean {
+        val base = com.localmind.data.BuiltinVoices.byId(com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID)
+            ?: return false
+        return neuralTts.load(storage, base) != null
+    }
+
+    /**
+     * 选中某个克隆音色：加载底模 + 缓存参考音频，之后 speak 走克隆链路。
+     * 和普通神经音色互斥 —— 选了克隆就清掉普通音色选择，避免两条链路打架。
+     */
+    fun selectClonedVoice(clone: ClonedVoice) {
+        if (!cloneBaseInstalled()) {
+            toast("先下载「声音克隆底模（中英 · 零样本）」")
+            return
+        }
+        viewModelScope.launch {
+            val rt = withContext(Dispatchers.IO) { buildCloneRuntime(clone) }
+            if (rt == null) {
+                toast("参考音频读不出来，请换一段 16-bit 单声道 WAV")
+                return@launch
+            }
+            val ok = withContext(Dispatchers.IO) { loadCloneBase() }
+            if (!ok) {
+                toast("克隆底模加载失败")
+                return@launch
+            }
+            // 写运行期缓存与选中态。这两步都在 IO 完成后、主线程安全。
+            cloneAudio = rt.audio
+            cloneSampleRate = rt.sampleRate
+            cloneText = rt.referenceText
+            _activeClone.value = clone
+            updateVoice { it.copy(neuralVoiceId = "", activeCloneId = clone.id) }
+            _activeNeuralVoice.value = com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID
+            toast("已切换到克隆音色：${clone.name}")
+        }
+    }
+
+    /**
+     * 试听克隆音色：临时加载底模 + 参考音频合成一句，试完把用户原本的普通音色加载回来
+     * （如果原本没选任何克隆/普通音色，就留在底模已加载状态也无妨）。
+     */
+    fun previewClonedVoice(clone: ClonedVoice) {
+        if (!cloneBaseInstalled()) {
+            toast("先下载「声音克隆底模（中英 · 零样本）」")
+            return
+        }
+        val text = clone.name + "。" + (clone.transcript.takeIf { it.isNotBlank() }
+            ?: "这是用我的声音克隆出来的音色。")
+        viewModelScope.launch {
+            // 试听前记住当前状态，试完还原，免得一次试听就把用户选好的普通音色冲掉。
+            val prev = _activeNeuralVoice.value
+            val prevClone = _activeClone.value
+            val rt = withContext(Dispatchers.IO) { buildCloneRuntime(clone) }
+            if (rt == null) {
+                toast("参考音频读不出来，请换一段 WAV")
+                return@launch
+            }
+            val ok = withContext(Dispatchers.IO) { loadCloneBase() }
+            if (!ok) {
+                toast("克隆底模加载失败")
+                return@launch
+            }
+            val v = _voice.value
+            val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+            val spoken = withContext(Dispatchers.Default) {
+                neuralTts.speakClone(text, rt.audio, rt.sampleRate, rt.referenceText, rate, pitch, v.volume)
+            }
+            if (!spoken) toast("试听失败")
+            // 还原：原本用的是普通神经音色（且不是底模）就加载回去。
+            if (prevClone == null && prev.isNotBlank() &&
+                prev != com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID
+            ) {
+                withContext(Dispatchers.IO) {
+                    val voiceEntry = com.localmind.data.VoiceCatalog.byId(prev)
+                    if (voiceEntry != null &&
+                        com.localmind.service.NeuralVoiceModels.isInstalled(storage, voiceEntry)
+                    ) {
+                        neuralTts.load(storage, voiceEntry)
+                        _activeNeuralVoice.value = prev
+                    } else {
+                        neuralTts.release()
+                        _activeNeuralVoice.value = ""
+                    }
+                }
+            }
+        }
+    }
+
+    /** 保存一个克隆音色（来自「新建克隆音色」页）。 */
+    fun saveClonedVoice(clone: ClonedVoice) {
+        ClonedVoiceStore.save(storage, clone)
+        refreshClonedVoices()
+    }
+
+    /**
+     * 从一段刚录好 / 导入的 WAV 建一个克隆音色。
+     *
+     * 音频必须**搬到 App 私有目录**再记路径：录音落在 cacheDir（系统随时可能清掉），
+     * 导入拿到的是 SAF 的临时 uri（进程重启就失效）。只有搬到 filesDir 之下，
+     * `ClonedVoice.audioPath` 才是一个长期有效的绝对路径。
+     *
+     * @return 新建的条目；音频不可用或写盘失败返回 null（已 toast 过原因）。
+     */
+    fun createClonedVoice(name: String, transcript: String, sourceWav: File): ClonedVoice? {
+        if (!sourceWav.isFile || sourceWav.length() <= 44L) {
+            toast("参考音频是空的，重录一段")
+            return null
+        }
+        val id = "clone-" + System.currentTimeMillis()
+        val dir = File(storage.appContext().filesDir, "cloned_voices").apply { mkdirs() }
+        val dst = File(dir, "$id.wav")
+        val copied = runCatching {
+            sourceWav.inputStream().use { input -> dst.outputStream().use { out -> input.copyTo(out) } }
+            dst.length() > 44L
+        }.getOrDefault(false)
+        if (!copied) {
+            runCatching { dst.delete() }
+            toast("参考音频保存失败")
+            return null
+        }
+        val clone = ClonedVoice(
+            id = id,
+            name = name.trim().ifBlank { "我的音色" },
+            audioPath = dst.absolutePath,
+            transcript = transcript.trim(),
+            createdAt = System.currentTimeMillis(),
+        )
+        saveClonedVoice(clone)
+        return clone
+    }
+
+    /** 删除一个克隆音色；若是当前选中的，先释放。音频文件一起删，别留垃圾。 */
+    fun deleteClonedVoice(id: String) {
+        val target = _clonedVoices.value.firstOrNull { it.id == id }
+        if (_activeClone.value?.id == id) releaseClonedVoice()
+        ClonedVoiceStore.delete(storage, id)
+        target?.audioPath?.let { path -> runCatching { File(path).delete() } }
+        refreshClonedVoices()
+        toast("已删除克隆音色")
+    }
+
+    /** 关闭克隆音色（退回系统 TTS / 普通神经音色）。 */
+    fun releaseClonedVoice() {
+        cloneAudio = null
+        cloneSampleRate = 24000
+        cloneText = null
+        _activeClone.value = null
+        updateVoice { it.copy(activeCloneId = "") }
+        if (_activeNeuralVoice.value == com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID) {
+            neuralTts.release()
+            _activeNeuralVoice.value = ""
+        }
+    }
 
     /**
      * 神经语音引擎（原生库）的下载状态。
@@ -3784,6 +4049,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             toast("「${voice.label}」用不了：$why")
             return
         }
+        // 选普通神经音色时清掉克隆状态：两者互斥，避免一个还占着底模。
+        cloneAudio = null
+        cloneSampleRate = 24000
+        cloneText = null
+        _activeClone.value = null
+        updateVoice { it.copy(activeCloneId = "") }
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { neuralTts.load(storage, voice) != null }
             if (ok) {
@@ -3799,7 +4070,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun releaseNeuralVoice() {
-        updateVoice { it.copy(neuralVoiceId = "") }
+        updateVoice { it.copy(neuralVoiceId = "", activeCloneId = "") }
+        cloneAudio = null
+        cloneSampleRate = 24000
+        cloneText = null
+        _activeClone.value = null
         neuralTts.release()
         _activeNeuralVoice.value = ""
         stopSpeaking()
@@ -3939,7 +4214,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (_voice.value.neuralVoiceId == crashed) {
                 updateVoice { it.copy(neuralVoiceId = "") }
             }
+            if (_voice.value.activeCloneId.isNotBlank()) {
+                updateVoice { it.copy(activeCloneId = "") }
+            }
             toast("上次加载音色导致应用退出，已停用它")
+        }
+
+        // 克隆音色优先于普通神经音色（两者互斥，且克隆走独立链路）。
+        val cloneId = _voice.value.activeCloneId
+        if (cloneId.isNotBlank()) {
+            val clone = ClonedVoiceStore.list(storage).firstOrNull { it.id == cloneId }
+            if (clone == null) {
+                updateVoice { it.copy(activeCloneId = "") }
+            } else {
+                viewModelScope.launch {
+                    val rt = withContext(Dispatchers.IO) { buildCloneRuntime(clone) }
+                    if (rt == null) {
+                        updateVoice { it.copy(activeCloneId = "") }
+                        toast("克隆音色的参考音频丢失，已停用")
+                        return@launch
+                    }
+                    if (!cloneBaseInstalled()) {
+                        updateVoice { it.copy(activeCloneId = "") }
+                        return@launch
+                    }
+                    val ok = withContext(Dispatchers.IO) { loadCloneBase() }
+                    if (ok) {
+                        cloneAudio = rt.audio
+                        cloneSampleRate = rt.sampleRate
+                        cloneText = rt.referenceText
+                        _activeClone.value = clone
+                        _activeNeuralVoice.value = com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID
+                    } else {
+                        updateVoice { it.copy(activeCloneId = "") }
+                    }
+                }
+            }
+            return
         }
 
         val id = _voice.value.neuralVoiceId

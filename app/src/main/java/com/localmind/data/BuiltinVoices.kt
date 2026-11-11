@@ -35,7 +35,35 @@ package com.localmind.data
  */
 object BuiltinVoices {
 
+    /**
+     * 声音克隆的「底模」id。克隆功能（「我的克隆音色」）依赖这个 ZipVoice2 零样本模型：
+     * 上传一段参考音频 + 它念的文字，模型据此复刻音色，不需要训练。
+     * 它是普通的神经音色条目，用户要先在语音页下载它，克隆才可用。
+     */
+    const val ZIPVOICE_CLONE_BASE_ID = "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
+
     val all: List<VoiceEntry> = listOf(
+        // ---- 声音克隆底模（零样本）----
+        // 上传参考音频即可复刻音色。必须先下载，否则「我的克隆音色」会提示先装它。
+        VoiceEntry(
+            id = ZIPVOICE_CLONE_BASE_ID,
+            label = "声音克隆底模（中英 · 零样本）",
+            badge = "克隆",
+            sizeBytes = 109_162_785,
+            clonable = true,
+            description = "109 MB · 完全离线 · Apache-2.0（ZipVoice2）。上传一段你的录音即可复刻音色，" +
+                "无需训练。这是「我的克隆音色」里做声音克隆要用的底模，先下载它。",
+            sampleText = "这是用我的声音克隆出来的音色，以后就用这个声音和你说话。",
+        ),
+        // ---- 额外的开源音色（像模型库一样可内置下载）----
+        VoiceEntry(
+            id = "vits-melo-tts-zh_en",
+            label = "梅洛（中文女声 · 开源）",
+            badge = "开源",
+            sizeBytes = 167_006_755,
+            description = "167 MB · 完全离线 · 社区开源模型。中文女声，音色温暖，适合当人设默认声音。",
+            sampleText = "你好，我是梅洛，很高兴认识你。",
+        ),
         // Kokoro int8 多语言：目前清单里最自然的音色，中英日韩都能念。
         // 140 MB 与 VITS 大模型同量级，效果却明显更好 —— 所以排第一推荐。
         VoiceEntry(

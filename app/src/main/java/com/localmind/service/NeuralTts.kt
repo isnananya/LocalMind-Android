@@ -12,6 +12,8 @@ import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsZipVoiceModelConfig
+import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.SherpaNativeLoader
 import com.localmind.data.Storage
 import com.localmind.data.VoiceEntry
@@ -118,6 +120,12 @@ object NeuralVoiceModels {
             .filter { it.extension.equals("onnx", ignoreCase = true) && it != model }
             .maxByOrNull { it.length() }
 
+        // ZipVoice2（零样本声音克隆）：encoder / decoder / vocoder 三个 onnx + tokens.txt。
+        // 见到这三件套就基本是它了；model_type 元数据大多写 "zipvoice"。
+        val encOnnx = pick(files, base, "encoder.onnx", "encoder_quant.onnx")
+        val decOnnx = pick(files, base, "decoder.onnx", "decoder_quant.onnx")
+        val vocOnnx = pick(files, base, "vocoder.onnx", "vocos.onnx", "vocoder_quant.onnx")
+
         
         //
         // 判据和 sherpa-onnx 自己的一致：它的 VITS 实现读 ONNX metadata 里的
@@ -131,6 +139,8 @@ object NeuralVoiceModels {
         val modelType = onnxMeta(model, "model_type").orEmpty()
         val comment = onnxMeta(model, "comment").orEmpty()
         val arch: NeuralVoiceModels.Arch = when {
+            modelType.equals("zipvoice", ignoreCase = true) ||
+                (encOnnx != null && decOnnx != null && vocOnnx != null) -> NeuralVoiceModels.Arch.ZIPVOICE
             modelType.equals("kitten", ignoreCase = true) -> NeuralVoiceModels.Arch.KITTEN
             modelType.equals("kokoro", ignoreCase = true) || comment.contains("kokoro", ignoreCase = true) ->
                 NeuralVoiceModels.Arch.KOKORO
@@ -186,6 +196,15 @@ object NeuralVoiceModels {
                     "原生引擎加载它会直接结束进程，已拦下"
                 else -> ""
             }
+            NeuralVoiceModels.Arch.ZIPVOICE -> when {
+                tokens == null -> "ZipVoice 音色缺 tokens.txt，无法使用"
+                encOnnx == null -> "ZipVoice 音色缺 encoder.onnx，无法使用"
+                decOnnx == null -> "ZipVoice 音色缺 decoder.onnx，无法使用"
+                vocOnnx == null -> "ZipVoice 音色缺 vocoder.onnx，无法使用"
+                // 多语言（中英）ZipVoice 靠 espeak-ng-data 做音素转换；缺了加载即崩进程。
+                espeakData == null -> "ZipVoice 缺 espeak-ng-data，原生引擎加载它会直接结束进程，已拦下"
+                else -> ""
+            }
             NeuralVoiceModels.Arch.UNKNOWN -> "这是 " + modelType.ifBlank { comment }.ifBlank { "未知架构" } +
                 " 架构的音色，主程序不认识它，装上也发不出声"
         }
@@ -193,6 +212,8 @@ object NeuralVoiceModels {
         return Layout(
             modelDir = base,
             model = model.name,
+            encoder = encOnnx?.name.orEmpty(),
+            decoder = decOnnx?.name.orEmpty(),
             tokens = tokens?.name.orEmpty(),
             lexicon = lexicon?.name.orEmpty(),
             dataDir = espeakData?.absolutePath.orEmpty(),
@@ -200,7 +221,11 @@ object NeuralVoiceModels {
             sizeBytes = files.sumOf { it.length() },
             arch = arch,
             voices = voicesBin?.name.orEmpty(),
-            vocoder = if (arch == NeuralVoiceModels.Arch.MATCHA) otherOnnx?.name.orEmpty() else "",
+            vocoder = when (arch) {
+                NeuralVoiceModels.Arch.MATCHA -> otherOnnx?.name.orEmpty()
+                NeuralVoiceModels.Arch.ZIPVOICE -> vocOnnx?.name.orEmpty()
+                else -> ""
+            },
             modelType = arch.label,
             frontend = frontend,
             playable = blockedReason.isEmpty(),
@@ -273,12 +298,16 @@ object NeuralVoiceModels {
         MATCHA("Matcha"),
         KOKORO("Kokoro"),
         KITTEN("Kitten TTS"),
+        /** 零样本声音克隆（上传参考音频即可复刻音色）。sherpa-onnx 的 ZipVoice2。 */
+        ZIPVOICE("ZipVoice 克隆"),
         UNKNOWN("未知"),
     }
 
     data class Layout(
         val modelDir: File,
         val model: String,
+        val encoder: String = "",
+        val decoder: String = "",
         val tokens: String,
         val lexicon: String,
         /** espeak-ng-data 的绝对路径（Piper / Coqui / icefall / Kokoro multi-lang 必需）。 */
@@ -462,6 +491,16 @@ class NeuralTtsEngine(
                         lexicon = abs(layout.lexicon),
                         dataDir = layout.dataDir,
                     )
+                    // ZipVoice2（零样本声音克隆）：用参考音频复刻音色，不走 sid。
+                    // encoder / decoder / vocoder 三个 onnx + tokens 是它独有的。
+                    NeuralVoiceModels.Arch.ZIPVOICE -> modelCfg.zipvoice = OfflineTtsZipVoiceModelConfig(
+                        tokens = abs(layout.tokens),
+                        encoder = abs(layout.encoder),
+                        decoder = abs(layout.decoder),
+                        vocoder = abs(layout.vocoder),
+                        dataDir = layout.dataDir,
+                        lexicon = abs(layout.lexicon),
+                    )
                     // VITS 与 UNKNOWN 都走 VITS config：UNKNOWN 的 playable 必为 false，
                     // 到不了这里；VITS 保持原有行为。
                     else -> modelCfg.vits = OfflineTtsVitsModelConfig(
@@ -572,6 +611,80 @@ class NeuralTtsEngine(
             true
         }.getOrElse { t ->
             Log.w(TAG, "导出 WAV 失败：${t.message}", t)
+            false
+        }
+    }
+
+    /**
+     * 零样本声音克隆：合成并播放。
+     *
+     * @param referenceAudio 参考音频的 PCM 浮点采样（已重采样到 [referenceSampleRate]）。
+     * @param referenceSampleRate 参考音频采样率（ZipVoice2 约定 24000 Hz）。
+     * @param referenceText 参考音频里念的文字；越准克隆越像。
+     */
+    fun speakClone(
+        text: String,
+        referenceAudio: FloatArray,
+        referenceSampleRate: Int,
+        referenceText: String?,
+        speed: Float = 1.0f,
+        pitch: Float = 1.0f,
+        volume: Float = 1.0f,
+    ): Boolean {
+        val engine = tts ?: return false
+        if (text.isBlank() || referenceAudio.isEmpty()) return false
+        stoppedGeneration = false
+        return runCatching {
+            val callback = NativeTtsCallback { if (stoppedGeneration) 0 else 1 }
+            val cfg = GenerationConfig(
+                silenceScale = 0.2f,
+                speed = speed.coerceIn(0.3f, 2.5f),
+                sid = 0,
+                referenceAudio = referenceAudio,
+                referenceSampleRate = referenceSampleRate,
+                referenceText = referenceText?.takeIf { it.isNotBlank() },
+                numSteps = 5,
+            )
+            val audio = engine.generateWithConfig(text, cfg)
+            if (audio.samples.isEmpty()) return false
+            val shifted = applyPitch(audio.samples, audio.sampleRate, pitch)
+            play(shifted.first, shifted.second, volume)
+            true
+        }.getOrElse { t ->
+            Log.w(TAG, "克隆合成失败：${t.message}", t)
+            false
+        }
+    }
+
+    /** 克隆合成到 WAV 文件。 */
+    fun synthesizeCloneToWav(
+        text: String,
+        referenceAudio: FloatArray,
+        referenceSampleRate: Int,
+        referenceText: String?,
+        speed: Float,
+        pitch: Float,
+        target: File,
+    ): Boolean {
+        val engine = tts ?: return false
+        if (text.isBlank() || referenceAudio.isEmpty()) return false
+        return runCatching {
+            val cfg = GenerationConfig(
+                silenceScale = 0.2f,
+                speed = speed.coerceIn(0.3f, 2.5f),
+                sid = 0,
+                referenceAudio = referenceAudio,
+                referenceSampleRate = referenceSampleRate,
+                referenceText = referenceText?.takeIf { it.isNotBlank() },
+                numSteps = 5,
+            )
+            val audio = engine.generateWithConfig(text, cfg)
+            if (audio.samples.isEmpty()) return false
+            val (samples, rate) = applyPitch(audio.samples, audio.sampleRate, pitch)
+            target.writeBytes(wav(samples, rate))
+            true
+        }.getOrElse { t ->
+            Log.w(TAG, "克隆导出 WAV 失败：${t.message}", t)
             false
         }
     }

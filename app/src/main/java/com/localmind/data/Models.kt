@@ -589,6 +589,12 @@ data class VoiceSettings(
      * 同时存在是有意的 —— 神经音色加载失败时必须能退回系统音色。
      */
     val neuralVoiceId: String = "",
+    /**
+     * 当前选中的「克隆音色」id（见 [com.localmind.data.ClonedVoice]）。
+     * 空串 = 没选克隆音色。和普通神经音色 [neuralVoiceId] 互斥：选了克隆就清掉普通音色，
+     * 因为克隆走的是 ZipVoice2 底模 + 参考音频这条独立的合成链路。
+     */
+    val activeCloneId: String = "",
     val speed: Float = 1.0f,
     val pitch: Float = 1.0f,
     val volume: Float = 1.0f,
