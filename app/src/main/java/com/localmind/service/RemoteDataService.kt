@@ -136,8 +136,8 @@ class RemoteDataService(private val context: Context) {
                     name = o.optString("name"),
                     yuan = o.optInt("yuan"),
                     // dataURL → 纯 base64（bitmap() 直接 Base64.decode）
-                    avatarBase64 = o.optString("avatar").takeIf { it.isNotBlank() }
-                        ?.substringAfter(",", it),
+                    avatarBase64 = o.optString("avatar").takeIf { s -> s.isNotBlank() }
+                        ?.let { s -> if (s.startsWith("data:")) s.substringAfter(",") else s },
                 )
             }
         } ?: emptyList()

@@ -272,6 +272,16 @@ fun LiquidGlassTabBar(
                 .onGloballyPositioned { panelWindow = it.boundsInWindow() },
             contentAlignment = Alignment.Center,
         ) {
+            // 几何量放在**外层**作用域：内层（底板/胶囊框内）和
+            // 外层（胶囊溢出的光晕）画的是同一个坐标系，都要用。
+            val w = panelPx.width.toFloat()
+            val h = panelPx.height.toFloat()
+            val cornerPx = with(density) { corner.toPx() }
+            // 胶囊在底板里留一圈可读的边距：贴到 4dp 时，前排选中项和底板
+            // 左端的圆弧几乎相切，看起来像被底板裁掉一角。
+            val pillInset = with(density) { 4.dp.toPx() }
+            val pillTop = with(density) { 4.dp.toPx() }
+            val fillColor = if (ios.isDark) 0xFF211F26.toInt() else 0xFFFFFFFF.toInt()
         Box(
             modifier = Modifier
                 .width(panelWidth)
@@ -286,15 +296,6 @@ fun LiquidGlassTabBar(
                 .clip(shape),
             contentAlignment = Alignment.Center,
         ) {
-            val w = panelPx.width.toFloat()
-            val h = panelPx.height.toFloat()
-            val cornerPx = with(density) { corner.toPx() }
-            // 胶囊在底板里留一圈可读的边距：贴到 4dp 时，前排选中项和底板
-            // 左端的圆弧几乎相切，看起来像被底板裁掉一角。
-            val pillInset = with(density) { 4.dp.toPx() }
-            val pillTop = with(density) { 4.dp.toPx() }
-            val fillColor = if (ios.isDark) 0xFF211F26.toInt() else 0xFFFFFFFF.toInt()
-
             Canvas(Modifier.fillMaxSize()) {
                 if (frameTick < 0) return@Canvas
                 val bd = backdrop
