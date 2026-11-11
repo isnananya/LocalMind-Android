@@ -28,7 +28,7 @@ internal fun Modifier.dockPressScale(
     val scale by animateFloatAsState(
         targetValue = if (pressed) scaleDown else 1f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingNoBouncy,
+            dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow,
         ),
         label = "dockPressScale",

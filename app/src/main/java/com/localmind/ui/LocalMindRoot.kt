@@ -359,6 +359,20 @@ fun LocalMindRoot(
                         targetOffsetY = { it / 2 },
                     ),
                 ) {
+                    val labels = uiLayout?.tabs
+                        ?.mapNotNull { spec ->
+                            val t = Tab.fromId(spec.target) ?: return@mapNotNull null
+                            spec.label.takeIf { it.isNotBlank() }?.let { t to it }
+                        }
+                        ?.toMap()
+                        .orEmpty()
+                    val icons = uiLayout?.tabs
+                        ?.mapNotNull { spec ->
+                            val t = Tab.fromId(spec.target) ?: return@mapNotNull null
+                            com.localmind.ui.icons.LayoutIcons.of(spec.icon)?.let { t to it }
+                        }
+                        ?.toMap()
+                        .orEmpty()
                     val dockImplMode = uiTokens["dockImpl"] ?: "liquidTabBar"
                     val dockItems = tabs.mapNotNull { t ->
                         val icon = (icons[t] ?: dockIconOf[t]) ?: return@mapNotNull null

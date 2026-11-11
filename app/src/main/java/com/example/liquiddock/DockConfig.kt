@@ -98,6 +98,8 @@ data class DockConfig(
     /** 面板填充透明度。LiquidTab 原值是 0.40。 */
     val fillAlpha: Float = 0.40f,
     val showOutline: Boolean = true,
+    /** 是否显示文字标签；与 [iconOnly] 取交集，任一为 false 都不显示。 */
+    val showLabels: Boolean = true,
     val highlight: Float = 0.5f,
     /** 关掉就只剩磨砂/色块，没有折射、色散、按压放大。 */
     val liquid: Boolean = true,
