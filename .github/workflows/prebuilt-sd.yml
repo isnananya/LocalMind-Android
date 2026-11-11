@@ -67,8 +67,14 @@ jobs:
           git -C third_party/stable-diffusion.cpp log -1 --oneline
           ls third_party/stable-diffusion.cpp/src | head
 
+      # packages 显式指定：默认值里的 `tools` 包已被 Google 下架，
+      # 装它会直接失败（Failed to find package 'tools'）。
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 11076708
+          accept-android-sdk-licenses: true
 
       - name: Install NDK / CMake
         run: |

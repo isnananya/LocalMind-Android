@@ -53,8 +53,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # ---------------------------------------------------------------------------
+      # packages 必须**显式指定**，不能吃默认值。
+      #
+      # setup-android@v3 的默认是 `tools platform-tools`，而 `tools` 这个包
+      # 已经被 Google 从 SDK 仓库里下架了 —— 装的时候会报
+      #   Warning: Failed to find package 'tools'
+      #   Error: The process '.../sdkmanager' failed with exit code 1
+      # 整个 job 在这一步就挂掉，后面什么都没跑。
+      #
+      # 这里只装真正需要的（platform-tools + build-tools），其余的
+      # platform / ndk / cmake 由下面那个 sdkmanager --install 步骤统一装。
+      # ---------------------------------------------------------------------------
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 11076708
+          accept-android-sdk-licenses: true
 
       - name: Install SDK / NDK / CMake
         run: |
