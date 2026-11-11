@@ -16,8 +16,10 @@ import java.util.concurrent.TimeUnit
 /**
  * 远程应用数据：捐献榜 / 公告 / 版本下发。
  *
- * 数据源是公开仓库 LocalMind-Data（由 GitHub Pages 管理后台维护），
- * App 匿名拉 raw JSON。策略：
+ * 数据源是公开仓库 LocalMind-Data，App 匿名拉 JSON。
+ * 国内网络下 raw.githubusercontent.com 经常被墙，所以按顺序尝试多个可达源：
+ * GitHub Pages（同源托管）→ jsDelivr 镜像（国内 CDN）→ 官方 raw（兜底）。
+ * 策略：
  *
  *  - 内存 StateFlow 供 UI 订阅；
  *  - 启动时先吃本地缓存（filesDir/remote_data/）立即渲染，
@@ -112,20 +114,27 @@ class RemoteDataService(private val context: Context) {
     private fun cache(name: String): String? =
         File(dir, name).takeIf { it.isFile }?.readText()
 
-    /** 拉网络并写缓存；失败返回 null（保留旧缓存）。 */
+    /** 拉网络并写缓存；失败返回 null（保留旧缓存）。
+     *  依次尝试多个可达源，任意一个 200 即采用（国内 raw 被墙时自动走 Pages/jsDelivr）。 */
     private fun fetch(name: String): String? {
-        val req = Request.Builder()
-            .url("$RAW/$name?t=${System.currentTimeMillis()}")
-            .header("Cache-Control", "no-cache")
-            .build()
-        return runCatching {
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val body = resp.body?.string() ?: return null
+        val t = System.currentTimeMillis()
+        for (base in BASES) {
+            val req = Request.Builder()
+                .url("$base/$name?t=$t")
+                .header("Cache-Control", "no-cache")
+                .build()
+            val body = runCatching {
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@runCatching null
+                    resp.body?.string()?.takeIf { it.isNotBlank() }
+                }
+            }.getOrNull()
+            if (body != null) {
                 runCatching { File(dir, name).writeText(body) }
-                body
+                return body
             }
-        }.getOrNull()
+        }
+        return null
     }
 
     private fun parseDonors(j: JSONObject): DonorBoard {
@@ -162,7 +171,15 @@ class RemoteDataService(private val context: Context) {
     )
 
     private companion object {
-        const val RAW = "https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data"
+        // 国内网络下 raw.githubusercontent.com 常被墙，按顺序尝试多个可达源。
+        // 1) GitHub Pages（同源托管，国内通常可达）
+        // 2) jsDelivr 镜像（国内 CDN，通常可达）
+        // 3) 官方 raw（兜底，可能被墙）
+        val BASES = listOf(
+            "https://isnananya.github.io/LocalMind-Data/data",
+            "https://cdn.jsdelivr.net/gh/isnananya/LocalMind-Data@main/data",
+            "https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
+        )
         const val KEY_ANN_READ = "ann_read_id"
     }
 }
