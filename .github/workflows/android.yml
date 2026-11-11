@@ -3,24 +3,49 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
+
+# 允许打 tag 时发布 Release
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch llama.cpp
+      # ---------------------------------------------------------------------------
+      # llama.cpp 必须**固定到 tag**，不能克隆最新 main。
+      #
+      # 本工程的 native 层（app/src/main/cpp/llama_jni.cpp，60 KB）对着
+      # llama.cpp v0.6.0 的 API 写：llama_init_from_model / llama_get_memory /
+      # llama_model_has_encoder / mtmd_* 这一套都是 v0.6.x 的形状。
+      # 上游到 v0.9.0 之间改过一批接口（llama_context 内存访问、采样器命名等），
+      # 克隆 main 会直接编译失败，而且是那种"报错位置看不懂为什么"的失败。
+      #
+      # 验证方式：本地 third_party/llama.cpp 是 v0.6.0 的源码快照，
+      # include/llama.h 与 tools/mtmd/mtmd.h 的 blob 哈希与上游 v0.6.0 完全一致
+      # （9bca8ee / bcd76a9），所以钉住 v0.6.0 就是钉住本机验证过的那个版本。
+      #
+      # 要升级 llama.cpp 时：先在本机改 native 层并跑通，再改这里这个变量，
+      # 不要单独改版本号。
+      - name: Fetch llama.cpp (pinned)
+        env:
+          LLAMA_CPP_REF: v0.6.0
         run: |
+          set -euo pipefail
           if [ ! -f third_party/llama.cpp/include/llama.h ]; then
-            git clone --depth 1 https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
+            git clone --depth 1 --branch "$LLAMA_CPP_REF" \
+              https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
           fi
           git -C third_party/llama.cpp log -1 --oneline
+          grep -m1 'LLAMA_VERSION_MINOR' third_party/llama.cpp/CMakeLists.txt || true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -46,6 +71,16 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
+      # CMake/Ninja 的中间产物。llama.cpp 是几百个编译单元，缓存命中能省十几分钟。
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/.cxx
+            app/build/intermediates/cxx
+          key: cxx-${{ runner.os }}-${{ hashFiles('app/src/main/cpp/**', 'app/build.gradle.kts') }}
+          restore-keys: cxx-${{ runner.os }}-
+
       - name: Build debug APK
         run: |
           chmod +x ./gradlew
@@ -67,3 +102,18 @@ jobs:
           name: LocalMind-release-apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
+
+      # 打 v* tag 时把 APK 挂到 Release 上，不用再去 Actions 页面翻 artifact。
+      # release 包用 debug key 签名（见 app/build.gradle.kts），所以只能自用、
+      # 不能上架应用商店 —— 这是刻意的，别改。
+      - name: Publish Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
+          body: |
+            由 GitHub Actions 自动构建。
+
+            - 安装包用 **debug key** 签名，仅供自用/内测，不能上架应用商店。
+            - 首次启动需要下载模型权重与（可选）神经语音引擎。

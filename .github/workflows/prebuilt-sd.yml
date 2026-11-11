@@ -32,11 +32,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch stable-diffusion.cpp
+      # ---------------------------------------------------------------------------
+      # sd.cpp 必须**固定到 commit**，而且必须打上本仓库的补丁。
+      #
+      # 背景：本机 third_party/stable-diffusion.cpp-master 不是上游的干净 checkout，
+      # 而是「上游 d763dae3b + 一整套 conv_direct_mode 特性补丁」的组合：
+      #   - 递归 diff 证明：除补丁外，本地与 d763dae3b **逐字节一致**；
+      #   - 补丁共 21 个文件、695 行（src/pipeline/diffusion_engine.cpp、
+      #     src/core/ggml_extend_backend.cpp、examples/cli/main.cpp 等），
+      #     外加两个新增文件 src/core/probe/conv_direct.{cpp,h}；
+      #   - 该补丁在 d763dae3b 之后被上游并入（10-24 的 a85db96a 起已有），
+      #     但上游那版同时带了一堆本机没有的其它改动（flux3_flow、generation_info.h
+      #     等），整体换版会牵动本机验证过的行为。
+      #
+      # 所以：钉死 commit d763dae3b + 应用 third_party/patches/sd-conv-direct.patch，
+      # 结果与本机验证过的源码**完全一致**（补丁已在干净 checkout 上验证过：
+      # `git apply -p1` 后递归 diff 零差异）。
+      #
+      # 补丁是**入库**的，不依赖任何外部提交仍然存在 —— 上游以后怎么变都不影响。
+      # ---------------------------------------------------------------------------
+      - name: Fetch stable-diffusion.cpp (pinned) + apply patch
+        env:
+          SD_CPP_REF: d763dae3b83f976487d1904a0038e880532efc10
         run: |
+          set -euo pipefail
           git clone --depth 1 https://github.com/leejet/stable-diffusion.cpp.git third_party/stable-diffusion.cpp
+          git -C third_party/stable-diffusion.cpp fetch -q --depth 1 origin "$SD_CPP_REF"
+          git -C third_party/stable-diffusion.cpp checkout -q "$SD_CPP_REF"
           # ggml 是子模块；Android 构建必须有它，否则 src/ 里的 ggml 调用编不过。
           git -C third_party/stable-diffusion.cpp submodule update --init --depth 1 ggml
+          # 打本仓库自带的 conv_direct_mode 补丁
+          git -C third_party/stable-diffusion.cpp apply -p1 \
+            "$GITHUB_WORKSPACE/third_party/patches/sd-conv-direct.patch"
           git -C third_party/stable-diffusion.cpp log -1 --oneline
           ls third_party/stable-diffusion.cpp/src | head
 

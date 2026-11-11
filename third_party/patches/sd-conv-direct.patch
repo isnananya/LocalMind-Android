@@ -1,0 +1,764 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -190,6 +190,7 @@
+ - [LocalAI](https://github.com/mudler/LocalAI)
+ - [Neural-Pixel](https://github.com/Luiz-Alcantara/Neural-Pixel)
+ - [KoboldCpp](https://github.com/LostRuins/koboldcpp)
++- [Kokon](https://github.com/GabrieleLozupone/kokon)
+ 
+ ## Contributors
+ 
+diff --git a/docs/backend.md b/docs/backend.md
+--- a/docs/backend.md
++++ b/docs/backend.md
+@@ -215,6 +215,47 @@
+ is off; supported video decoders try temporal tiling first and can then add
+ spatial tiling. Spatial retries use half-size tiles along each latent dimension.
+ 
++## Direct convolution (`--conv-direct on|off|auto`)
++
++`--conv-direct` defaults to `auto` and accepts module assignments for
++`diffusion`, `vae` (including preview VAE), and `controlnet`, using the same
++aliases and precedence rules as `--flash-attn`:
++
++```shell
++sd-cli -m model.safetensors -p "a cat" --conv-direct auto,vae=off
++sd-cli -m model.safetensors -p "a cat" --conv-direct off,diffusion=on
++```
++
++- `on` requests direct 2D and 3D convolution.
++- `off` uses the existing im2col-based convolution paths.
++- `auto` enables direct convolution on compute backends with implicit GEMM
++  implementations, without running a benchmark. A metadata-only probe first
++  checks support for a representative F16-weight/F32-input direct convolution
++  graph. Results and decision logs are cached per compute backend and dimension
++  in the context, as with flash attention. Vulkan enables both 2D and 3D.
++  CUDA 2D requires a compiled Turing-or-newer MMA architecture; HIP 2D requires
++  the supported CDNA MFMA or RDNA WMMA architectures described below for flash
++  attention. MUSA 2D has a SIMT implementation. CUDA, HIP, and MUSA 3D also have
++  a SIMT implementation, so they do not require MMA. Other backends default to
++  `off`. Each dimension is selected independently, and all compute devices in
++  a module must qualify. Parameter-storage devices do not affect this choice.
++
++These are backend-level defaults. GGML still chooses the actual kernel based on
++weight type, shape, and hardware; enabling direct convolution does not guarantee
++that every operation uses implicit GEMM. The CUDA-family implicit GEMM paths
++require F16 weights and can use ordinary direct kernels for other cases.
++This option does not change the separately created image upscaler context.
++
++Repeating `--conv-direct` replaces the previous assignment string. Existing
++`--diffusion-conv-direct` (diffusion and ControlNet) and `--vae-conv-direct`
++flags are deprecated and emit a warning, but remain supported when
++`--conv-direct` is omitted. Use `--conv-direct auto,diffusion=on,controlnet=on`
++and `--conv-direct auto,vae=on`, respectively. An explicit
++`--conv-direct` takes precedence over both legacy flags regardless of order.
++Library callers can set the appended `sd_ctx_params_t::conv_direct_mode` field
++to the same string; null or empty selects `auto` while honoring legacy true
++flags. The context copies the string.
++
+ ## Flash attention (`--flash-attn on|off|auto`)
+ 
+ `--flash-attn` defaults to `auto`. Selection happens while creating the model
+diff --git a/docs/backend_probe.md b/docs/backend_probe.md
+--- a/docs/backend_probe.md
++++ b/docs/backend_probe.md
+@@ -3,8 +3,9 @@
+ `src/core/probe/backend_probe.h` provides the shared measurement machinery. Operator
+ policy stays separate: `src/core/probe/flash_attn.cpp`, for example, defines attention
+ shapes and its CPU/CUDA/HIP/Vulkan shortcuts, then calls `sd_run_backend_probe` for unknown
+-configurations. A future convolution probe can use the same runner without
+-changing the attention implementation.
++configurations. `src/core/probe/conv_direct.cpp` uses metadata-only probe graphs
++to check direct 2D/3D convolution support, then enables known implicit GEMM
++paths. It does not allocate device tensors, execute kernels, or run measurements.
+ 
+ For each representative shape, create a `BackendProbeCase`:
+ 
+@@ -40,7 +41,9 @@
+ convolution implementation. If shapes or settings vary within one context,
+ include them in the corresponding cache key as well.
+ 
+-No convolution policy or CLI option is added by this infrastructure.
++Convolution results are cached separately for 2D and 3D, once per compute backend
++in the context, just like attention results. Each probe logs its backend, decision,
++and reason; mixed-device modules log when their compute devices disagree.
+ 
+ Module assignment parsing remains in `src/core/ggml_extend_backend.cpp`, next
+ to backend assignment parsing. The probe directory does not parse CLI/API options.
+diff --git a/examples/cli/README.md b/examples/cli/README.md
+--- a/examples/cli/README.md
++++ b/examples/cli/README.md
+@@ -17,6 +17,11 @@
+ Use module assignments such as `--flash-attn auto,te=off,vae=on` to override
+ individual modules.
+ 
++`--conv-direct on|off|auto` also defaults to `auto`, enabling direct convolution
++on backends with implicit GEMM implementations. Use `--conv-direct auto,vae=off`
++for module overrides; supported modules are `diffusion`, `vae`, and `controlnet`.
++See [Direct convolution](../../docs/backend.md#direct-convolution---conv-direct-onoffauto).
++
+ For direct image repair or automatic post-generation YOLOv8 detection followed by cropped inpainting, see
+ [ADetailer](../../docs/adetailer.md).
+ 
+diff --git a/examples/cli/main.cpp b/examples/cli/main.cpp
+--- a/examples/cli/main.cpp
++++ b/examples/cli/main.cpp
+@@ -696,9 +696,9 @@
+ 
+     LOG_VERBOSE("version: %s", version_string().c_str());
+     LOG_VERBOSE("%s", sd_get_system_info());
+-    LOG_VERBOSE("%s", cli_params.to_string().c_str());
+-    LOG_VERBOSE("%s", ctx_params.to_string().c_str());
+-    LOG_VERBOSE("%s", gen_params.to_string().c_str());
++    LOG_DEBUG("%s", cli_params.to_string().c_str());
++    LOG_DEBUG("%s", ctx_params.to_string().c_str());
++    LOG_DEBUG("%s", gen_params.to_string().c_str());
+ 
+     if (!cli_params.imatrix_out.empty()) {
+         if (fs::exists(cli_params.imatrix_out) &&
+diff --git a/examples/common/common.cpp b/examples/common/common.cpp
+--- a/examples/common/common.cpp
++++ b/examples/common/common.cpp
+@@ -636,14 +636,6 @@
+          "--sage-attn",
+          "use native CUDA SageAttention in the diffusion model, with flash/default attention fallback",
+          true, &sage_attn},
+-        {"",
+-         "--diffusion-conv-direct",
+-         "use ggml_conv2d_direct in the diffusion model",
+-         true, &diffusion_conv_direct},
+-        {"",
+-         "--vae-conv-direct",
+-         "use direct 2D and 3D convolutions in the vae model",
+-         true, &vae_conv_direct},
+     };
+ 
+     auto on_type_arg = [&](int argc, const char** argv, int index) {
+@@ -730,6 +722,33 @@
+              return parse_scale_override(argc, argv, index, attn_scale);
+          }},
+         {"",
++         "--diffusion-conv-direct",
++         "deprecated; use --conv-direct auto,diffusion=on,controlnet=on",
++         [this](int, const char**, int) {
++             LOG_WARN("--diffusion-conv-direct is deprecated; use --conv-direct auto,diffusion=on,controlnet=on instead.");
++             diffusion_conv_direct = true;
++             return 0;
++         }},
++        {"",
++         "--vae-conv-direct",
++         "deprecated; use --conv-direct auto,vae=on",
++         [this](int, const char**, int) {
++             LOG_WARN("--vae-conv-direct is deprecated; use --conv-direct auto,vae=on instead.");
++             vae_conv_direct = true;
++             return 0;
++         }},
++        {"",
++         "--conv-direct",
++         "on|off|auto or diffusion/vae/controlnet assignments (default: auto), e.g. auto,vae=off. Overrides legacy convolution flags",
++         [this](int argc, const char** argv, int index) {
++             if (++index >= argc || argv[index][0] == '\0') {
++                 LOG_ERROR("--conv-direct requires on, off, auto, or module assignments");
++                 return -1;
++             }
++             conv_direct_mode = argv[index];
++             return 1;
++         }},
++        {"",
+          "--flash-attn",
+          "on|off|auto or module assignments (default: auto), e.g. auto,te=off,vae=on. Last repeated option wins",
+          [this](int argc, const char** argv, int index) {
+@@ -984,6 +1003,7 @@
+         << "  clip_on_cpu: " << (clip_on_cpu ? "true" : "false") << ",\n"
+         << "  vae_on_cpu: " << (vae_on_cpu ? "true" : "false") << ",\n"
+         << "  flash_attn_mode: " << flash_attn_mode << ",\n"
++        << "  conv_direct_mode: " << (conv_direct_mode.empty() ? "auto (legacy flags honored)" : conv_direct_mode) << ",\n"
+         << "  sage_attn: " << (sage_attn ? "true" : "false") << ",\n"
+         << "  linear_scale: " << linear_scale << ",\n"
+         << "  attn_scale: " << attn_scale << ",\n"
+@@ -1042,6 +1062,7 @@
+     sd_ctx_params.lora_apply_mode                 = lora_apply_mode;
+     sd_ctx_params.enable_mmap                     = enable_mmap;
+     sd_ctx_params.flash_attn_mode                 = flash_attn_mode.c_str();
++    sd_ctx_params.conv_direct_mode                = conv_direct_mode.c_str();
+     sd_ctx_params.sage_attn                       = sage_attn;
+     sd_ctx_params.linear_scale                    = linear_scale;
+     sd_ctx_params.attn_scale                      = attn_scale;
+diff --git a/examples/common/common.h b/examples/common/common.h
+--- a/examples/common/common.h
++++ b/examples/common/common.h
+@@ -171,9 +171,10 @@
+     bool clip_on_cpu            = false;
+     bool vae_on_cpu             = false;
+     std::string flash_attn_mode = "auto";
+-    bool sage_attn              = false;
+-    bool diffusion_conv_direct  = false;
+-    bool vae_conv_direct        = false;
++    std::string conv_direct_mode;  // Empty selects auto while honoring legacy convolution flags.
++    bool sage_attn             = false;
++    bool diffusion_conv_direct = false;
++    bool vae_conv_direct       = false;
+ 
+     prediction_t prediction           = PREDICTION_COUNT;
+     lora_apply_mode_t lora_apply_mode = LORA_APPLY_AUTO;
+diff --git a/examples/server/main.cpp b/examples/server/main.cpp
+--- a/examples/server/main.cpp
++++ b/examples/server/main.cpp
+@@ -85,8 +85,8 @@
+     LOG_VERBOSE("version: %s", version_string().c_str());
+     LOG_VERBOSE("%s", sd_get_system_info());
+     LOG_VERBOSE("%s", svr_params.to_string().c_str());
+-    LOG_VERBOSE("%s", ctx_params.to_string().c_str());
+-    LOG_VERBOSE("%s", default_gen_params.to_string().c_str());
++    LOG_DEBUG("%s", ctx_params.to_string().c_str());
++    LOG_DEBUG("%s", default_gen_params.to_string().c_str());
+ 
+     sd_ctx_params_t sd_ctx_params = ctx_params.to_sd_ctx_params_t(false);
+     SDCtxPtr sd_ctx(new_sd_ctx(&sd_ctx_params));
+diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -252,6 +252,7 @@
+     bool sage_attn;
+     int conditioning_cache_size;  // Maximum cached conditioning entries per context; 0 disables caching (default: 4)
+     const char* flash_attn_mode;  // on/off/auto or module assignments (e.g. "auto,te=off"); NULL/empty honors legacy flags.
++    const char* conv_direct_mode;  // on/off/auto or diffusion/vae/controlnet assignments; NULL/empty honors legacy flags.
+ } sd_ctx_params_t;
+ 
+ typedef struct {
+diff --git a/src/core/ggml_extend_backend.cpp b/src/core/ggml_extend_backend.cpp
+--- a/src/core/ggml_extend_backend.cpp
++++ b/src/core/ggml_extend_backend.cpp
+@@ -457,23 +457,23 @@
+     return buffer;
+ }
+ 
+-bool sd_backend_supports_cuda_mma(ggml_backend_t backend) {
++static int cuda_compiled_arch(ggml_backend_t backend) {
+ #ifdef SD_USE_CUDA
+     if (!sd_backend_is(backend, "CUDA")) {
+-        return false;
++        return 0;
+     }
+     auto dev = ggml_backend_get_device(backend);
+     if (dev == nullptr) {
+-        return false;
++        return 0;
+     }
+     static std::mutex mutex;
+-    static std::unordered_map<ggml_backend_dev_t, bool> cache;
++    static std::unordered_map<ggml_backend_dev_t, int> cache;
+     std::lock_guard<std::mutex> lock(mutex);
+     auto it = cache.find(dev);
+     if (it != cache.end()) {
+         return it->second;
+     }
+-    const bool supported = [&]() {
++    const int arch = [&]() {
+         ggml_backend_dev_props props{};
+         ggml_backend_dev_get_props(dev, &props);
+         CUdevice device;
+@@ -482,13 +482,13 @@
+             cuDeviceGetByPCIBusId(&device, props.device_id) != CUDA_SUCCESS ||
+             cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device) != CUDA_SUCCESS ||
+             cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device) != CUDA_SUCCESS) {
+-            return false;
++            return 0;
+         }
+         auto reg          = ggml_backend_dev_backend_reg(dev);
+         auto get_features = reinterpret_cast<ggml_backend_get_features_t>(
+             ggml_backend_reg_get_proc_address(reg, "ggml_backend_get_features"));
+         if (get_features == nullptr) {
+-            return false;
++            return 0;
+         }
+         // Match ggml's highest compiled architecture for this device, including PTX fallback.
+         const int cc      = 100 * major + 10 * minor;
+@@ -511,16 +511,21 @@
+                 arch = end;
+             }
+         }
+-        return compiled_arch == 700 || compiled_arch >= 750;
++        return compiled_arch;
+     }();
+-    cache.emplace(dev, supported);
+-    return supported;
++    cache.emplace(dev, arch);
++    return arch;
+ #else
+     (void)backend;
+-    return false;
++    return 0;
+ #endif
+ }
+ 
++bool sd_backend_supports_cuda_mma(ggml_backend_t backend) {
++    const int arch = cuda_compiled_arch(backend);
++    return arch == 700 || arch >= 750;
++}
++
+ bool sd_backend_supports_hip_mma(ggml_backend_t backend) {
+ #ifdef SD_USE_HIP
+     if (!sd_backend_is(backend, "ROCm")) {
+@@ -564,6 +569,20 @@
+ #endif
+ }
+ 
++bool sd_backend_supports_conv_implicit_gemm(ggml_backend_t backend, bool conv3d) {
++    if (backend == nullptr) {
++        return false;
++    }
++    if (sd_backend_is(backend, "Vulkan") || sd_backend_is(backend, "MUSA")) {
++        return true;
++    }
++    // CUDA/HIP Conv3d also implements SIMT implicit GEMM; Conv2d requires MMA.
++    if (conv3d) {
++        return sd_backend_is(backend, "CUDA") || sd_backend_is(backend, "ROCm");
++    }
++    return cuda_compiled_arch(backend) >= 750 || sd_backend_supports_hip_mma(backend);
++}
++
+ ggml_backend_t sd_backend_cpu_init() {
+     ggml_backend_load_all_once();
+     return ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+@@ -782,7 +801,8 @@
+     return true;
+ }
+ 
+-bool sd_parse_flash_attention_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error) {
++static bool parse_operation_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error, bool convolution) {
++    const std::string operation = convolution ? "direct convolution" : "flash attention";
+     if (assignment == nullptr) {
+         return false;
+     }
+@@ -800,7 +820,7 @@
+                 return true;
+             }
+             if (error != nullptr) {
+-                *error = "invalid flash attention mode '" + mode + "': expected on, off, or auto";
++                *error = "invalid " + operation + " mode '" + mode + "': expected on, off, or auto";
+             }
+             return false;
+         };
+@@ -813,15 +833,19 @@
+         for (const auto& setting : entry.module_names) {
+             switch (setting.first) {
+                 case SDBackendModule::DIFFUSION:
+-                case SDBackendModule::TE:
+-                case SDBackendModule::CLIP_VISION:
+                 case SDBackendModule::VAE:
+                 case SDBackendModule::CONTROL_NET:
+-                case SDBackendModule::AUDIO_ENCODER:
+                     break;
++                case SDBackendModule::TE:
++                case SDBackendModule::CLIP_VISION:
++                case SDBackendModule::AUDIO_ENCODER:
++                    if (!convolution) {
++                        break;
++                    }
++                    [[fallthrough]];
+                 default:
+                     if (error != nullptr) {
+-                        *error = std::string("flash attention is not configurable for module '") + sd_backend_module_name(setting.first) + "'";
++                        *error = operation + " is not configurable for module '" + sd_backend_module_name(setting.first) + "'";
+                     }
+                     return false;
+             }
+@@ -835,6 +859,14 @@
+     return true;
+ }
+ 
++bool sd_parse_flash_attention_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error) {
++    return parse_operation_assignment(spec, assignment, error, false);
++}
++
++bool sd_parse_conv_direct_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error) {
++    return parse_operation_assignment(spec, assignment, error, true);
++}
++
+ bool SDBackendAssignment::empty() const {
+     return default_name.empty() && module_names.empty();
+ }
+diff --git a/src/core/ggml_extend_backend.h b/src/core/ggml_extend_backend.h
+--- a/src/core/ggml_extend_backend.h
++++ b/src/core/ggml_extend_backend.h
+@@ -89,6 +89,7 @@
+ bool sd_backend_is_cpu(ggml_backend_t backend);
+ bool sd_backend_supports_cuda_mma(ggml_backend_t backend);
+ bool sd_backend_supports_hip_mma(ggml_backend_t backend);
++bool sd_backend_supports_conv_implicit_gemm(ggml_backend_t backend, bool conv3d);
+ ggml_backend_buffer_t sd_backend_dev_buffer_from_host_ptr(ggml_backend_dev_t device,
+                                                           void* ptr,
+                                                           size_t size,
+@@ -102,6 +103,7 @@
+ std::string sd_backend_resolve_name(const std::string& name);
+ bool sd_parse_backend_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error);
+ bool sd_parse_flash_attention_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error);
++bool sd_parse_conv_direct_assignment(const std::string& spec, SDBackendAssignment* assignment, std::string* error);
+ const char* sd_backend_module_name(SDBackendModule module);
+ void ggml_ext_im_set_f32_1d(const struct ggml_tensor* tensor, int i, float value);
+ bool add_rpc_devices(const std::string& servers);
+Only in N:/Data/big美铝难安/yiyuan/aichat/LocalMind/third_party/stable-diffusion.cpp-master/src/core/probe: conv_direct.cpp
+Only in N:/Data/big美铝难安/yiyuan/aichat/LocalMind/third_party/stable-diffusion.cpp-master/src/core/probe: conv_direct.h
+diff --git a/src/model_loader.cpp b/src/model_loader.cpp
+--- a/src/model_loader.cpp
++++ b/src/model_loader.cpp
+@@ -630,7 +630,7 @@
+         }
+     }
+     if (is_wan) {
+-        LOG_VERBOSE("patch_embedding_channels %d", patch_embedding_channels);
++        LOG_DEBUG("patch_embedding_channels %d", patch_embedding_channels);
+         if (is_s2v) {
+             return VERSION_WAN2_2_S2V;
+         }
+diff --git a/src/model_manager.cpp b/src/model_manager.cpp
+--- a/src/model_manager.cpp
++++ b/src/model_manager.cpp
+@@ -1762,7 +1762,7 @@
+             }
+             // A wrapped report may reflect real pressure; reclaim before accepting the tracked estimate.
+             LOG_VERBOSE("ignoring impossible free memory report on %s (%.2f MB free / %.2f MB total), using tracked residency",
+-                        ggml_backend_name(backend), free_bytes / (1024.0 * 1024.0), total_bytes / (1024.0 * 1024.0));
++                           ggml_backend_name(backend), free_bytes / (1024.0 * 1024.0), total_bytes / (1024.0 * 1024.0));
+             free_bytes                  = total_bytes;
+             result.requires_reclamation = true;
+         }
+diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
+--- a/src/pipeline/diffusion_engine.cpp
++++ b/src/pipeline/diffusion_engine.cpp
+@@ -18,6 +18,7 @@
+ #include "core/ggml_runner.h"
+ #include "core/ggml_tensor_utils.h"
+ #include "core/layer_split_partition.h"
++#include "core/probe/conv_direct.h"
+ #include "core/probe/flash_attn.h"
+ #include "model.h"
+ 
+@@ -951,7 +952,15 @@
+         LOG_ERROR("invalid flash_attn_mode '%s': %s", flash_mode.c_str(), flash_error.c_str());
+         return false;
+     }
++    const std::string conv_mode = SAFE_STR(sd_ctx_params->conv_direct_mode);
++    std::string conv_error;
++    if (!sd_parse_conv_direct_assignment(conv_mode, &conv_direct_assignment, &conv_error)) {
++        LOG_ERROR("invalid conv_direct_mode '%s': %s", conv_mode.c_str(), conv_error.c_str());
++        return false;
++    }
+     flash_attn_by_backend.clear();
++    conv2d_direct_by_backend.clear();
++    conv3d_direct_by_backend.clear();
+     conditioning_cache_->set_capacity(static_cast<size_t>(sd_ctx_params->conditioning_cache_size));
+     auto configuration = std::make_unique<ModelConfig>(*sd_ctx_params);
+     n_threads          = sd_ctx_params->n_threads;
+@@ -1224,6 +1233,34 @@
+     return enabled;
+ }
+ 
++bool StableDiffusionGGML::conv_direct_for(SDBackendModule module, bool conv3d) {
++    const auto& params     = config_->params;
++    const std::string mode = conv_direct_assignment.get(module);
++    if (mode == "on" || mode == "off") {
++        return mode == "on";
++    }
++    if (strlen(SAFE_STR(params.conv_direct_mode)) == 0 &&
++        (module == SDBackendModule::VAE ? params.vae_conv_direct : params.diffusion_conv_direct)) {
++        return true;
++    }
++    auto& by_backend = conv3d ? conv3d_direct_by_backend : conv2d_direct_by_backend;
++    auto backends    = backend_manager.runtime_backends(module);
++    bool enabled     = !backends.empty();
++    bool any_enabled = false;
++    for (auto backend : backends) {
++        auto it = by_backend.find(backend);
++        if (it == by_backend.end()) {
++            it = by_backend.emplace(backend, sd_probe_conv_direct(backend, conv3d)).first;
++        }
++        enabled     = enabled && it->second;
++        any_enabled = any_enabled || it->second;
++    }
++    if (any_enabled && !enabled) {
++        LOG_INFO("conv%dd direct auto: %s -> off (compute devices disagree)", conv3d ? 3 : 2, sd_backend_module_name(module));
++    }
++    return enabled;
++}
++
+ bool StableDiffusionGGML::validate_and_load_runners() {
+     const auto* sd_ctx_params   = &config_->params;
+     const bool use_tae          = uses_tae();
+@@ -1261,6 +1298,23 @@
+     if (sd_ctx_params->sage_attn && !set_sage_attention_enabled(true)) {
+         return false;
+     }
++    const auto set_conv_direct = [this](SDBackendModule module, const std::vector<GGMLRunner*>& runners) {
++        const bool conv2d = conv_direct_for(module, false);
++        const bool conv3d = conv_direct_for(module, true);
++        for (auto runner : runners) {
++            if (runner != nullptr) {
++                runner->set_conv2d_direct_enabled(conv2d);
++                runner->set_conv3d_direct_enabled(conv3d);
++            }
++        }
++    };
++    set_conv_direct(SDBackendModule::DIFFUSION, {diffusion_model.get(), high_noise_diffusion_model.get()});
++    if (first_stage_model || preview_vae || audio_vae_model) {
++        set_conv_direct(SDBackendModule::VAE, {first_stage_model.get(), preview_vae.get(), audio_vae_model.get()});
++    }
++    if (control_net) {
++        set_conv_direct(SDBackendModule::CONTROL_NET, {control_net.get()});
++    }
+     LOG_VERBOSE("validating model metadata");
+ 
+     std::set<std::string> ignore_tensors;
+@@ -1579,7 +1633,7 @@
+     LOG_INFO("Diffusion model weight type stat: %s", wtype_stat_to_str(diffusion_model_wtype_stat).c_str());
+     LOG_INFO("VAE weight type stat:             %s", wtype_stat_to_str(vae_wtype_stat).c_str());
+ 
+-    LOG_VERBOSE("ggml tensor size = %d bytes", (int)sizeof(ggml_tensor));
++    LOG_DEBUG("ggml tensor size = %d bytes", (int)sizeof(ggml_tensor));
+ 
+     configure_weight_loading();
+     for (auto group : groups) {
+diff --git a/src/pipeline/diffusion_engine.h b/src/pipeline/diffusion_engine.h
+--- a/src/pipeline/diffusion_engine.h
++++ b/src/pipeline/diffusion_engine.h
+@@ -51,6 +51,9 @@
+     SDBackendManager backend_manager;
+     std::unordered_map<ggml_backend_t, bool> flash_attn_by_backend;
+     SDBackendAssignment flash_attn_assignment;
++    SDBackendAssignment conv_direct_assignment;
++    std::unordered_map<ggml_backend_t, bool> conv2d_direct_by_backend;
++    std::unordered_map<ggml_backend_t, bool> conv3d_direct_by_backend;
+ 
+     SDVersion version;
+     bool external_vae_is_invalid = false;
+@@ -134,7 +137,7 @@
+                                 &sd_ctx_params_t::clip_g_path, &sd_ctx_params_t::clip_vision_path,
+                                 &sd_ctx_params_t::t5xxl_path, &sd_ctx_params_t::llm_path,
+                                 &sd_ctx_params_t::llm_vision_path, &sd_ctx_params_t::diffusion_model_path,
+-                                &sd_ctx_params_t::tokenizer, &sd_ctx_params_t::flash_attn_mode,
++                                &sd_ctx_params_t::tokenizer, &sd_ctx_params_t::flash_attn_mode, &sd_ctx_params_t::conv_direct_mode,
+                                 &sd_ctx_params_t::high_noise_diffusion_model_path, &sd_ctx_params_t::uncond_diffusion_model_path,
+                                 &sd_ctx_params_t::embeddings_connectors_path, &sd_ctx_params_t::vae_path,
+                                 &sd_ctx_params_t::audio_vae_path, &sd_ctx_params_t::taesd_path,
+@@ -338,6 +341,7 @@
+ 
+     bool validate_and_load_runners();
+     bool flash_attention_for(SDBackendModule module);
++    bool conv_direct_for(SDBackendModule module, bool conv3d);
+ 
+     bool build_denoiser();
+ 
+diff --git a/src/pipeline/model_builders.cpp b/src/pipeline/model_builders.cpp
+--- a/src/pipeline/model_builders.cpp
++++ b/src/pipeline/model_builders.cpp
+@@ -478,10 +478,6 @@
+                                                                  "model.diffusion_model",
+                                                                  version,
+                                                                  weight_manager);
+-            if (sd_ctx_params->diffusion_conv_direct) {
+-                LOG_INFO("Using Conv2d direct in the diffusion model");
+-                result.diffusion->set_conv2d_direct_enabled(true);
+-            }
+         }
+ 
+         if (strlen(SAFE_STR(sd_ctx_params->ip_adapter_path)) > 0 && result.clip_vision == nullptr) {
+@@ -668,15 +664,6 @@
+             }
+         }
+ 
+-        if (sd_ctx_params->vae_conv_direct) {
+-            LOG_INFO("Using Conv2d/Conv3d direct in the vae model");
+-            result.vae->set_conv2d_direct_enabled(true);
+-            result.vae->set_conv3d_direct_enabled(true);
+-            if (result.preview) {
+-                result.preview->set_conv2d_direct_enabled(true);
+-                result.preview->set_conv3d_direct_enabled(true);
+-            }
+-        }
+         if (result.vae) {
+             result.vae->set_scale_overrides(sd_ctx_params->linear_scale, sd_ctx_params->attn_scale);
+         }
+@@ -703,10 +690,6 @@
+                                                         version,
+                                                         "",
+                                                         weight_manager);
+-        if (sd_ctx_params->diffusion_conv_direct) {
+-            LOG_INFO("Using Conv2d direct in the control net");
+-            control_net->set_conv2d_direct_enabled(true);
+-        }
+         control_net->set_scale_overrides(sd_ctx_params->linear_scale, sd_ctx_params->attn_scale);
+         runner = std::move(control_net);
+         return true;
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -339,6 +339,7 @@
+     sd_ctx_params->eager_load                = false;
+     sd_ctx_params->enable_mmap               = false;
+     sd_ctx_params->flash_attn_mode           = nullptr;
++    sd_ctx_params->conv_direct_mode          = nullptr;
+     sd_ctx_params->diffusion_flash_attn      = false;
+     sd_ctx_params->sage_attn                 = false;
+     sd_ctx_params->linear_scale              = 0.f;
+@@ -397,6 +398,7 @@
+              "auto_fit: %s\n"
+              "flash_attn: %s\n"
+              "flash_attn_mode: %s\n"
++             "conv_direct_mode: %s\n"
+              "diffusion_flash_attn: %s\n"
+              "sage_attn: %s\n"
+              "linear_scale: %g\n"
+@@ -439,6 +441,7 @@
+              BOOL_STR(sd_ctx_params->auto_fit),
+              BOOL_STR(sd_ctx_params->flash_attn),
+              sd_ctx_params->flash_attn_mode && sd_ctx_params->flash_attn_mode[0] ? sd_ctx_params->flash_attn_mode : "auto (legacy flags honored)",
++             sd_ctx_params->conv_direct_mode && sd_ctx_params->conv_direct_mode[0] ? sd_ctx_params->conv_direct_mode : "auto (legacy flags honored)",
+              BOOL_STR(sd_ctx_params->diffusion_flash_attn),
+              BOOL_STR(sd_ctx_params->sage_attn),
+              sd_ctx_params->linear_scale,
+diff --git a/src/tokenizers/clip_tokenizer.cpp b/src/tokenizers/clip_tokenizer.cpp
+--- a/src/tokenizers/clip_tokenizer.cpp
++++ b/src/tokenizers/clip_tokenizer.cpp
+@@ -63,7 +63,7 @@
+     }
+     vocab.push_back(utf8_to_utf32("<|startoftext|>"));
+     vocab.push_back(utf8_to_utf32("<|endoftext|>"));
+-    LOG_VERBOSE("vocab size: %zu", vocab.size());
++    LOG_DEBUG("vocab size: %zu", vocab.size());
+     int i = 0;
+     for (const auto& token : vocab) {
+         encoder[token] = i;
+diff --git a/src/tokenizers/gemma_tokenizer.cpp b/src/tokenizers/gemma_tokenizer.cpp
+--- a/src/tokenizers/gemma_tokenizer.cpp
++++ b/src/tokenizers/gemma_tokenizer.cpp
+@@ -29,7 +29,7 @@
+         decoder[i]           = token;
+     }
+     encoder_len = static_cast<int>(vocab.size());
+-    LOG_VERBOSE("vocab size: %d", encoder_len);
++    LOG_DEBUG("vocab size: %d", encoder_len);
+ 
+     std::vector<std::u32string> merges = split_utf32(merges_utf8_str);
+     std::vector<std::pair<std::u32string, std::u32string>> merge_pairs;
+@@ -37,7 +37,7 @@
+         size_t space_pos = merge.find(' ');
+         merge_pairs.emplace_back(merge.substr(0, space_pos), merge.substr(space_pos + 1));
+     }
+-    LOG_VERBOSE("merges size %zu", merge_pairs.size());
++    LOG_DEBUG("merges size %zu", merge_pairs.size());
+ 
+     int rank = 0;
+     for (const auto& merge : merge_pairs) {
+diff --git a/src/tokenizers/mistral_tokenizer.cpp b/src/tokenizers/mistral_tokenizer.cpp
+--- a/src/tokenizers/mistral_tokenizer.cpp
++++ b/src/tokenizers/mistral_tokenizer.cpp
+@@ -20,7 +20,7 @@
+         decoder[i]           = token;
+     }
+     encoder_len = static_cast<int>(vocab.size());
+-    LOG_VERBOSE("vocab size: %d", encoder_len);
++    LOG_DEBUG("vocab size: %d", encoder_len);
+ 
+     auto byte_unicode_pairs = bytes_to_unicode();
+     byte_encoder            = std::map<int, std::u32string>(byte_unicode_pairs.begin(), byte_unicode_pairs.end());
+@@ -28,7 +28,7 @@
+         byte_decoder[pair.second] = pair.first;
+     }
+     std::vector<std::u32string> merges = split_utf32(merges_utf8_str);
+-    LOG_VERBOSE("merges size %zu", merges.size());
++    LOG_DEBUG("merges size %zu", merges.size());
+     std::vector<std::pair<std::u32string, std::u32string>> merge_pairs;
+     for (const auto& merge : merges) {
+         size_t space_pos = merge.find(' ');
+diff --git a/src/tokenizers/qwen2_tokenizer.cpp b/src/tokenizers/qwen2_tokenizer.cpp
+--- a/src/tokenizers/qwen2_tokenizer.cpp
++++ b/src/tokenizers/qwen2_tokenizer.cpp
+@@ -11,7 +11,7 @@
+     }
+ 
+     std::vector<std::u32string> merges = split_utf32(merges_utf8_str);
+-    LOG_VERBOSE("merges size %zu", merges.size());
++    LOG_DEBUG("merges size %zu", merges.size());
+     std::vector<std::pair<std::u32string, std::u32string>> merge_pairs;
+     for (const auto& merge : merges) {
+         size_t space_pos = merge.find(' ');
+@@ -36,7 +36,7 @@
+         i++;
+     }
+     encoder_len = i;
+-    LOG_VERBOSE("vocab size: %d", encoder_len);
++    LOG_DEBUG("vocab size: %d", encoder_len);
+ 
+     int rank = 0;
+     for (const auto& merge : merge_pairs) {
+diff --git a/src/core/probe/conv_direct.cpp b/src/core/probe/conv_direct.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/core/probe/conv_direct.cpp
+@@ -0,0 +1,51 @@
++#include "core/probe/conv_direct.h"
++
++#include <exception>
++
++#include "core/ggml_extend_backend.h"
++#include "core/probe/backend_probe.h"
++#include "core/util.h"
++
++static void build_conv_direct_probe(BackendProbeGraph& graph, bool conv3d) {
++    constexpr int channels = 64;
++    if (conv3d) {
++        auto input   = ggml_new_tensor_4d(graph.ctx, GGML_TYPE_F32, 16, 16, 4, channels);
++        auto weight  = ggml_new_tensor_4d(graph.ctx, GGML_TYPE_F16, 3, 3, 3, channels * channels);
++        graph.inputs = {input, weight};
++        graph.output = ggml_conv_3d_direct(graph.ctx, weight, input, 1, 1, 1, 1, 1, 1, 1, 1, 1, channels, 1, channels);
++    } else {
++        auto input   = ggml_new_tensor_4d(graph.ctx, GGML_TYPE_F32, 32, 32, channels, 1);
++        auto weight  = ggml_new_tensor_4d(graph.ctx, GGML_TYPE_F16, 3, 3, channels, channels);
++        graph.inputs = {input, weight};
++        graph.output = ggml_conv_2d_direct(graph.ctx, weight, input, 1, 1, 1, 1, 1, 1);
++    }
++}
++
++bool sd_probe_conv_direct(ggml_backend_t backend, bool conv3d) {
++    if (backend == nullptr) {
++        return false;
++    }
++    const char* name = ggml_backend_name(backend);
++    const int dims   = conv3d ? 3 : 2;
++    try {
++        BackendProbeGraph capability(backend);
++        if (capability.ctx == nullptr) {
++            LOG_INFO("conv%dd direct auto: %s -> off (probe graph unavailable)", dims, name);
++            return false;
++        }
++        build_conv_direct_probe(capability, conv3d);
++        if (!capability.supported()) {
++            LOG_INFO("conv%dd direct auto: %s -> off (unsupported probe graph)", dims, name);
++            return false;
++        }
++        if (sd_backend_supports_conv_implicit_gemm(backend, conv3d)) {
++            LOG_INFO("conv%dd direct auto: %s -> on (implicit GEMM)", dims, name);
++            return true;
++        }
++        LOG_INFO("conv%dd direct auto: %s -> off (no implicit GEMM path)", dims, name);
++        return false;
++    } catch (const std::exception& error) {
++        LOG_WARN("conv%dd direct auto: %s -> off (probe failed: %s)", dims, name, error.what());
++        return false;
++    }
++}
+diff --git a/src/core/probe/conv_direct.h b/src/core/probe/conv_direct.h
+new file mode 100644
+--- /dev/null
++++ b/src/core/probe/conv_direct.h
+@@ -0,0 +1,8 @@
++#ifndef __SD_CORE_PROBE_CONV_DIRECT_H__
++#define __SD_CORE_PROBE_CONV_DIRECT_H__
++
++#include "ggml-backend.h"
++
++bool sd_probe_conv_direct(ggml_backend_t backend, bool conv3d);
++
++#endif  // __SD_CORE_PROBE_CONV_DIRECT_H__
