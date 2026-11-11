@@ -12,6 +12,7 @@ import android.graphics.Shader
 import android.os.Build
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -23,7 +24,44 @@ import kotlin.math.sqrt
  */
 internal class LiquidBarGlass {
 
+    /**
+     * [drawPill] 的绘制层。
+     *
+     * 拆成两层的唯一原因：底栏根节点上有 `.clip(shape)`，整条底栏都被裁在
+     * 底板形状里。想让按压时的液态**溢出胶囊边界**，就必须有一层画在那个
+     * clip 之外 —— 否则光晕刚出框就被切掉，视觉上和没改一样。
+     */
+    companion object {
+        /** 溢出层：框外那圈光晕与高光描边。画在底栏 clip 之外。 */
+        const val PILL_LAYER_OVERFLOW = 0
+
+        /** 框内层：磨砂底、折射内容、高光填充。画在底栏 clip 之内。 */
+        const val PILL_LAYER_BODY = 1
+    }
+
     var density = 2.75f
+
+    /**
+     * 按压时液态效果向胶囊外**溢出**的最大距离（dp）。
+     *
+     * 酷安那套观感的重点不是"框内更亮"，而是"液体鼓出框外"：光晕沿着
+     * 胶囊轮廓往外洇一圈，框和框外是连着的。
+     *
+     * 这个值是「光晕外缘到胶囊边缘」的距离，不是总缩放。给到 6dp 是因为
+     * 底栏胶囊本身只有 ~28dp 高，再多就显得是另一个元素而不是"溢出"。
+     */
+    private val OVERFLOW_SPREAD_DP = 6f
+
+    /**
+     * 外洇光晕的层数与每层宽度（dp）。
+     *
+     * 泛光着色器画的是**描边**（一条有宽度的线），单靠它往外扩，看起来是
+     * "框变粗了"，不是"光溢出来了"。所以在描边之外再叠几圈更淡、更宽的
+     * 光晕，模拟液体表面张力被打破后的柔光扩散。
+     */
+    private val GLOW_LAYERS = 3
+    private val GLOW_WIDTH_DP = 9f
+    private val GLOW_FALLOFF = 0.42f
 
     private val sdfSrc = """
             float radiusAt(float2 coord, float4 radii) {
@@ -184,6 +222,7 @@ internal class LiquidBarGlass {
     private val fillPaint = Paint().apply { isAntiAlias = true }
     private val plainStroke = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE }
     private val bloomPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE }
+    private val glowPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE }
     private val panelPath = Path()
     private val pillPath = Path()
     private val matrix = Matrix()
@@ -327,24 +366,57 @@ internal class LiquidBarGlass {
         tiltX: Float,
         fillColor: Int = 0xFFFFFFFF.toInt(),
         fillAlpha: Float = 0.40f,
+        layer: Int = PILL_LAYER_BODY,
     ) {
         val w = right - left
         val h = bottom - top
         if (w <= 0f || h <= 0f) return
         val radius = h * 0.5f
+        val p = press.coerceIn(0f, 1f)
+        val overflow = if (liquid) p * OVERFLOW_SPREAD_DP * density else 0f
+
+        // ---- 溢出层：只画框外那一圈 ----
+        //
+        // 底栏根节点上有 `.clip(shape)`，把整条底栏裁到底板形状里。所以
+        // 溢出必须**在那个 clip 之外**画，否则光晕刚出框就被切掉了 ——
+        // 这正是原来"按下去液体出不来"的根因（不只是 clipPath(pillPath)）。
+        //
+        // 这一层自己也要裁一下：不然光晕会盖到相邻图标上。用一个比胶囊
+        // 大一圈、但仍在底栏范围内的圆角矩形来裁。
+        if (layer == PILL_LAYER_OVERFLOW) {
+            if (!liquid || p <= 0.01f) return
+            val glowAlpha = p * (if (dark) 0.5f else 0.85f)
+            // 外洇光晕（宽而淡）：让边界"化开"，这是"液体鼓出框外"的关键。
+            drawOverflowGlow(canvas, left, top, w, h, radius, overflow, glowAlpha, dark)
+            // 内圈高光描边（窄而亮）：贴着胶囊轮廓往外扩的一道亮边。
+            val bloom = bloomShader
+            if (bloom != null && canShader) {
+                drawBloom(
+                    canvas, bloom,
+                    left - overflow, top - overflow,
+                    w + overflow * 2f, h + overflow * 2f,
+                    radius + overflow,
+                    p * (if (dark) 0.48f else 1f),
+                    90f, tiltX,
+                )
+            }
+            return
+        }
+
+        // ---- 框内层：磨砂底 + 折射内容 + 高光填充 ----
         pillPath.reset()
         pillPath.addRoundRect(left, top, right, bottom, radius, radius, Path.Direction.CW)
 
-        val p = press.coerceIn(0f, 1f)
         val save = canvas.save()
+        // 2) 框内：磨砂底。和底板完全一致，胶囊不会"透出页面"。
+        //    这里用 clipPath 框住 —— 底色只该在框内。
         canvas.clipPath(pillPath)
-        // 1) 磨砂底：和底板完全一致，胶囊不会再"透出页面"。
         if (base != null) {
             drawBackdrop(canvas, base, sample, winLeft, winTop)
             fillPaint.color = Color.argb((fillAlpha * 255f).toInt(), Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor))
             canvas.drawRect(left, top, right, bottom, fillPaint)
         }
-        // 2) 折射内容：只有按住/拖动时才拉满，静止时保留一点点。
+        // 3) 折射内容：只有按住/拖动时才拉满，静止时保留一点点。
         val pressing = p > 0.12f
         if (content != null) {
             val lensP = if (liquid) (if (pressing) (0.16f + 0.84f * p) else 0.16f).coerceIn(0f, 1f) else 0f
@@ -358,12 +430,18 @@ internal class LiquidBarGlass {
                 shader.setFloatUniform("size", w, h)
                 shader.setFloatUniform("offset", -left, -top)
                 shader.setFloatUniform("cornerRadii", radius, radius, radius, radius)
+                // 折射高度跟着按压量涨：按得越重，隆起越高，边缘越往外拱。
                 shader.setFloatUniform("refractionHeight", 10f * density * lensP)
                 shader.setFloatUniform("refractionAmount", -14f * density * lensP)
                 shader.setFloatUniform("depthEffect", 1f)
                 shader.setFloatUniform("chromaticAberration", 0.5f)
                 lensPaint.shader = shader
-                canvas.drawRect(left - radius, top - radius, right + radius, bottom + radius, lensPaint)
+                // 画的范围比框大一圈：透镜的隆起会往形状外推，框内画不下。
+                canvas.drawRect(
+                    left - radius - overflow, top - radius - overflow,
+                    right + radius + overflow, bottom + radius + overflow,
+                    lensPaint,
+                )
                 lensPaint.shader = null
             } else {
                 // 没有 AGSL（模拟器 / 老系统）：原样铺内容，至少不会出现
@@ -371,13 +449,17 @@ internal class LiquidBarGlass {
                 canvas.drawBitmap(content, contentLeft, contentTop, null)
             }
         }
+        canvas.restoreToCount(save)
 
-        // LiquidTab drawSelection：静止 10% 白/黑；按压再叠 3% 黑。
+        // ------------------------------------------------------------------
+        // 4) 框内的高光层：静止 10% 白/黑；按压再叠 3% 黑。
+        //    已经在上面的 clipPath 里了，直接画。
+        // ------------------------------------------------------------------
         val idle = 0.10f * (1f - p)
-        val base = if (dark) Color.WHITE else Color.BLACK
+        val baseCol = if (dark) Color.WHITE else Color.BLACK
         fillPaint.color = Color.argb(
             (idle * 255f).toInt().coerceIn(0, 255),
-            Color.red(base), Color.green(base), Color.blue(base),
+            Color.red(baseCol), Color.green(baseCol), Color.blue(baseCol),
         )
         canvas.drawPath(pillPath, fillPaint)
         val pressed = 0.03f * p
@@ -396,11 +478,6 @@ internal class LiquidBarGlass {
         canvas.drawPath(pillPath, fillPaint)
         fillPaint.blendMode = null
         canvas.restoreToCount(save)
-
-        val bloom = bloomShader
-        if (liquid && bloom != null && canShader && p > 0.01f) {
-            drawBloom(canvas, bloom, left, top, w, h, radius, p * (if (dark) 0.48f else 1f), 90f, tiltX)
-        }
     }
 
     /** 底部渐变模糊：把模糊图铺在底栏上方（遮罩由调用方做）。 */
@@ -441,6 +518,55 @@ internal class LiquidBarGlass {
         panelPath.addRoundRect(left, top, left + width, top + height, radius, radius, Path.Direction.CW)
         canvas.drawPath(panelPath, bloomPaint)
         bloomPaint.shader = null
+    }
+
+    /**
+     * 外洇光晕：沿胶囊轮廓往外叠几圈越来越淡、越来越宽的柔光。
+     *
+     * 为什么要单独做这个，而不是把 [drawBloom] 的描边加粗：
+     * 描边加粗 = "框变粗了"，边界依然是一条清晰的硬边；
+     * 而液体溢出的观感是边界**化开** —— 越往外越淡，直到消失。
+     * 所以这里用「宽度递减、透明度递减」的多层描边近似那个衰减曲线。
+     *
+     * 画在胶囊轮廓**之外**（每层都把圆角矩形往外扩），所以不会污染框内。
+     */
+    private fun drawOverflowGlow(
+        canvas: Canvas,
+        left: Float,
+        top: Float,
+        width: Float,
+        height: Float,
+        radius: Float,
+        spread: Float,
+        alpha: Float,
+        dark: Boolean,
+    ) {
+        if (alpha <= 0.01f || spread <= 0.5f) return
+        // 深色底栏上光要用暗一点的冷白；浅色底栏上直接用白。
+        val glowColor = if (dark) Color.argb(255, 210, 224, 255) else Color.WHITE
+        val layerWidth = GLOW_WIDTH_DP * density
+        for (i in GLOW_LAYERS downTo 1) {
+            // 第 i 层（i=1 最贴边）：扩散得最远、最淡。
+            val t = i.toFloat() / GLOW_LAYERS
+            val extra = spread * t
+            val layerAlpha = alpha * GLOW_FALLOFF.pow(i.toFloat()) * 0.5f
+            if (layerAlpha <= 0.004f) continue
+            glowPaint.style = Paint.Style.STROKE
+            glowPaint.strokeWidth = layerWidth * t
+            glowPaint.color = Color.argb(
+                (layerAlpha * 255f).toInt().coerceIn(0, 255),
+                Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor),
+            )
+            panelPath.reset()
+            panelPath.addRoundRect(
+                left - extra, top - extra,
+                left + width + extra, top + height + extra,
+                radius + extra, radius + extra,
+                Path.Direction.CW,
+            )
+            canvas.drawPath(panelPath, glowPaint)
+        }
+        glowPaint.style = Paint.Style.FILL
     }
 
     private fun setBloomLight(shader: RuntimeShader, suffix: String, rotation: Float, tiltX: Float) {

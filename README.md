@@ -1,14 +1,8 @@
 # 交接说明（下一轮从这里读）
 
 > 这一节是给下一个对话/开发者的交接文档，写在 README 最前面；下面才是项目本身的 README。
-> 最近一轮**把识图（多模态）真正打通了** —— 之前几轮卡住的 `mtmd_tokenize ... std::bad_alloc`
-> 根因是 JNI 里少给一个字段（`mtmd_input_text.text_len`），不是 llama.cpp 的 bug。
-> 同一轮还修了几个「用了没效果」的洞（mmproj 在预热/自动切模型时被丢、识图槽位是摆设）、
-> 把内置清单补上两个多模态模型，并加了可复现的内置插件打包脚本。
+> 最近一轮做完了「内置音色 + 多选」「低端模式」，并把 Breeze 的界面入口撤掉。
 > 第 1 节是**已经验证过、不要回退**的东西；第 2 节是剩下的活。
->
-> 本轮（版本号仍是 **1.0.5** / versionCode 11）补了三件事：**人设终于有入口**（§1.9）、
-> **外观新增界面布局 / 底栏形状 / 风格配色**（§1.11）、**关于页支持作者那段加了一句话**。
 
 ## 0. 环境、构建、验证
 
@@ -34,35 +28,6 @@
   adb -s emulator-5554 shell "run-as com.localmind cp /data/local/tmp/prefs.xml shared_prefs/localmind.xml"
   ```
 - 生图原生库默认**不打包**：要带 SD 用 `.\gradlew.bat :app:assembleSdPlugin` 或 `-PwithSdLib=true`。
-
-### 0.1 GitHub Actions（云端出包，不用本机编）
-
-仓库：`isnananya/LocalMind-Android`（**私有**）。push 到 `main` 会自动出 APK。
-
-| 想干嘛 | 怎么做 |
-| --- | --- |
-| 拿一个 APK 装到手机上 | push 到 `main` → Actions 页面下 `LocalMind-release-apk` artifact |
-| 出一个带版本号的正式包 | `git tag v1.0.8 && git push origin v1.0.8` → 自动发 GitHub Release，APK 直接挂在 Release 上 |
-| 重跑一次构建 | Actions 页面点 `Re-run all jobs` |
-| 手动触发 | Actions → `Build APK` → `Run workflow` |
-| 编生图后端静态库（可选） | Actions → `Build native prebuilt` → 填版本号手动跑，产物发到 Release |
-
-命令行取包：
-
-```bash
-gh run list --repo isnananya/LocalMind-Android
-gh run download <run-id> --repo isnananya/LocalMind-Android --name LocalMind-release-apk
-```
-
-**首次全新构建约 20 分钟**（要编 llama.cpp 的几百个 C++ 单元）；之后有 CMake/Gradle
-缓存，通常 5–8 分钟。
-
-两个依赖的版本是**钉死**的，别改成"拉最新"：
-
-| 依赖 | 钉在 | 为什么 |
-| --- | --- | --- |
-| llama.cpp | `v0.6.0` | native 层（`llama_jni.cpp`）是照着 v0.6.0 的 API 写的。上游已到 v0.9.0，克隆 main 会因 API 变更编译失败 |
-| stable-diffusion.cpp | `d763dae3b` + `third_party/patches/sd-conv-direct.patch` | 本机验证过的是「上游 d763dae3b + conv_direct_mode 补丁」这个组合，补丁已入库（21 文件 695 行），`git apply -p1` 后与本机快照逐字节一致 |
 
 ## 1. 已完成、不要回退
 
@@ -189,130 +154,13 @@ gh run download <run-id> --repo isnananya/LocalMind-Android --name LocalMind-rel
   `exec-out ... > file` 用二进制安全写法（node spawn/bin），或直接让应用自己写；
   写回前确认文件是 **UTF-8 无 BOM**。
 
-### 1.8 识图（多模态）打通（本轮）
-
-**根因**：`llama_jni.cpp` 的 `generate_vision` 里，`mtmd_input_text` 只填了 `text` /
-`add_special` / `parse_special`，**漏了 `text_len`**。mtmd 内部是
-`input_text.assign(text->text, text->text_len)`，垃圾长度 → 一片几百 MB 的分配 →
-`std::bad_alloc` → 外层只看到 `mtmd_tokenize failed (2)`。所以前几轮怀疑的
-「llava-uhd 网格计算」「模型不配套」全都不是原因；预处理根本没跑到。
-补上 `txt.text_len = prompt.size();` 之后 tokenize 立刻通过。
-
-**第二个必须同时满足的条件**：上下文。一张 512×512 的图在 LFM2 类模型里是
-一块 256 个位置，整图切 3×3 就是 2304 —— 低端模式把 ctx 夹到 1024 时连一块都放不下，
-报错却是原生的 `failed to find a memory slot`。所以：
-
-* `MemoryPlanner.VISION_MIN_CONTEXT = 4096`，`plan(minContext=...)` 在**政策档位之后**
-  按内存预算把它抬上来（抬不动只写 warning，不硬来）；
-* `LlamaEngine.load` 见到 mmproj 就传这个下限；
-* 原生侧 eval 失败时的报错改成「装不下这张图：上下文只有 N 个位置…」，别再让人看 `(1)`。
-
-**其它一起修的洞**：
-
-| 症状 | 原因 | 修法 |
-| --- | --- | --- |
-| 开机预热的多模态模型看不见图 | `preloadChatModel()` 调 `engine.load(..., null)` | 三处本地加载统一走 `AppViewModel.mmprojPathFor()` |
-| 对话里自动切模型后看不见图 | `send()` 的 `needSwitch` 同样漏 mmproj | 同上 |
-| 「识图」槽位选了没效果 | 只用于显示，`send()` 从没读它 | 带图且当前模型看不见 → 这一轮切到槽位模型（带 mmproj） |
-| 给 AI 对话发图被当成纯文字 | 新对话 `AiAbilities.PLAIN`，识图默认关，界面却提示「会一起发给模型」 | 附图即自动打开这个对话的识图（并 toast 说明）；`canSeeImageOnSend` 也要遵守这个开关 |
-| mmproj 出现在模型页当成可加载模型 | 清单过期时 `orphanFiles()` 把它当本机文件 | 按名字排掉含 `mmproj` 的 `.gguf` |
-| 下载完主模型进度条归零重来 | mmproj 用同一行状态报进度 | `downloadFrom(progressBase/Total)`，按「主模型 + 投影」总足迹连续报 |
-| 选完图界面卡一下 | `PendingImageStrip` 主线程全尺寸解码 | `ChatImageStore.decodeScaled` + `produceState` 放 IO 线程 |
-| **发过图之后，下一条纯文字必失败**（`prompt decode failed`，而且会一直失败） | `generate_vision` 只清了账本（`cache_tokens`）没清 KV，文本路径见账本为空就不裁 KV，直接往位置 0 写 —— 撞上残留的图像嵌入 | 带图那轮结束时连 KV 一起清；再加一个 `kv_dirty` 脏标记：带图失败/解码失败时置位，下一条文本消息进 `generate()` 先清一次 |
-
-**数据侧**：
-
-* `RecommendedModels` 新增两条内置多模态模型（都带 mmproj 四件套）：
-  `LFM2-VL 450M（看图）` 合计 319 MB、`Qwen3.5 0.8B（看图）` 合计 703 MB；
-* 官方模型库插件 6 条识图条目补齐 `mmprojFileName / mmprojUrl / mmprojMirrors / mmprojSizeBytes`，
-  文案里「当前版本还没接上视觉投影层」全部删掉；
-* ⚠️ **内置插件是 zip 快照**：改完 `plugins-src/**` 必须跑
-  `node tools/build_builtin_packs.mjs` 重打 `app/src/main/assets/builtin/*.zip`，
-  并把 `BuiltinPlugins.Item.version` +1（`installMissing` 按版本号决定要不要替换旧安装）。
-  这一轮就是把模型库提到 `3.0.2`。
-
-**实测（模拟器 x86_64，LFM2-VL 450M + mmproj Q8，2.5 GB 内存）**：
-
-```
-POST /v1/debug/vision  {"path":"/data/local/tmp/qr256.png"}
-→ 200 {"ok":true,"vision_ready":true,
-      "text":"A white poster with a black and orange image and Chinese text on it."}   (2.7 s)
-```
-
-聊天页同一条路也过了：附图 → 自动开识图 → 发送 → 回包「The image appears to be a stylized
-representation of a question mark …」（原图是作者赞赏码，模型把二维码中心的人像看成问号形状，
-450M 的极限，但**它真的在看这张图**）。截图 `_shots/vl-chat.png`：那条回复里它把图中
-「您的支持是我最大的动力」读成了「这是我爱热带植物的力」—— 认字认错了，但**确实在读图里的字**，
-这才是有没有识图的判据（以前它会一本正经地回答与图片无关的内容）。
-
-顶到 1024 上下文的旧行为也验证过会失败，报错就是新写的「装不下这张图…」。
-
-### 1.9 人设不能设置（本轮）
-
-**症状**：配好了人设也没地方用 —— 新建对话永远是同一个人；想改名字/提示词只能
-点进某个「人设聊天」的对话设置（那只改那一个对话）。
-
-**根因**：人设管理**只存在于死代码** `ui/screen/ProfileScreen.kt`（根页面换成
-`MePage` 之后没人渲染它）。活着的入口只有两处：`PersonaChatSettingsScreen` 的
-「它是谁」（改的是对话自己的身份）、以及对话列表的「+」—— 而「+」是**硬编码**
-`newConversation(ChatMode.AI)`，既不能开人设聊天，也用不上刚配的人设。
-
-**修法**：
-
-* 新增 `ui/screen/PersonaScreen.kt`：全部人设列表（标出「AI / 当人」「内置」、
-  当前在用哪个）、点行即编辑、右侧「使用」切换、底部两条新建（AI / 当人）；
-* **我的 → 个性化 → 人设**（副标题显示当前人设名）—— 这一行就是那把门；
-* 对话列表的「+」改成先问一句：`AI 对话`（最快）或某个人设；
-  `newConversationWithPersona(id)` 让人设的 mode 决定是 AI 还是人设聊天；
-* 「AI 聊天」人设以前**完全无效**（`blankConversation(AI)` 把身份清空）：
-  现在会 `adoptIdentity` —— 名字/头像/提示词生效，但仍然不加载拟人层。
-
-### 1.11 外观：界面布局 / 底栏形状 / 风格配色（本轮）
-
-`ThemeScreen.kt` 里新增三块，**全部只写已有令牌**，没有新增渲染分支：
-
-* **界面布局**：`LAYOUT_PRESETS`（文件底部）——6 套组合（iOS 26 默认 / 沉浸通栏 /
-  极简直角 / 悬浮大胶囊 / 极小图标栏 / 下划线页签），点一下把一组 `tabBar*` +
-  `glassBar*` 令牌写进覆盖表；`LayoutPreset.matches(tokens)` 用来打勾。
-* **底栏形状**：`tabBarShape` = capsule / rounded / square（原来只有令牌没有入口）。
-* **风格配色**：`PALETTES` ——7 套只改颜色的预设，每套写 `accent` / `accentOn` /
-  `bubbleUser` / `fill` / `fillSecondary`；另有「恢复默认配色」把这几项清空。
-
-注意：布局预设会覆盖用户手调过的 `tabBarHeight`/`glassBarSlotWidth` 等值 —— 那是
-"换一套界面"的本意，但**不要再顺手清空其它未列出的令牌**，否则用户刚选的配色会一起丢。
-
-### 1.10 速度（本轮）
-
-| 位置 | 之前 | 现在 |
-| --- | --- | --- |
-| **生图** | `sd_jni.cpp` 写死 `params.wtype = SD_TYPE_F16` | 保持 `SD_TYPE_COUNT`（按文件里的类型）。量化 checkpoint 被上转成 f16 等于内存/带宽 ×2~4 且丢掉量化 matmul 内核 —— 真机 70 s/步的主因 |
-| **流式吐字** | 每**一个字符**一次 JNI 往返，且每次都 `GetObjectClass + GetMethodID` | `token_sink` 按块回调：句柄一轮只解析一次（全局引用），一 token 一次、16 ms 节流、≥256 B 立即冲 |
-| **气泡渲染** | 每次流式刷新都重新 `splitCodeSegments` + 正则解析整段回答 | `remember(text)` 缓存分段与 `AnnotatedString`，刷新只做排版 |
-| **语音自然度** | 只接 VITS；`maxNumSentences = 1`（一句一合成） | 接上 **Kokoro / Matcha**；`maxNumSentences = 3` + `silenceScale 0.35`（句间自己接气，不再像播报） |
-
-**TTS 新音色**（id 就是官方 tarball 名，字节数取自 GitHub Release API）：
-
-| id | 体积 | 说明 |
-| --- | --- | --- |
-| `kokoro-int8-multi-lang-v1_0` | 132 353 410 | 最像人话，中英混读 |
-| `kokoro-int8-multi-lang-v1_1` | 147 052 523 | 更新版音色表 |
-| `matcha-icefall-zh-baker` | 75 479 739 | 中文女声，体积一半 |
-| `matcha-icefall-zh-en` | 79 033 838 | 中英夹词不切语言 |
-
-引擎由**解包后的文件结构**识别（有 `voices.bin` → Kokoro，有 `vocos*.onnx` → Matcha），
-认错架构会让原生库 `exit(-1)`，所以认不出来就退回 VITS（它还有自己的 metadata 闸门）。
-
 ## 2. 待办（下一轮）
 
-### 2.1 生图收尾（必须真机）
+### 2.1 生图 / 识图收尾（必须真机）
 - 生图：装 `assembleSdPlugin` 产物 → 下一个小 SD 模型（512×512、低步数先跑通）→
   看 `diffusionBackendReady` / `ImageEngine` 日志。
-- **识图已经在模拟器上跑通了**（见 §1.8）；真机还欠一件事：试一个中文档的
-  （`Qwen3.5 0.8B（看图）` 或 `Qwen3-VL 2B`），确认中文截图/OCR 的观感。
-  验收口径：模型详情里「视觉投影 = 已就位」+ 状态页「可以看图」+ 发图得到的回答确实在描述那张图。
-- 识图还有两件**没做**的事，别当成已支持：
-  1. 一轮只挂**一张**图（`generate_vision` 的 `bitmaps[1]`），多图要改成数组；
-  2. `/v1/chat/completions` 的 `image_url` 还没接 —— 目前只有 `/v1/debug/vision` 能喂图。
+- 识图：`data/ModelCatalog.kt` 里挑带 `mmprojUrl` 的多模态模型，主模型 + mmproj 都下完，
+  `loadModel` 会自动 `nativeMmprojLoad`；验收 = 状态页「现在能看图」+ 真机发图问答。
 
 ### 2.2 语音这块还能做
 - 引擎包 36 MB，直连 GitHub 实测 30–40 KB/s（这台机器上直连甚至会 RST），
@@ -332,30 +180,10 @@ representation of a question mark …」（原图是作者赞赏码，模型把�
    （`NeuralVoiceModels.Layout.unsupportedReason` 会拦，放行会让原生库直接结束进程）。
    内置清单因此只放 VITS/Piper。
 3. **GPL-3.0**：从 LiquidTab 移植的 AGSL/几何常量属于派生作品，发布按 GPL；其余代码 MIT。
-4. 模拟器只能验证 UI/交互/降级渲染；性能、真机 AGSL、SD 必须真机。
-   （识图例外：mtmd 全程在 CPU 上跑，模拟器上的验证是**真的**跑通了，见 §1.8。）
+4. 模拟器只能验证 UI/交互/降级渲染；性能、真机 AGSL、SD、识图必须真机。
 5. 底栏截图循环 180 ms/次、1/3 缩略、后台模糊双缓冲；`capturing` 期间不能画底栏，否则自拍自。
 
 ## 4. 本轮验证记录
-
-**识图（本轮重点，模拟器 x86_64）**：
-
-| 步骤 | 结果 |
-| --- | --- |
-| 装 LFM2-VL 450M + mmproj Q8（合计 334 379 968 B，和清单逐字节一致） | `mmproj ready: vision=1`，`loaded … ctx=4096 vision=true` |
-| 模型详情 | 「建议上下文 4096」「视觉投影 已就位 · 100.20 MB」 |
-| `POST /v1/debug/vision` 256×256 | 200，2.7 s，「A white poster with a black and orange image and Chinese text on it.」 |
-| `POST /v1/debug/vision` 1382×1382 | 200，86 s（9 块切片；模拟器上 x86_64 跑 CPU 编码，真机会快一个量级） |
-| 聊天页附图 → 发送 | 自动打开该对话识图 → `encoding image slice` → 回包在**描述这张图**（`_shots/vl-ok.png`） |
-| ctx 被夹在 1024 时 | 失败但报错清楚：「装不下这张图：上下文只有 1024 个位置…」 |
-| 文本 → 识图 → 文本 → 文本（连续 4 次 API 调用，同一个 ctx） | 全部 200（这一串以前第 3 步就 500） |
-
-**编译**：`:app:assembleDebug`（arm64-v8a + armeabi-v7a）、`-PabiList=x86_64` 都通过；
-`node tools/build_builtin_packs.mjs all` 重打 3 个内置包（sd-backend 见脚本说明）。
-
-**没做/没验**：中文多模态档（Qwen3.5 0.8B 看图）只核了地址与字节数，没有真跑；
-多图、`/v1/chat/completions` 的 `image_url`、真机 arm64 速度都还没做。
-
 
 - `:app:assembleDebug` 通过（Kotlin 只有 3 条历史 warning，无新增）。
 - 模拟器：关掉「LocalMind 官方模型库」插件 → TTS 页只剩 4 个内置音色（`_shots/s12.png`）；
@@ -397,11 +225,10 @@ representation of a question mark …」（原图是作者赞赏码，模型把�
 
 | 能力 | 实现方式 | 需要网络吗 |
 | --- | --- | --- |
-| 下载模型 | 内置 8 个推荐 GGUF（229 MB–1.2 GB，覆盖各内存档位；其中 2 个是**带视觉投影的多模态**），断点续传、多镜像回退；更大的清单走模型库插件 | 下载时需要 |
+| 下载模型 | 内置 6 个推荐 GGUF（229 MB–1.2 GB，覆盖各内存档位），断点续传、多镜像回退；更大的清单走模型库插件 | 下载时需要 |
 | 本地推理 | **llama.cpp** 经 JNI 编译进 APK，CPU 多线程 | 完全离线 |
 | 聊天 | 流式输出、代码块/Markdown 渲染、多会话、tok/s 实时统计 | 完全离线 |
 | 生图 | 内置原生程序化渲染引擎（毫秒级、可复现），并预留真实扩散模型接入位 | 完全离线 |
-| **识图（多模态）** | **llama.cpp 的 mtmd**（视觉投影）：主 GGUF + 配套 mmproj 两个文件，下载器一起拉；内置 2 个多模态模型（LFM2-VL 450M / Qwen3.5 0.8B），发图即看。一轮一张图 | 完全离线 |
 | 语音对话 | 长按说话 → 语音识别 → 本地大模型 → TTS 朗读；**8 种情感音色** | 识别取决于机型 |
 | **神经音色** | **sherpa-onnx VITS 离线语音合成**：内置 4 个（Piper / VITS，13–114 MB），官方插件再加 17 个；支持多选批量下载/删除。模型下载后完全离线、跟机型无关 | 下载时需要 |
 | **Breeze 语音** | **外部语音引擎插件**（`tts_engine`）：端点、密钥、模型名由插件声明，手机只当客户端。Breeze TTS 2 是 3.47B / 需要 CUDA 的模型，**手机上跑不动**，必须在 PC 或 GPU 服务器上自建服务 | 合成时需要（局域网/云端） |

@@ -252,11 +252,30 @@ fun LiquidGlassTabBar(
             }
         }
 
+        // ---------------------------------------------------------------------
+        // 外层容器：**不裁剪**。
+        //
+        // 底板本身要 `.clip(shape)`（磨砂玻璃不能溢出圆角），但按压时液态要能
+        // 溢出胶囊边界 —— 那个 clip 会把光晕切掉。所以拆成两层：
+        //   * 内层 Box（被 clip）：底板、图标文字、胶囊框内部分；
+        //   * 外层 Canvas（不被 clip）：按压时溢出胶囊的那圈光晕。
+        //
+        // 外层套内层的尺寸与对齐完全一致（contentAlignment = Center），
+        // 所以两层画的是同一个坐标系里的同一个位置。
+        // ---------------------------------------------------------------------
         Box(
             modifier = Modifier
                 .width(panelWidth)
                 .height(barHeight)
                 .graphicsLayer { translationY = dragY }
+                .onSizeChanged { panelPx = it }
+                .onGloballyPositioned { panelWindow = it.boundsInWindow() },
+            contentAlignment = Alignment.Center,
+        ) {
+        Box(
+            modifier = Modifier
+                .width(panelWidth)
+                .height(barHeight)
                 .drawWithContent { if (!GlassBackdrop.capturing) drawContent() }
                 .shadow(
                     elevation = barShadow,
@@ -264,9 +283,7 @@ fun LiquidGlassTabBar(
                     ambientColor = Color.Black.copy(alpha = if (ios.isDark) 0.55f else 0.10f),
                     spotColor = Color.Black.copy(alpha = if (ios.isDark) 0.60f else 0.12f),
                 )
-                .clip(shape)
-                .onSizeChanged { panelPx = it }
-                .onGloballyPositioned { panelWindow = it.boundsInWindow() },
+                .clip(shape),
             contentAlignment = Alignment.Center,
         ) {
             val w = panelPx.width.toFloat()
@@ -473,6 +490,7 @@ fun LiquidGlassTabBar(
             // 这些字和图标，底栏本身始终是连续的磨砂玻璃。
             val bmp = contentBitmap
             if (indicatorKind == "capsule" && slotPx > 0f && bmp != null) {
+                // 胶囊框内部分（被底板 clip 裁住）
                 Canvas(Modifier.fillMaxSize()) {
                     drawIntoCanvas { c ->
                         val nc = c.nativeCanvas
@@ -505,11 +523,54 @@ fun LiquidGlassTabBar(
                             tiltX = tilt,
                             fillColor = fillColor,
                             fillAlpha = 0.40f,
+                            layer = LiquidBarGlass.PILL_LAYER_BODY,
                         )
                     }
                 }
             }
+        } // 内层 Box 结束（被 clip）
+
+        // ---------------------------------------------------------------------
+        // 溢出层：画在**外层**（没有 clip），所以液态光晕能真正溢出胶囊边界。
+        //
+        // 位置与内层完全一致（同样 fillMaxSize + 同样的坐标换算），只是少了
+        // 底板 clip。它画在内层**之上**，所以按压时那圈外洇的光是压在底板
+        // 边缘上的 —— 视觉上就是"框里装着一汪水，按下去水从边上溢出来"。
+        // ---------------------------------------------------------------------
+        if (indicatorKind == "capsule" && slotPx > 0f && contentBitmap != null) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawIntoCanvas { c ->
+                    val nc = c.nativeCanvas
+                    val baseHalfW = (w / count.toFloat() - pillInset * 2f) / 2f
+                    val baseHalfH = (h - pillTop * 2f) / 2f
+                    val cx = pillX.value
+                    val cy = h / 2f
+                    val velocity = (if (dragging) dragVelocity else pillX.velocity) / 10f
+                    val sx = pressScale.value / (1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f))
+                    val sy = pressScale.value * (1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f))
+                    glass.drawPill(
+                        canvas = nc,
+                        base = null,
+                        content = null,
+                        sample = GlassBackdrop.SAMPLE,
+                        winLeft = panelWindow.left,
+                        winTop = panelWindow.top + dragY,
+                        contentLeft = 0f,
+                        contentTop = 0f,
+                        left = cx - baseHalfW * sx,
+                        top = cy - baseHalfH * sy,
+                        right = cx + baseHalfW * sx,
+                        bottom = cy + baseHalfH * sy,
+                        dark = ios.isDark,
+                        liquid = liquid,
+                        press = press.value,
+                        tiltX = tilt,
+                        layer = LiquidBarGlass.PILL_LAYER_OVERFLOW,
+                    )
+                }
+            }
         }
+    } // 外层 Box 结束（不裁剪）
     }
 }
 
