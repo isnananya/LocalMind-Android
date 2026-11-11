@@ -248,6 +248,10 @@ object UiTokens {
         note = "glass（毛玻璃）/ plain（不透明）/ hidden（藏起来，但标签只剩一个时忽略）",
     )
     val showTabBarLabels = UiToken("showTabBarLabels", "标签栏显示文字", TokenType.BOOL, "true")
+    val dockImpl = UiToken(
+        "dockImpl", "底栏实现", TokenType.ENUM, "liquidTabBar",
+        note = "liquidTabBar（当前液态玻璃底栏）/ liquidDock（自定义液态底栏，更多可调项）",
+    )
     val navTitleAlign = UiToken("navTitleAlign", "导航栏标题位置", TokenType.ENUM, "center",
         note = "center（居中，iOS 默认）/ leading（靠左）")
 
@@ -272,7 +276,7 @@ object UiTokens {
         tabStyle, showTabBarLabels, navTitleAlign,
         tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator, tabBarWidth, uiKit,
         glassBarLiquid, glassBarOutline, glassBarHighlight, glassBarSlotWidth,
-        glassBarBottomBlur, glassBarIconOnly, glassBarLabelSize, dynamicColor,
+        glassBarBottomBlur, glassBarIconOnly, glassBarLabelSize, dynamicColor, dockImpl,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }
@@ -285,6 +289,7 @@ object UiTokens {
         tabBarIndicator.key to setOf("capsule", "underline", "dot", "none"),
         tabBarWidth.key to setOf("compact", "full"),
         uiKit.key to setOf("auto", "library", "compose"),
+        dockImpl.key to setOf("liquidTabBar", "liquidDock"),
     )
 
     /** 合法的标签页 id。 */

@@ -56,6 +56,72 @@ import com.localmind.ui.screen.SettingsScreen
 import com.localmind.ui.screen.StatusScreen
 import com.localmind.ui.screen.VoiceScreen
 import com.localmind.ui.theme.IosTheme
+import com.example.liquiddock.*
+import com.localmind.ui.icons.AppIcons
+import androidx.compose.ui.unit.sp
+
+private val dockIconOf = mapOf(
+    Tab.HOME to AppIcons.AutoAwesome,
+    Tab.CHAT to AppIcons.ChatBubble,
+    Tab.MODELS to AppIcons.Memory,
+    Tab.ME to AppIcons.Person,
+    Tab.VOICE to AppIcons.Mic,
+    Tab.BREEZE to AppIcons.RecordVoiceOver,
+    Tab.PLUGINS to AppIcons.Extension,
+    Tab.IMAGE to AppIcons.Image,
+)
+
+/**
+ * 把现有主题令牌映射成 liquiddock 的 [DockConfig]，让「外观」页里的底栏参数
+ * 对两种底栏实现都生效。这样融合后，用户既能用回自定义液态底栏，
+ * 也保留当前的液态玻璃底栏，互不丢失。
+ */
+private fun dockConfigFromTokens(tokens: Map<String, String>?, isDark: Boolean): DockConfig {
+    if (tokens == null) return DockConfig()
+    fun num(k: String, d: Float) = tokens[k]?.toFloatOrNull() ?: d
+    fun bool(k: String, d: Boolean) = tokens[k]?.toBooleanStrictOrNull() ?: d
+    fun str(k: String, d: String) = tokens[k] ?: d
+    val indicator = when (str("tabBarIndicator", "capsule").lowercase()) {
+        "underline" -> DockIndicator.Underline
+        "dot" -> DockIndicator.Dot
+        "none" -> DockIndicator.None
+        else -> DockIndicator.Capsule
+    }
+    val shape = when (str("tabBarShape", "capsule").lowercase()) {
+        "rounded" -> DockShape.Rounded
+        "square" -> DockShape.Square
+        else -> DockShape.Capsule
+    }
+    val width = when (str("tabBarWidth", "compact").lowercase()) {
+        "full" -> DockWidth.Full
+        else -> DockWidth.Compact
+    }
+    val style = when (str("tabStyle", "glass").lowercase()) {
+        "plain" -> DockStyle.Plain
+        else -> DockStyle.Glass
+    }
+    return DockConfig(
+        style = style,
+        indicator = indicator,
+        shape = shape,
+        width = width,
+        colors = if (isDark) DockColors.Dark else DockColors.Light,
+        height = num("tabBarHeight", 60f).dp,
+        slotWidth = num("glassBarSlotWidth", 76f).dp,
+        sideMargin = num("tabBarMargin", 18f).dp,
+        bottomGap = num("tabBarLift", 12f).dp,
+        roundedCorner = 24.dp,
+        blurRadius = num("tabBarBlur", 10f),
+        fillAlpha = 0.40f,
+        showOutline = bool("glassBarOutline", true),
+        highlight = num("glassBarHighlight", 0.5f),
+        liquid = bool("glassBarLiquid", true),
+        bottomVeil = bool("glassBarBottomBlur", false),
+        iconOnly = bool("glassBarIconOnly", false),
+        iconSize = num("tabIconSize", 23f).dp,
+        labelSize = num("glassBarLabelSize", 11f).sp,
+    )
+}
 
 /**
  * 应用外壳。
@@ -293,28 +359,31 @@ fun LocalMindRoot(
                         targetOffsetY = { it / 2 },
                     ),
                 ) {
-                    LiquidGlassTabBar(
-                        selected = tab,
-                        onSelect = { viewModel.selectTab(it) },
-                        bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
-                        items = tabs,
-                        labels = uiLayout?.tabs
-                            ?.mapNotNull { spec ->
-                                val t = Tab.fromId(spec.target) ?: return@mapNotNull null
-                                spec.label.takeIf { it.isNotBlank() }?.let { t to it }
-                            }
-                            ?.toMap()
-                            .orEmpty(),
-                        icons = uiLayout?.tabs
-                            ?.mapNotNull { spec ->
-                                val t = Tab.fromId(spec.target) ?: return@mapNotNull null
-                                com.localmind.ui.icons.LayoutIcons.of(spec.icon)?.let { t to it }
-                            }
-                            ?.toMap()
-                            .orEmpty(),
-                        showLabels = showLabels,
-                        style = tabStyle,
-                    )
+                    val dockImplMode = uiTokens["dockImpl"] ?: "liquidTabBar"
+                    val dockItems = tabs.mapNotNull { t ->
+                        val icon = (icons[t] ?: dockIconOf[t]) ?: return@mapNotNull null
+                        DockItem(t.name.lowercase(), labels[t] ?: t.title, icon)
+                    }
+                    if (dockImplMode == "liquidDock" && dockItems.isNotEmpty()) {
+                        LiquidDock(
+                            items = dockItems,
+                            selectedId = tab.name.lowercase(),
+                            onSelect = { id -> Tab.fromId(id)?.let { viewModel.selectTab(it) } },
+                            bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                            config = dockConfigFromTokens(uiTokens, IosTheme.palette.isDark),
+                        )
+                    } else {
+                        LiquidGlassTabBar(
+                            selected = tab,
+                            onSelect = { viewModel.selectTab(it) },
+                            bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                            items = tabs,
+                            labels = labels,
+                            icons = icons,
+                            showLabels = showLabels,
+                            style = tabStyle,
+                        )
+                    }
                 }
             }
         }

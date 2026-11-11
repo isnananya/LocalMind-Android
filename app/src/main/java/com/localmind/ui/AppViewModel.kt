@@ -3629,31 +3629,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _breeze.value = _breeze.value.copy(status = "")
     }
 
-    /**
-     * 用外部引擎念一段。返回 false 表示"这条链路不可用"，调用方走原来的路。
-     *
-     * 失败时**静默退回**系统 / 神经音色：用户要的是"能听见"，不是"知道为什么
-     * Breeze 没连上"。错误会留在 [BreezeState.error] 里，语音页能看到。
-     */
-    private fun speakViaBreeze(text: String): Boolean {
-        val st = _breeze.value
-        if (!st.ready) return false
-        val spec = st.active?.spec ?: return false
-        viewModelScope.launch {
-            runCatching { breezeTts.synthesize(spec, text) }
-                .onSuccess { runCatching { breezeTts.play(it.file) } }
-                .onFailure { t ->
-                    _breeze.value = _breeze.value.copy(error = t.message ?: "合成失败")
-                    tts.init { }
-                    tts.speak(text, _voice.value)
-                }
-        }
-        return true
-    }
-
     fun speak(text: String) {
-        // 本地神经音色优先：它是真·离线（sherpa VITS），不依赖任何服务。
-        // 没选本地音色、或引擎还没加载好时，才轮到 Breeze，最后才是系统 TTS。
+        // 唯一用户侧 TTS = 开源本地神经音色 NeuralTts（sherpa-onnx，VITS/Matcha/Kokoro/Kitten）。
+        // 选中了本地音色且引擎已加载就直接走它；其余情况退系统 TTS。
+        // 不再经过云端 Breeze（原来的 TTS 逻辑已整体替换为开源 NeuralTts）。
         val neural = _activeNeuralVoice.value
         if (neural.isNotBlank() && neuralTts.loadedVoiceId == neural) {
             val v = _voice.value
@@ -3665,7 +3644,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        if (speakViaBreeze(text)) return
         tts.init { }
         tts.speak(text, _voice.value)
     }

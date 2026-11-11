@@ -118,6 +118,15 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         selected = tokens["tabBarIndicator"] ?: "capsule",
                         onPick = { viewModel.setThemeOverride("tabBarIndicator", it) },
                     )
+                    ChoiceRow(
+                        title = "底栏实现",
+                        options = listOf(
+                            "liquidTabBar" to "液态玻璃",
+                            "liquidDock" to "自定义液态",
+                        ),
+                        selected = tokens["dockImpl"] ?: "liquidTabBar",
+                        onPick = { viewModel.setThemeOverride("dockImpl", it) },
+                    )
                 }
             }
 
