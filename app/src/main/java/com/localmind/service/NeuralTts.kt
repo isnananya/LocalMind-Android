@@ -7,6 +7,9 @@ import android.media.AudioTrack
 import android.util.Log
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.SherpaNativeLoader
@@ -103,7 +106,19 @@ object NeuralVoiceModels {
         val rules = listOf("date.fst", "number.fst", "phone.fst")
             .mapNotNull { pick(files, base, it) }
 
-        // ---- 这是不是 VITS？----
+        // ---- 架构判定：VITS / Matcha / Kokoro / Kitten ----
+        //
+        // 判据和 sherpa-onnx 自己的一致：VITS 读 ONNX metadata 的 model_type/comment。
+        // Kokoro / Kitten 的生成器 onnx 同样带 model_type；Matcha 有声学模型 + 声码器
+        // 两个 onnx。 voices.bin 是 Kokoro / Kitten 独有的声纹库，见到它基本就是这两家。
+        // **必须查**：把 Matcha 的声学模型当成 VITS 生成器塞进 OfflineTtsVitsModelConfig，
+        // 那一步不是抛异常 —— libsherpa-onnx-jni.so 会直接结束进程（实测 exit）。
+        val voicesBin = pick(files, base, "voices.bin")
+        val otherOnnx = files
+            .filter { it.extension.equals("onnx", ignoreCase = true) && it != model }
+            .maxByOrNull { it.length() }
+
+        
         //
         // 判据和 sherpa-onnx 自己的一致：它的 VITS 实现读 ONNX metadata 里的
         // `comment`，读不到就报错退出。所以"我们拒绝"与"它会崩"永远是同一件事，
@@ -115,7 +130,17 @@ object NeuralVoiceModels {
         // 连 tombstone 都没有）。Java 侧 runCatching 拦不住，用户看到的就是闪退。
         val modelType = onnxMeta(model, "model_type").orEmpty()
         val comment = onnxMeta(model, "comment").orEmpty()
-        val isVits = modelType.equals("vits", ignoreCase = true) || comment.isNotBlank()
+        val arch: NeuralVoiceModels.Arch = when {
+            modelType.equals("kitten", ignoreCase = true) -> NeuralVoiceModels.Arch.KITTEN
+            modelType.equals("kokoro", ignoreCase = true) || comment.contains("kokoro", ignoreCase = true) ->
+                NeuralVoiceModels.Arch.KOKORO
+            modelType.equals("matcha", ignoreCase = true) -> NeuralVoiceModels.Arch.MATCHA
+            voicesBin != null && otherOnnx != null -> NeuralVoiceModels.Arch.MATCHA
+            voicesBin != null -> NeuralVoiceModels.Arch.KOKORO
+            modelType.equals("vits", ignoreCase = true) || comment.isNotBlank() -> NeuralVoiceModels.Arch.VITS
+            else -> NeuralVoiceModels.Arch.UNKNOWN
+        }
+        val isVits = arch == NeuralVoiceModels.Arch.VITS
 
         // ---- 前端：这个模型怎么把文字变成音素 ----
         //
@@ -133,12 +158,36 @@ object NeuralVoiceModels {
             jieba || g2pw || comment.contains("melo", ignoreCase = true)
         val canPhonemize = charFrontend || (piperLike && espeakData != null) || lexicon != null
 
-        val blockedReason = when {
-            !isVits -> "这是 " + modelType.ifBlank { comment }.ifBlank { "未知架构" } +
-                " 架构的音色，主程序目前只接了 VITS 引擎，装上也发不出声"
-            !canPhonemize -> "这个音色缺少发音数据（espeak-ng-data 或 lexicon.txt）；" +
-                "原生引擎加载它会直接结束进程，已拦下"
-            else -> ""
+        // ---- 各架构的可播放条件 ----
+        //
+        // 原则：宁可拒绝也不让原生库 exit() 带崩进程。sherpa 对"缺关键文件"的
+        // 反应是直接结束进程而不是抛异常，Java 侧拦不住，所以这里必须替它把门。
+        val blockedReason = when (arch) {
+            NeuralVoiceModels.Arch.KOKORO -> when {
+                tokens == null -> "Kokoro 音色缺 tokens.txt，无法使用"
+                // multi-lang Kokoro 靠 espeak-ng-data 做音素转换；英文版可以没有。
+                espeakData == null && model.name.contains("multi-lang") ->
+                    "多语言 Kokoro 缺 espeak-ng-data，原生引擎加载它会直接结束进程，已拦下"
+                else -> ""
+            }
+            NeuralVoiceModels.Arch.KITTEN -> when {
+                tokens == null -> "Kitten TTS 音色缺 tokens.txt，无法使用"
+                espeakData == null -> "Kitten TTS 缺 espeak-ng-data，原生引擎加载它会直接结束进程，已拦下"
+                else -> ""
+            }
+            NeuralVoiceModels.Arch.MATCHA -> when {
+                tokens == null -> "Matcha 音色缺 tokens.txt，无法使用"
+                otherOnnx == null -> "Matcha 音色缺声码器 onnx，无法使用"
+                espeakData == null && lexicon == null -> "Matcha 缺 espeak-ng-data 且没有 lexicon，已拦下"
+                else -> ""
+            }
+            NeuralVoiceModels.Arch.VITS -> when {
+                !canPhonemize -> "这个音色缺少发音数据（espeak-ng-data 或 lexicon.txt）；" +
+                    "原生引擎加载它会直接结束进程，已拦下"
+                else -> ""
+            }
+            NeuralVoiceModels.Arch.UNKNOWN -> "这是 " + modelType.ifBlank { comment }.ifBlank { "未知架构" } +
+                " 架构的音色，主程序不认识它，装上也发不出声"
         }
 
         return Layout(
@@ -149,7 +198,10 @@ object NeuralVoiceModels {
             dataDir = espeakData?.absolutePath.orEmpty(),
             ruleFsts = rules.joinToString(",") { it.absolutePath },
             sizeBytes = files.sumOf { it.length() },
-            modelType = modelType.ifBlank { comment }.ifBlank { "未知架构" },
+            arch = arch,
+            voices = voicesBin?.name.orEmpty(),
+            vocoder = if (arch == NeuralVoiceModels.Arch.MATCHA) otherOnnx?.name.orEmpty() else "",
+            modelType = arch.label,
             frontend = frontend,
             playable = blockedReason.isEmpty(),
             blockedReason = blockedReason,
@@ -215,15 +267,30 @@ object NeuralVoiceModels {
      * 别的用户/设备后会失效，而 sherpa 的 config 要的是绝对路径，所以在
      * [NeuralTtsEngine.load] 里现拼。
      */
+    /** TTS 架构。决定 load() 构建哪种 OfflineTtsXxxModelConfig。 */
+    enum class Arch(val label: String) {
+        VITS("VITS"),
+        MATCHA("Matcha"),
+        KOKORO("Kokoro"),
+        KITTEN("Kitten TTS"),
+        UNKNOWN("未知"),
+    }
+
     data class Layout(
         val modelDir: File,
         val model: String,
         val tokens: String,
         val lexicon: String,
-        /** espeak-ng-data 的绝对路径（Piper / Coqui / icefall 这类音素的模型必需）。 */
+        /** espeak-ng-data 的绝对路径（Piper / Coqui / icefall / Kokoro multi-lang 必需）。 */
         val dataDir: String = "",
         val ruleFsts: String,
         val sizeBytes: Long,
+        /** 模型架构（由 resolve 根据 onnx metadata / 目录布局判定）。 */
+        val arch: Arch = Arch.UNKNOWN,
+        /** Kokoro / Kitten 的 voices.bin 文件名。 */
+        val voices: String = "",
+        /** Matcha 的声码器 onnx 文件名。 */
+        val vocoder: String = "",
         /** ONNX metadata 里的 model_type（或 comment）—— 就是"这是什么架构"。 */
         val modelType: String = "",
         /** ONNX metadata 的 frontend（characters / 空）。诊断用。 */
@@ -249,7 +316,7 @@ object NeuralVoiceModels {
 }
 
 /**
- * sherpa-onnx 的 VITS 推理 + 播放。
+ * sherpa-onnx 的多架构离线 TTS 推理 + 播放（VITS / Matcha / Kokoro / Kitten）。
  *
  * 生命周期：模型常驻（一个音色几百 MB，反复读盘太亏），同一时刻只保留一个。
  * 换音色会先 [release] 再加载。
@@ -274,6 +341,12 @@ class NeuralTtsEngine(
     }
 
     @Volatile private var tts: OfflineTts? = null
+
+    /**
+     * 置 1 会让进行中的合成在下一批 sample 时中断（回调返回 0，sherpa 停止生成）。
+     * stop() 置位，speak() 开头清零。
+     */
+    @Volatile private var stoppedGeneration = false
     @Volatile private var loadedId: String = ""
     @Volatile private var playing: AudioTrack? = null
 
@@ -359,22 +432,49 @@ class NeuralTtsEngine(
         return try {
             runCatching {
                 val dir = layout.modelDir.absolutePath
+                // 按架构构建对应的模型 config。缺关键文件的情况已在 resolve 里拦下，
+                // 走到这里的路径都是"原生库能正常解析"的。
+                val abs = { name: String -> if (name.isEmpty()) "" else "$dir/$name" }
+                val modelCfg = OfflineTtsModelConfig(
+                    numThreads = if (Runtime.getRuntime().availableProcessors() >= 8) 4 else 2,
+                    debug = false,
+                    provider = "cpu",
+                )
+                when (layout.arch) {
+                    NeuralVoiceModels.Arch.KOKORO -> modelCfg.kokoro = OfflineTtsKokoroModelConfig(
+                        model = abs(layout.model),
+                        voices = abs(layout.voices),
+                        tokens = abs(layout.tokens),
+                        // multi-lang Kokoro 靠 espeak 做音素转换，不给 data_dir 会 exit(-1)。
+                        dataDir = layout.dataDir,
+                        lexicon = abs(layout.lexicon),
+                    )
+                    NeuralVoiceModels.Arch.KITTEN -> modelCfg.kitten = OfflineTtsKittenModelConfig(
+                        model = abs(layout.model),
+                        voices = abs(layout.voices),
+                        tokens = abs(layout.tokens),
+                        dataDir = layout.dataDir,
+                    )
+                    NeuralVoiceModels.Arch.MATCHA -> modelCfg.matcha = OfflineTtsMatchaModelConfig(
+                        acousticModel = abs(layout.model),
+                        vocoder = abs(layout.vocoder),
+                        tokens = abs(layout.tokens),
+                        lexicon = abs(layout.lexicon),
+                        dataDir = layout.dataDir,
+                    )
+                    // VITS 与 UNKNOWN 都走 VITS config：UNKNOWN 的 playable 必为 false，
+                    // 到不了这里；VITS 保持原有行为。
+                    else -> modelCfg.vits = OfflineTtsVitsModelConfig(
+                        model = abs(layout.model),
+                        lexicon = abs(layout.lexicon),
+                        tokens = abs(layout.tokens),
+                        // Piper / Coqui / icefall 靠 espeak 做音素转换；这条路径
+                        // 不给 dataDir 就会被原生库 exit(-1) 掉（见 resolve 的注释）。
+                        dataDir = layout.dataDir,
+                    )
+                }
                 val config = OfflineTtsConfig(
-                    model = OfflineTtsModelConfig(
-                        vits = OfflineTtsVitsModelConfig(
-                            model = "$dir/${layout.model}",
-                            lexicon = layout.lexicon.takeIf { it.isNotEmpty() }?.let { "$dir/$it" } ?: "",
-                            tokens = layout.tokens.takeIf { it.isNotEmpty() }?.let { "$dir/$it" } ?: "",
-                            // Piper / Coqui / icefall 靠 espeak 做音素转换；这条路径
-                            // 不给 dataDir 就会被原生库 exit(-1) 掉（见 resolve 的注释）。
-                            dataDir = layout.dataDir,
-                        ),
-                        // VITS 很小：低端机 2 线程就够（给多了和 llama 抢核），
-                        // 8 核以上才放到 4 —— 合成一整段音频的延迟能少 20%~35%。
-                        numThreads = if (Runtime.getRuntime().availableProcessors() >= 8) 4 else 2,
-                        debug = false,
-                        provider = "cpu",
-                    ),
+                    model = modelCfg,
                     ruleFsts = layout.ruleFsts,
                     maxNumSentences = 1,
                     silenceScale = 0.2f,
@@ -421,6 +521,7 @@ class NeuralTtsEngine(
     }
 
     fun stop() {
+        stoppedGeneration = true
         runCatching { playing?.pause(); playing?.flush() }
     }
 
@@ -436,9 +537,15 @@ class NeuralTtsEngine(
     fun speak(text: String, speed: Float = 1.0f, pitch: Float = 1.0f, volume: Float = 1.0f): Boolean {
         val engine = tts ?: return false
         if (text.isBlank()) return false
+        stoppedGeneration = false
 
         return runCatching {
-            val audio = engine.generate(text, sid = 0, speed = speed.coerceIn(0.3f, 2.5f))
+            // 回调返回 0 会让 sherpa 中断本次合成 —— stop() 一按，正在跑的
+            // 合成下一批 sample 就停，不用等整段念完。
+            val callback = NativeTtsCallback { if (stoppedGeneration) 0 else 1 }
+            val audio = engine.generateWithCallback(
+                text, sid = 0, speed = speed.coerceIn(0.3f, 2.5f), callback = callback,
+            )
             if (audio.samples.isEmpty()) return false
 
             val shifted = applyPitch(audio.samples, audio.sampleRate, pitch)
@@ -455,7 +562,10 @@ class NeuralTtsEngine(
         val engine = tts ?: return false
         if (text.isBlank()) return false
         return runCatching {
-            val audio = engine.generate(text, sid = 0, speed = speed.coerceIn(0.3f, 2.5f))
+            val audio = engine.generateWithCallback(
+                text, sid = 0, speed = speed.coerceIn(0.3f, 2.5f),
+                callback = NativeTtsCallback { 1 },
+            )
             if (audio.samples.isEmpty()) return false
             val (samples, rate) = applyPitch(audio.samples, audio.sampleRate, pitch)
             target.writeBytes(wav(samples, rate))
@@ -532,4 +642,19 @@ class NeuralTtsEngine(
         }
         return out
     }
+}
+
+/**
+ * sherpa-onnx 的 JNI 按**精确方法签名** `invoke([F)Ljava/lang/Integer;` 在回调对象上
+ * 找回调方法。Kotlin lambda 经 invokedynamic + D8 desugar 后只暴露擦除后的
+ * `invoke(Object)`，签名对不上 → NoSuchMethodError，且发生在 JNI 调用点，
+ * 可能直接带崩进程。命名类保留了带类型的 `invoke(FloatArray)` 桥接方法，
+ * 签名匹配，JNI 找得到。
+ *
+ * 这不是理论风险：VoiceStudio 项目（同为 sherpa-onnx Android 端）在实战中踩过
+ * 这个坑并留下了同样的规避类。凡是要传给 sherpa 的 native 回调，都必须经这种
+ * 命名类包装。
+ */
+private class NativeTtsCallback(val onChunk: () -> Int) : (FloatArray) -> Int {
+    override fun invoke(samples: FloatArray): Int = onChunk()
 }

@@ -569,6 +569,21 @@ private fun NeuralVoiceRow(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
+                // 已安装音色的引擎架构（Kokoro / VITS / …），让用户知道它在用什么引擎说话。
+                viewModel.voiceArch(voice)?.let { arch ->
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        arch,
+                        style = IosTheme.typography.caption2,
+                        color = ios.teal,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(ios.teal.copy(alpha = 0.12f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
                 if (selected) {
                     Spacer(Modifier.width(6.dp))
                     Text(

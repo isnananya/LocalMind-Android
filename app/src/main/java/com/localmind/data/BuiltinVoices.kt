@@ -17,9 +17,9 @@ package com.localmind.data
  *
  * ## 为什么是这 4 个
  *
- * 主程序只接了 **VITS** 引擎（见 `NeuralVoiceModels.Layout.unsupportedReason`），
- * 所以 Kokoro / Matcha 这些更自然的架构现在装上也发不出声 —— 内置清单里不放
- * 它们，否则用户点"使用"只会看到一句"用不了"。
+ * 主程序已接 **VITS / Kokoro / Kitten / Matcha** 四种引擎（见
+ * `NeuralVoiceModels.Layout.arch`），所以 Kokoro 这类更自然的架构也能直接用。
+ * 第一推荐是 Kokoro 多语言：140 MB 的体积、明显更自然的效果。
  *
  * 体积从小到大排，第一项就是低端机的默认答案：
  *
@@ -36,6 +36,17 @@ package com.localmind.data
 object BuiltinVoices {
 
     val all: List<VoiceEntry> = listOf(
+        // Kokoro int8 多语言：目前清单里最自然的音色，中英日韩都能念。
+        // 140 MB 与 VITS 大模型同量级，效果却明显更好 —— 所以排第一推荐。
+        VoiceEntry(
+            id = "kokoro-int8-multi-lang-v1_1",
+            label = "Kokoro 星野（多语言 · 推荐）",
+            badge = "140 MB",
+            sizeBytes = 147_052_523,
+            description = "140 MB · 完全离线 · Apache-2.0（Kokoro）。中/英/日/韩多语言，" +
+                "目前清单里最自然的音色，断句和语气都接近真人。",
+            sampleText = "你好，我是星野。用自然的声音，陪你把每一天过得更从容。",
+        ),
         VoiceEntry(
             id = "vits-piper-zh_CN-chaowen-medium-int8",
             label = "超文（男声 · 轻量）",

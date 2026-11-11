@@ -3755,6 +3755,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun voiceInstalled(voice: com.localmind.data.VoiceEntry): Boolean =
         com.localmind.service.NeuralVoiceModels.isInstalled(storage, voice)
 
+    /** 已安装音色的引擎架构（VITS / Kokoro / Kitten / Matcha），未安装返回 null。 */
+    fun voiceArch(voice: com.localmind.data.VoiceEntry): String? =
+        com.localmind.service.NeuralVoiceModels
+            .resolve(com.localmind.service.NeuralVoiceModels.dirOf(storage, voice))
+            ?.arch?.label
+
     fun voiceInstalledBytes(voice: com.localmind.data.VoiceEntry): Long =
         com.localmind.service.NeuralVoiceModels.installedBytes(storage, voice)
 

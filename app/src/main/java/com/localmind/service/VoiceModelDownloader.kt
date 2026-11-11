@@ -230,12 +230,12 @@ class VoiceModelDownloader(
                 continue
             }
 
-            // 解压成功 ≠ 能用。真正验收标准是"能解析出 VITS 布局" —— 下到一半的
+            // 解压成功 ≠ 能用。真正验收标准是"能解析出已知架构的模型布局" —— 下到一半的
             // 压缩包、解压出空目录、布局变了，都在这里被挡住，而不是等用户点播放
-            // 才发现没声音。
+            // 才发现没声音。支持 VITS / Kokoro / Kitten / Matcha（见 NeuralVoiceModels.resolve）。
             val layout = NeuralVoiceModels.resolve(target)
             if (layout == null) {
-                lastError = "解压后没有找到 VITS 模型文件"
+                lastError = "解压后没有找到可用的 TTS 模型文件"
                 target.deleteRecursively()
                 continue
             }
