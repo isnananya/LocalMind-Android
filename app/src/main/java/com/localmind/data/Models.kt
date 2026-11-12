@@ -599,6 +599,28 @@ data class VoiceSettings(
     val pitch: Float = 1.0f,
     val volume: Float = 1.0f,
     val emotion: Emotion = Emotion.NEUTRAL,
+    /**
+     * 句间停顿倍率（ZipVoice 的 `silenceScale`）。
+     *
+     * 0.2 是上游默认值。调大一点（0.3–0.5）读长段落更像人在说话 ——
+     * sherpa 的默认值偏"赶"，一句话接一句没有换气感。
+     */
+    val silenceScale: Float = 0.2f,
+    /**
+     * 克隆音色的采样步数（ZipVoice 的 `numSteps`）。
+     *
+     * 5 是上游默认（快）；8–12 更自然但更慢。只在克隆链路生效 ——
+     * VITS 类模型没有这个概念，改它对普通音色没有任何影响。
+     */
+    val numSteps: Int = 5,
+    /**
+     * 长文本按句切分合成（句间插静音），而不是整段一次性喂给模型。
+     *
+     * 一次性喂长文本时，模型的注意力会"跑偏"，越到后面越平、越容易吞字；
+     * 按句切开能让每句都从干净的状态开始，听感明显更稳。代价是句间韵律
+     * 不如整段连贯 —— 所以做成开关而不是写死。
+     */
+    val splitSentences: Boolean = true,
     val autoSpeak: Boolean = true,
     val bargeIn: Boolean = true,
     val recordTurns: Boolean = true,

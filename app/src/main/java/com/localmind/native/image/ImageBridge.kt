@@ -11,9 +11,28 @@ import android.graphics.Typeface
  */
 object ImageBridge {
 
+    /**
+     * 生图后端现在是**打包在 APK 里**的（装完就能用）。
+     *
+     * 以前它走"插件"这条路：用户得先下 36 MB 的 zip 再导入，而这一步在国内
+     * 网络上经常几十分钟都下不完 —— 功能明明在，用户却永远看不到。
+     * 现在 `liblocalmind-sd.so` 直接躺在 `jniLibs/arm64-v8a/` 里，
+     * 这里 load 一次就有。**没打包的 ABI（armeabi-v7a）会抛 UnsatisfiedLinkError**，
+     * 捕获后当作"没有后端"，退回程序化渲染 —— 和以前行为一致。
+     *
+     * 顺序必须在 `localmind` **之后**：sd 库依赖主库已经解析好的运行环境。
+     */
+    @Volatile
+    private var bundledLoaded = false
+
     init {
         System.loadLibrary("localmind")
+        bundledLoaded = runCatching { System.loadLibrary("localmind-sd") }.isSuccess
+        if (bundledLoaded) android.util.Log.i("ImageBridge", "内置生图后端已加载")
     }
+
+    /** 生图后端是不是随包带进来的（不是用户导入的插件）。 */
+    val backendBundled: Boolean get() = bundledLoaded
 
     /** Renders into [pixels] (w*h ARGB words). Returns pixels written, or -1. */
     private external fun nativeRender(

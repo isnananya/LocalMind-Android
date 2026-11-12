@@ -70,6 +70,12 @@ import com.localmind.ui.theme.IosTheme
 fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val ios = IosTheme.palette
     val plugins by viewModel.plugins.collectAsState()
+    // 内置能力（液态底栏、模型库、表情包、语音音色、生图…）已经长在应用里了，
+    // 列表只显示用户自己装的 —— 否则一进插件页就是一排「你从没装过」的东西，
+    // 还带着卸载按钮，用户会以为是自己误装的。
+    val userPlugins = remember(plugins) {
+        plugins.filterKeys { !com.localmind.data.BuiltinPlugins.isBuiltin(it) }
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     var pendingDelete by remember { mutableStateOf<InstalledPlugin?>(null) }
     var pendingCode by remember { mutableStateOf<java.io.File?>(null) }
@@ -214,7 +220,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             }
             }
 
-            if (plugins.isEmpty()) {
+            if (userPlugins.isEmpty()) {
                 item {
                     AuroraEmpty(
                         icon = AppIcons.Extension,
@@ -223,13 +229,10 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     )
                 }
             } else {
-                item { AuroraSectionLabel("已安装 " + plugins.size + " 个") }
+                item { AuroraSectionLabel("已安装 " + userPlugins.size + " 个") }
                 item {
                     AuroraGroup {
-                        // 液态底栏已经是应用内置能力，旧的插件记录不再展示（也不必卸载）。
-        val list = plugins.values
-            .filter { it.manifest.id != "com.localmind.bar.liquidtab" }
-            .sortedBy { it.installedAt }
+                        val list = userPlugins.values.sortedBy { it.installedAt }
                         list.forEachIndexed { index, plugin ->
                             if (index > 0) AuroraDivider(indent = 62.dp)
                             PluginRow(

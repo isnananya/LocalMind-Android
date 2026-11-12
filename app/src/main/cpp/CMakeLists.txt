@@ -80,6 +80,21 @@ foreach(_tgt llama ggml ggml-base mtmd)
 endforeach()
 
 # ---------------------------------------------------------------------------
+# 关掉 llama 的 unity build —— 非 ASCII 路径下它会直接编不过
+# ---------------------------------------------------------------------------
+# llama.cpp 的 src/CMakeLists.txt 里 `UNITY_BUILD ON` + `BATCH_SIZE 16`：
+# 它会把 16 个 .cpp **拼成一个 unity_0_cxx.cxx**，而拼接方式是写
+# `#include "<绝对路径>"`。路径里只要有中文（比如本机仓库在
+# `N:/Data/big美铝难安/...`），clang 在 Windows 上就拿不到那个文件：
+#
+#   fatal error: cannot open file 'N:/Data/big<乱码>/.../models/afmoe.cpp'
+#
+# 报错只有一句 "unspecified system_category error"，看不出是编码问题。
+# 关掉 unity 之后每个源文件由 ninja 直接以**相对路径**编译，这条路径就绕开了。
+# 代价是编译单元从 ~26 个变成 ~400 个（首次编译慢几分钟，增量编译反而更细）。
+set_target_properties(llama PROPERTIES UNITY_BUILD OFF)
+
+# ---------------------------------------------------------------------------
 # localmind JNI bridge
 # ---------------------------------------------------------------------------
 add_library(localmind SHARED

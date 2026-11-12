@@ -115,22 +115,9 @@ fun MePage(viewModel: AppViewModel) {
                     )
                     AuroraDivider(indent = 58.dp)
                     AuroraRow(
-                        title = "语音工作室",
-                        subtitle = "写脚本 · 选音色 · 合成导出",
-                        leading = { AuroraIcon(AppIcons.Mic, ios.green) },
-                        onClick = { viewModel.openVoiceScreen(true) },
-                    )
-                    AuroraDivider(indent = 58.dp)
-                    AuroraRow(
-                        title = "声音克隆",
-                        subtitle = "录一段，复刻成你自己的音色",
-                        leading = { AuroraIcon(AppIcons.RecordVoiceOver, ios.pink) },
-                        onClick = { viewModel.openVoiceCloneScreen(true) },
-                    )
-                    AuroraDivider(indent = 58.dp)
-                    AuroraRow(
                         title = "插件",
-                        subtitle = plugins.count { it.value.isActive }.toString() + " 个已启用",
+                        subtitle = plugins.count { it.value.isActive && !com.localmind.data.BuiltinPlugins.isBuiltin(it.key) }
+                            .toString() + " 个已启用",
                         leading = { AuroraIcon(AppIcons.Extension, ios.orange) },
                         onClick = { viewModel.openPlugins(true) },
                     )
@@ -157,6 +144,15 @@ fun MePage(viewModel: AppViewModel) {
                         title = "生图",
                         leading = { AuroraIcon(AppIcons.Image, ios.pink) },
                         onClick = { viewModel.openImageStudio(true) },
+                    )
+                    AuroraDivider(indent = 58.dp)
+                    // TTS 设置 = 合成 / 音色库 / 声音克隆。和「生图」放在一起：
+                    // 两者都是"本地模型推理"的入口，用户在同一个心智分组里找。
+                    AuroraRow(
+                        title = "TTS 设置",
+                        subtitle = "语音合成 · 音色库 · 声音克隆",
+                        leading = { AuroraIcon(AppIcons.RecordVoiceOver, ios.green) },
+                        onClick = { viewModel.openVoiceScreen(true) },
                     )
                     AuroraDivider(indent = 58.dp)
                     AuroraRow(

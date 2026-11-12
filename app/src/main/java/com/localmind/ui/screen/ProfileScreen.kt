@@ -457,7 +457,7 @@ fun ProfileScreen(viewModel: AppViewModel) {
             header = "下载代理",
             // 一句话结论就够。原来那段解释 `{url}` 模板语法的是给维护者看的，
             // 而用户要判断的只有"开了有没有用"。
-            footer = "只对 GitHub 资源有效，下模型用不上。",
+            footer = "对 GitHub 资源生效：语音音色、语音引擎、第三方源码。模型走 hf-mirror，不受这里影响。",
         ) {
             Row(
                 modifier = Modifier

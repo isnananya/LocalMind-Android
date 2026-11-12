@@ -630,6 +630,8 @@ class NeuralTtsEngine(
         speed: Float = 1.0f,
         pitch: Float = 1.0f,
         volume: Float = 1.0f,
+        silenceScale: Float = 0.2f,
+        numSteps: Int = 5,
     ): Boolean {
         val engine = tts ?: return false
         if (text.isBlank() || referenceAudio.isEmpty()) return false
@@ -637,13 +639,13 @@ class NeuralTtsEngine(
         return runCatching {
             val callback = NativeTtsCallback { if (stoppedGeneration) 0 else 1 }
             val cfg = GenerationConfig(
-                silenceScale = 0.2f,
+                silenceScale = silenceScale.coerceIn(0f, 1f),
                 speed = speed.coerceIn(0.3f, 2.5f),
                 sid = 0,
                 referenceAudio = referenceAudio,
                 referenceSampleRate = referenceSampleRate,
                 referenceText = referenceText?.takeIf { it.isNotBlank() },
-                numSteps = 5,
+                numSteps = numSteps.coerceIn(1, 32),
             )
             val audio = engine.generateWithConfig(text, cfg)
             if (audio.samples.isEmpty()) return false
@@ -665,18 +667,20 @@ class NeuralTtsEngine(
         speed: Float,
         pitch: Float,
         target: File,
+        silenceScale: Float = 0.2f,
+        numSteps: Int = 5,
     ): Boolean {
         val engine = tts ?: return false
         if (text.isBlank() || referenceAudio.isEmpty()) return false
         return runCatching {
             val cfg = GenerationConfig(
-                silenceScale = 0.2f,
+                silenceScale = silenceScale.coerceIn(0f, 1f),
                 speed = speed.coerceIn(0.3f, 2.5f),
                 sid = 0,
                 referenceAudio = referenceAudio,
                 referenceSampleRate = referenceSampleRate,
                 referenceText = referenceText?.takeIf { it.isNotBlank() },
-                numSteps = 5,
+                numSteps = numSteps.coerceIn(1, 32),
             )
             val audio = engine.generateWithConfig(text, cfg)
             if (audio.samples.isEmpty()) return false

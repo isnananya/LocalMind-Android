@@ -26,6 +26,10 @@ import com.localmind.data.RemoteProvider
 import com.localmind.data.Role
 import com.localmind.data.ClonedVoice
 import com.localmind.data.ClonedVoiceStore
+import com.localmind.data.SynthTake
+import com.localmind.data.SynthTakeStore
+import com.localmind.data.VoicePreset
+import com.localmind.data.VoicePresetStore
 import com.localmind.data.VoiceSettings
 import com.localmind.util.AudioUtil
 import com.localmind.service.ApiForegroundService
@@ -245,11 +249,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 聊天页的麦克风按钮和「我的」页的导航行。放在这里两边都能开。
      */
     private val _showVoiceScreen = MutableStateFlow(false)
-
-    /** 「新建克隆音色」整页（上传参考音频 + 文字，复刻音色）。 */
-    private val _showVoiceCloneScreen = MutableStateFlow(false)
-    val showVoiceCloneScreen: StateFlow<Boolean> = _showVoiceCloneScreen.asStateFlow()
-    fun openVoiceCloneScreen(open: Boolean) { _showVoiceCloneScreen.value = open }
 
     /** 「Breeze 语音」整页（外部语音引擎）。 */
     private val _showBreeze = MutableStateFlow(false)
@@ -3971,6 +3970,115 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 工作室的产物目录（重合成会覆盖同一个文件，用户要留就导出）。 */
     val studioDir: File get() = File(storage.appContext().filesDir, "studio").apply { mkdirs() }
 
+    // ---- 合成记录 / 参数预设（VoiceStudio 的 Recent takes + Voice Design） ----
+
+    private val _takes = MutableStateFlow<List<SynthTake>>(emptyList())
+    val takes: StateFlow<List<SynthTake>> = _takes.asStateFlow()
+
+    private val _presets = MutableStateFlow<List<VoicePreset>>(emptyList())
+    val presets: StateFlow<List<VoicePreset>> = _presets.asStateFlow()
+
+    fun refreshStudioLists() {
+        _takes.value = SynthTakeStore.list(storage)
+        _presets.value = VoicePresetStore.list(storage)
+    }
+
+    fun deleteTake(id: String) {
+        _takes.value = SynthTakeStore.delete(storage, id)
+        if (_synthFile.value?.absolutePath?.contains(id) == true) clearStudioAudio()
+    }
+
+    fun clearTakes() {
+        SynthTakeStore.clearAll(storage)
+        _takes.value = emptyList()
+        toast("已清空合成记录")
+    }
+
+    /** 把一条记录的文字放回脚本框，方便改一改再合成。 */
+    fun reuseTake(take: SynthTake) {
+        _studioDraft.value = take.text
+        toast("已填入脚本")
+    }
+
+    /** 播放一条历史记录。 */
+    fun playTake(take: SynthTake) {
+        val f = File(take.path)
+        if (!f.isFile) {
+            toast("音频文件不在了")
+            return
+        }
+        previewWavFile(f)
+    }
+
+    fun exportTake(take: SynthTake): String? = exportWavAs(File(take.path))
+
+    fun applyPreset(preset: VoicePreset) {
+        updateVoice { preset.applyTo(it) }
+        toast("已套用「${preset.name}」")
+    }
+
+    fun saveCurrentAsPreset(name: String) {
+        val v = _voice.value
+        val p = VoicePreset(
+            id = "user-" + System.currentTimeMillis(),
+            name = name.trim().ifBlank { "我的预设" },
+            hint = "自定义",
+            speed = v.speed,
+            pitch = v.pitch,
+            volume = v.volume,
+            silenceScale = v.silenceScale,
+            numSteps = v.numSteps,
+            splitSentences = v.splitSentences,
+            emotion = v.emotion,
+        )
+        VoicePresetStore.save(storage, p)
+        refreshStudioLists()
+        toast("已保存预设「${p.name}」")
+    }
+
+    fun deletePreset(id: String) {
+        VoicePresetStore.delete(storage, id)
+        refreshStudioLists()
+    }
+
+    // ---- 批量合成 ----
+
+    private val _batchBusy = MutableStateFlow(false)
+    val batchBusy: StateFlow<Boolean> = _batchBusy.asStateFlow()
+
+    private val _batchProgress = MutableStateFlow("")
+    val batchProgress: StateFlow<String> = _batchProgress.asStateFlow()
+
+    /**
+     * 批量合成：一段文本 = 一条，空行分隔。逐条合成并导出到「音乐/LocalMind/batch」。
+     *
+     * 这是 VoiceStudio「Narrate & Batch」里最有用的一半：有声书/口播稿经常是
+     * 几十段，一段一段点合成再导出没人受得了。视频封装那半我们没有做 ——
+     * 那需要视频复用器，和 TTS 本身无关。
+     */
+    fun synthesizeBatch(text: String) {
+        if (_batchBusy.value || _synthBusy.value) return
+        val items = text.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (items.isEmpty()) {
+            toast("先写点内容，空行分隔每一条")
+            return
+        }
+        _batchBusy.value = true
+        viewModelScope.launch {
+            var done = 0
+            items.forEachIndexed { index, body ->
+                _batchProgress.value = "第 ${index + 1}/${items.size} 条…"
+                val f = File(studioDir, "batch-%03d.wav".format(index))
+                val ok = runCatching { synthToFile(body, f) }.getOrDefault(false)
+                // 合成完立刻导出：批量合成不出现在「音乐」里就等于白跑一趟。
+                if (ok && exportWavAs(f) != null) done++
+            }
+            _batchBusy.value = false
+            _batchProgress.value = "完成 $done/${items.size} 条，已导出到 音乐/LocalMind"
+            toast("批量合成完成：$done/${items.size}")
+        }
+    }
+
     /**
      * 合成到文件（VoiceStudio 的「Synthesize audio」）。
      *
@@ -3985,9 +4093,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (_synthBusy.value) return
-        val clone = _activeClone.value
-        val neuralId = _activeNeuralVoice.value
-        if (clone == null && neuralId.isBlank()) {
+        if (_activeClone.value == null && _activeNeuralVoice.value.isBlank()) {
             toast("先在上面选一个音色")
             return
         }
@@ -3995,60 +4101,159 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _synthError.value = null
         viewModelScope.launch {
             val target = File(studioDir, "last.wav")
-            val v = _voice.value
-            val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
-            val label = clone?.name ?: com.localmind.data.VoiceCatalog.byId(neuralId)?.label ?: "音色"
-            val ok = withContext(Dispatchers.Default) {
-                runCatching {
-                    if (clone != null) {
-                        val audio = cloneAudio
-                        if (audio == null) {
-                            // 选中的克隆还没解析过（比如刚启动）：先补上再合成。
-                            val rt = withContext(Dispatchers.IO) { buildCloneRuntime(clone) }
-                                ?: return@runCatching false
-                            if (!withContext(Dispatchers.IO) { loadCloneBase() }) return@runCatching false
-                            cloneAudio = rt.audio
-                            cloneSampleRate = rt.sampleRate
-                            cloneText = rt.referenceText
-                            neuralTts.synthesizeCloneToWav(
-                                body, rt.audio, rt.sampleRate, rt.referenceText, rate, pitch, target,
-                            )
-                        } else {
-                            if (neuralTts.loadedVoiceId !=
-                                com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID &&
-                                !withContext(Dispatchers.IO) { loadCloneBase() }
-                            ) {
-                                return@runCatching false
-                            }
-                            neuralTts.synthesizeCloneToWav(
-                                body, audio, cloneSampleRate, cloneText, rate, pitch, target,
-                            )
-                        }
-                    } else {
-                        if (neuralTts.loadedVoiceId != neuralId) {
-                            val entry = com.localmind.data.VoiceCatalog.byId(neuralId)
-                            if (entry == null) return@runCatching false
-                            val loaded = withContext(Dispatchers.IO) { neuralTts.load(storage, entry) }
-                            if (loaded == null) return@runCatching false
-                        }
-                        neuralTts.synthesizeToWav(body, rate, pitch, target)
-                    }
-                }.getOrElse { t ->
-                    Log.w("AppViewModel", "工作室合成失败：${t.message}", t)
-                    false
-                }
-            }
+            val label = _activeClone.value?.name
+                ?: com.localmind.data.VoiceCatalog.byId(_activeNeuralVoice.value)?.label ?: "音色"
+            val ok = runCatching { synthToFile(body, target) }.getOrDefault(false)
             _synthBusy.value = false
             if (ok && target.isFile && target.length() > 44L) {
                 _synthFile.value = target
                 _synthMeta.value = label + " · " + body.take(24).replace("\n", " ") +
                     (if (body.length > 24) "…" else "")
+                // 落一条历史：复制一份，免得下一次合成就把它覆盖了。
+                val dir = File(storage.appContext().filesDir, "voice_takes").apply { mkdirs() }
+                val id = "take-" + System.currentTimeMillis()
+                val dst = File(dir, "$id.wav")
+                val t = runCatching {
+                    target.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
+                    SynthTake(
+                        id = id,
+                        title = body.take(28).replace("\n", " "),
+                        text = body,
+                        voice = label,
+                        path = dst.absolutePath,
+                        createdAt = System.currentTimeMillis(),
+                        durationMs = runCatching {
+                            val mp = android.media.MediaPlayer()
+                            mp.setDataSource(dst.absolutePath); mp.prepare()
+                            val d = mp.duration; mp.release(); d
+                        }.getOrDefault(0),
+                    )
+                }.getOrNull()
+                if (t != null) _takes.value = SynthTakeStore.add(storage, t)
             } else {
                 _synthFile.value = null
                 _synthError.value = "合成失败：音色没加载起来，或参考音频有问题"
                 toast("合成失败")
             }
         }
+    }
+
+    /**
+     * 真正干活的那层：按设置决定「整段喂」还是「按句切」。
+     *
+     * 切成句之后每句从干净状态起步，长文本不会越念越平、吞字；句间补一段静音
+     * 当作换气。代价是句间韵律不如整段连贯，所以这由 [VoiceSettings.splitSentences]
+     * 控制，默认开。
+     */
+    private suspend fun synthToFile(body: String, target: File): Boolean {
+        val v = _voice.value
+        val clone = _activeClone.value
+        val neuralId = _activeNeuralVoice.value
+        val chunks = if (v.splitSentences) splitForTts(body) else listOf(body)
+        val tmp = File(studioDir, "tmp").apply { mkdirs() }
+        tmp.listFiles()?.forEach { runCatching { it.delete() } }
+
+        val parts = ArrayList<File>()
+        for ((i, chunk) in chunks.withIndex()) {
+            val f = File(tmp, "p%03d.wav".format(i))
+            val ok = synthChunk(chunk, f, v, clone, neuralId)
+            if (!ok) return false
+            parts.add(f)
+        }
+        if (parts.isEmpty()) return false
+        if (parts.size == 1) {
+            target.delete()
+            return parts.first().renameTo(target) || AudioUtil.concatWavs(parts, 0, target)
+        }
+        // 句间停顿：克隆链路自己也会插静音（silenceScale），这里只补一点点，
+        // 否则两个静音叠起来会显得拖沓。
+        val gap = if (clone != null) 80 else (80 + v.silenceScale * 320).toInt()
+        return AudioUtil.concatWavs(parts, gap, target)
+    }
+
+    private suspend fun synthChunk(
+        text: String,
+        target: File,
+        v: VoiceSettings,
+        clone: ClonedVoice?,
+        neuralId: String,
+    ): Boolean = withContext(Dispatchers.Default) {
+        val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+        runCatching {
+            if (clone != null) {
+                val audio = cloneAudio ?: withContext(Dispatchers.IO) { buildCloneRuntime(clone) }
+                    ?.let { rt ->
+                        cloneAudio = rt.audio
+                        cloneSampleRate = rt.sampleRate
+                        cloneText = rt.referenceText
+                        rt.audio
+                    } ?: return@runCatching false
+                if (neuralTts.loadedVoiceId != com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID &&
+                    !withContext(Dispatchers.IO) { loadCloneBase() }
+                ) {
+                    return@runCatching false
+                }
+                neuralTts.synthesizeCloneToWav(
+                    text, audio, cloneSampleRate, cloneText, rate, pitch, target,
+                    silenceScale = v.silenceScale, numSteps = v.numSteps,
+                )
+            } else {
+                if (neuralTts.loadedVoiceId != neuralId) {
+                    val entry = com.localmind.data.VoiceCatalog.byId(neuralId)
+                        ?: return@runCatching false
+                    val loaded = withContext(Dispatchers.IO) { neuralTts.load(storage, entry) }
+                        ?: return@runCatching false
+                    if (loaded.isBlank()) return@runCatching false
+                }
+                neuralTts.synthesizeToWav(text, rate, pitch, target)
+            }
+        }.getOrElse { t ->
+            Log.w("AppViewModel", "合成失败：${t.message}", t)
+            false
+        }
+    }
+
+    /**
+     * 按句末标点切分，过长的句子再按逗号切成 110 字以内。
+     *
+     * 110 字是实测的经验值：再长模型的注意力就开始"忘了开头"，
+     * 表现是后面几个字含糊；再短则句间拼接的痕迹变明显。
+     */
+    private fun splitForTts(text: String): List<String> {
+        val parts = ArrayList<String>()
+        val buf = StringBuilder()
+        for (ch in text) {
+            buf.append(ch)
+            if (ch == '。' || ch == '！' || ch == '？' || ch == '!' || ch == '?' ||
+                ch == '；' || ch == ';' || ch == '\n'
+            ) {
+                val s = buf.toString().trim()
+                if (s.isNotEmpty()) parts.add(s)
+                buf.clear()
+            }
+        }
+        buf.toString().trim().takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+        if (parts.isEmpty()) return listOf(text)
+
+        val out = ArrayList<String>(parts.size)
+        for (p in parts) {
+            if (p.length <= 110) {
+                out.add(p)
+                continue
+            }
+            var rest = p
+            while (rest.length > 110) {
+                // 尽量在逗号处断开，找不到就硬切。
+                val window = rest.substring(0, 110)
+                val cut = window.lastIndexOfAny(charArrayOf('，', ',', '、', ' ')).let {
+                    if (it > 40) it + 1 else 110
+                }
+                out.add(rest.substring(0, cut).trim())
+                rest = rest.substring(cut)
+            }
+            rest.trim().takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        }
+        return out.ifEmpty { listOf(text) }
     }
 
     fun clearStudioAudio() {
@@ -4089,6 +4294,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun exportSynthAudio(): String? {
         val src = _synthFile.value?.takeIf { it.isFile } ?: return null
+        return exportWavAs(src)
+    }
+
+    /**
+     * 把一个 WAV 复制进「音乐/LocalMind」，返回给用户看的位置。
+     *
+     * 单独抽出来是因为合成记录（[exportTake]）也要走同一套落盘逻辑 ——
+     * 之前只有"最后一次合成"能导出，历史记录点了没反应。
+     */
+    fun exportWavAs(src: File): String? {
+        if (!src.isFile) return null
         val name = "LocalMind-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
             .format(java.util.Date()) + ".wav"
         return runCatching {
@@ -4926,6 +5142,219 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val VISION_USABLE = false
     }
 
+    // ============================================================ 生图工作台
+    //
+    // 这一组状态替代了原来散在 ImageScreen 里的 `var generating by remember`。
+    // 放在 ViewModel 里的理由很实际：出图要几十秒，用户切到别的标签再切回来，
+    // remember 的状态全没了 —— 进度、图片、耗时一起消失，看起来像"图丢了"。
+
+    /** checkpoint 下载器。模型 1.6 GB 起，必须能看进度、能取消、能续传。 */
+    private val imageDownloader = com.localmind.service.ImageModelDownloader(storage, viewModelScope)
+
+    val imageDownloadStates: StateFlow<Map<String, com.localmind.service.ImageModelDownloader.State>> =
+        imageDownloader.states
+
+    fun imageModelInstalled(entry: com.localmind.data.ImageModelEntry): Boolean =
+        imageDownloader.isInstalled(entry)
+
+    fun imageModelBytes(entry: com.localmind.data.ImageModelEntry): Long =
+        imageDownloader.installedBytes(entry)
+
+    fun downloadImageModel(entry: com.localmind.data.ImageModelEntry) {
+        imageDownloader.install(entry)
+        toast("开始下载「${entry.label}」（${entry.sizeBytes / 1024 / 1024} MB）")
+    }
+
+    fun cancelImageModel(entry: com.localmind.data.ImageModelEntry) {
+        imageDownloader.cancel(entry)
+        refreshDiffusionModels()
+    }
+
+    /**
+     * 删掉一个 checkpoint。
+     *
+     * 顺序很重要：**先释放常驻上下文**。sd.cpp 把模型 mmap 在内存里，
+     * 文件被删掉之后上下文还活着，下一次出图会读到一堆空洞 —— 表现为
+     * 花屏或直接段错误，而不是"模型不存在"这种好懂的错误。
+     */
+    fun deleteImageModel(entry: com.localmind.data.ImageModelEntry) {
+        imageDownloader.uninstall(entry)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { com.localmind.native.image.ImageBridge.releaseDiffusion() }
+            refreshDiffusionModels()
+            if (_image.value.customModelPath?.endsWith(entry.fileName) == true) {
+                updateImage { it.copy(customModelPath = null) }
+            }
+        }
+        toast("已删除「${entry.label}」")
+    }
+
+    private val _imgBusy = MutableStateFlow(false)
+    val imgBusy: StateFlow<Boolean> = _imgBusy.asStateFlow()
+
+    private val _imgStep = MutableStateFlow(0)
+    val imgStep: StateFlow<Int> = _imgStep.asStateFlow()
+
+    private val _imgTotal = MutableStateFlow(0)
+    val imgTotal: StateFlow<Int> = _imgTotal.asStateFlow()
+
+    /** 已经跑了多久（毫秒，每 300 ms 更新）。 */
+    private val _imgElapsed = MutableStateFlow(0L)
+    val imgElapsed: StateFlow<Long> = _imgElapsed.asStateFlow()
+
+    private val _imgResult = MutableStateFlow<File?>(null)
+
+    /** 最后一次出图的结果文件。 */
+    val imgResult: StateFlow<File?> = _imgResult.asStateFlow()
+
+    private val _imgNote = MutableStateFlow("")
+
+    /** 结果卡下面那行：用了哪个模型、多少步、多久。 */
+    val imgNote: StateFlow<String> = _imgNote.asStateFlow()
+
+    private val _imgError = MutableStateFlow<String?>(null)
+    val imgError: StateFlow<String?> = _imgError.asStateFlow()
+
+    /** 这次出的图是不是程序化渲染的（没走真模型）。界面要照实标出来。 */
+    private val _imgProcedural = MutableStateFlow(false)
+    val imgProcedural: StateFlow<Boolean> = _imgProcedural.asStateFlow()
+
+    private val _imgGallery = MutableStateFlow<List<File>>(emptyList())
+    val imgGallery: StateFlow<List<File>> = _imgGallery.asStateFlow()
+
+    private val _imgPreview = MutableStateFlow<File?>(null)
+
+    /** 全屏预览中的图；null = 没打开。 */
+    val imgPreview: StateFlow<File?> = _imgPreview.asStateFlow()
+
+    @Volatile
+    private var imgCancelFlag = false
+
+    fun openImagePreview(file: File) { _imgPreview.value = file }
+    fun closeImagePreview() { _imgPreview.value = null }
+
+    fun refreshImageGallery() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _imgGallery.value = com.localmind.service.ImageEngine.listGenerated(storage)
+        }
+    }
+
+    fun deleteImage(file: File) {
+        runCatching { file.delete() }
+        if (_imgResult.value == file) _imgResult.value = null
+        if (_imgPreview.value == file) _imgPreview.value = null
+        refreshImageGallery()
+    }
+
+    fun exportImage(file: File): Boolean =
+        runCatching { com.localmind.ui.components.saveImageToGallery(getApplication(), file) }
+            .getOrDefault(false)
+
+    /** 把某张图的种子填回设置 —— 想"同一张再变一点"的唯一入口。 */
+    fun reuseSeedOf(file: File) {
+        val seed = file.name.substringAfterLast("_", "").substringBefore("_").toIntOrNull()
+        if (seed == null || seed <= 0) {
+            toast("这张没记种子（不是本应用生成的？）")
+            return
+        }
+        updateImage { it.copy(seed = seed) }
+        toast("已用回种子 $seed")
+    }
+
+    /**
+     * 出图。
+     *
+     * ## 为什么这里要自己算尺寸与步数
+     *
+     * 都不算的话就是把 sd.cpp 的默认值直接端给用户 —— 那是 512² / 20 步 / cfg 7，
+     * 在手机 CPU 上是「三分钟出一张，还未必看得过去」。这里按模型族和内存
+     * 定尺寸与步数（[com.localmind.service.ImageEngine.autoStepsFor]），
+     * 让默认值就是"能用的默认值"。
+     */
+    fun generateImage(prompt: String) {
+        val body = prompt.trim()
+        if (body.isEmpty()) {
+            toast("先写点想要什么")
+            return
+        }
+        if (_imgBusy.value) return
+        val settings = _image.value
+        val modelPath = DiffusionModels_refreshAndPick(settings.customModelPath)
+        imgCancelFlag = false
+        _imgBusy.value = true
+        _imgError.value = null
+        _imgStep.value = 0
+        _imgTotal.value = 0
+        _imgElapsed.value = 0L
+        _imgProcedural.value = false
+
+        viewModelScope.launch {
+            val startedAt = System.currentTimeMillis()
+            // 计时协程：sd.cpp 一步可能要几秒，进度回调之间的空档里界面
+            // 至少要有个在走的秒数，否则用户以为卡死了。
+            val ticker = launch {
+                while (true) {
+                    _imgElapsed.value = System.currentTimeMillis() - startedAt
+                    delay(300)
+                }
+            }
+            // ⚠️ 这里是 Result<Result<Generated>>：generateWithSettings 自己就返回
+            // Result，外面再套一层 runCatching 是为了兜住它没兜住的异常（OOM / UnsatisfiedLinkError）。
+            val outer = runCatching {
+                ImageEngine.generateWithSettings(
+                    storage = storage,
+                    prompt = body,
+                    settings = settings,
+                    seed = if (settings.seed > 0) settings.seed else ImageEngine.randomSeed(),
+                    modelPath = modelPath,
+                    onStep = { step, total ->
+                        _imgStep.value = step
+                        _imgTotal.value = total
+                    },
+                )
+            }
+            ticker.cancel()
+            _imgElapsed.value = System.currentTimeMillis() - startedAt
+            _imgBusy.value = false
+
+            val inner = outer.getOrNull()
+            val g = inner?.getOrNull()
+            if (g == null) {
+                _imgError.value = outer.exceptionOrNull()?.message
+                    ?: inner?.exceptionOrNull()?.message
+                    ?: "生成失败"
+                return@launch
+            }
+            _imgResult.value = g.file
+            _imgProcedural.value = g.via == ImageEngine.Via.PROCEDURAL
+            _imgNote.value = buildString {
+                if (g.via == ImageEngine.Via.DIFFUSION) {
+                    if (g.steps > 0) append("${g.steps} 步 · ")
+                    if (g.renderSize > 0) append("${g.renderSize}² 渲染 · ")
+                    append(String.format(java.util.Locale.US, "%.1fs", g.elapsedMs / 1000f))
+                } else {
+                    append("内置渲染器 · 没走模型")
+                }
+                if (g.note.isNotBlank()) append("\n").append(g.note)
+            }
+            refreshImageGallery()
+        }
+    }
+
+    /**
+     * 选 checkpoint：用户显式指的优先，其次扫目录。
+     *
+     * 单独包一层是因为 [ImageEngine.resolveDiffusionModel] 需要 settings，
+     * 而这里有可能是刚下载完、`customModelPath` 还是空的情况 ——
+     * 那就按"最近修改的那个"用（刚下完的必然是最新的）。
+     */
+    private fun DiffusionModels_refreshAndPick(preferred: String?): String? {
+        val explicit = preferred?.takeIf { it.isNotBlank() && File(it).isFile }
+        if (explicit != null) return File(explicit).absolutePath
+        return com.localmind.service.DiffusionModels.findCheckpoints(storage.modelsDir)
+            .firstOrNull()?.absolutePath
+    }
+
     /** 重新扫描本机的生图模型。进生图页、下载完模型、导入文件后调。 */
     fun refreshDiffusionModels() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -4936,6 +5365,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 这个 build 有没有真的链上扩散后端。没有的话生图只能用程序化渲染。 */
     val hasDiffusionBackend: Boolean get() = com.localmind.native.image.ImageBridge.hasDiffusionBackend
+
+    /** 生图后端是不是**随包内置**的（而不是用户导入的插件）—— 界面用它说清"要不要再装东西"。 */
+    val hasDiffusionBundled: Boolean get() = com.localmind.native.image.ImageBridge.backendBundled
 
     /** 把原生层的真实探测结果同步到可观察状态（界面据此判断"能不能用"）。 */
     fun refreshDiffusionBackend() {

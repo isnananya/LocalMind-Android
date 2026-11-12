@@ -1,40 +1,44 @@
 package com.localmind.ui.screen
 
-import android.graphics.Bitmap
-import android.widget.Toast
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,969 +46,937 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.DialogProperties
-import com.localmind.util.GallerySaver
+import com.localmind.data.ImageModelEntry
+import com.localmind.data.ImageModels
 import com.localmind.data.ImageStyle
-import com.localmind.service.ImageEngine
 import com.localmind.ui.AppViewModel
-import com.localmind.ui.Tab
-import com.localmind.ui.components.IosLargeTitle
-import com.localmind.ui.components.IosSection
-import com.localmind.ui.components.IosNavigationBar
-import com.localmind.ui.components.IosPill
-import com.localmind.ui.components.IosSwitch
-import com.localmind.ui.components.IosTag
-import com.localmind.ui.components.ModelPickerSheet
-import com.localmind.ui.components.PickerOption
-import com.localmind.ui.components.statusBarTopPadding
+import com.localmind.ui.design.AuroraButton
+import com.localmind.ui.design.AuroraNavBar
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.theme.IosTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
+
+/**
+ * 生图页 —— 生成 / 模型 / 图库，一个页面三段。
+ *
+ * ## 为什么重做
+ *
+ * 旧版把提示词、四个滑块、后端插件管理、模型列表、图库网格全塞进一个
+ * LazyColumn：用户要滚三屏才能看到自己刚生成的图。而且它的状态
+ * （生成中、进度、结果）全在 `remember` 里 —— 切一次标签回来就没了，
+ * 看起来像"图丢了"。
+ *
+ * 现在拆成三段，状态全部搬进 [AppViewModel]：
+ *  * **生成**：只有"输入 → 出图 → 看图"这一条线；
+ *  * **模型**：checkpoint 的下载 / 选择 / 删除（1.6 GB 起，必须能看进度）；
+ *  * **图库**：历史成品。
+ *
+ * ## 后端
+ *
+ * `liblocalmind-sd.so` 现在**打包在 APK 里**（见 ImageBridge），装完就能出图，
+ * 不用再下载插件。模型仍然要下 —— 一个 1.6 GB 的 checkpoint 没法塞进 APK。
+ */
+enum class ImageTab(val label: String) {
+    GEN("生成"), MODEL("模型"), GALLERY("图库")
+}
 
 @Composable
 fun ImageScreen(viewModel: AppViewModel, onBack: () -> Unit = {}) {
     val ios = IosTheme.palette
+    val ctx = LocalContext.current
+    var tab by remember { mutableStateOf(ImageTab.GEN) }
+    val backendReady by viewModel.diffusionBackendReady.collectAsState()
+    val preview by viewModel.imgPreview.collectAsState()
+    val models by viewModel.diffusionModels.collectAsState()
+
+    val status = when {
+        !backendReady -> "后端未就绪"
+        models.isEmpty() -> "缺模型"
+        else -> "就绪"
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            AuroraNavBar(
+                title = "生图",
+                onBack = onBack,
+                trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            status,
+                            color = if (backendReady && models.isNotEmpty()) ios.green else ios.secondaryLabel,
+                            fontSize = 11.sp,
+                        )
+                        if (models.isEmpty()) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(ios.orange.copy(alpha = 0.16f))
+                                    .clickable { tab = ImageTab.MODEL }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) { Text("下模型", color = ios.orange, fontSize = 11.sp) }
+                        }
+                    }
+                },
+            )
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(ios.fillSecondary)
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                ImageTab.entries.forEach { t ->
+                    val sel = t == tab
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (sel) ios.secondaryGroupedBackground else Color.Transparent)
+                            .clickable { tab = t }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            t.label,
+                            color = if (sel) ios.label else ios.secondaryLabel,
+                            fontSize = 13.sp,
+                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+
+            when (tab) {
+                ImageTab.GEN -> GenSection(viewModel) { tab = ImageTab.MODEL }
+                ImageTab.MODEL -> ModelSection(viewModel)
+                ImageTab.GALLERY -> GallerySection(viewModel)
+            }
+        }
+
+        preview?.let { f ->
+            ImageFullScreen(
+                file = f,
+                onClose = { viewModel.closeImagePreview() },
+                onSave = { viewModel.toast(if (viewModel.exportImage(f)) "已保存到相册" else "保存失败") },
+                onShare = { com.localmind.ui.components.shareImage(ctx, f) },
+                onDelete = {
+                    viewModel.deleteImage(f)
+                    viewModel.toast("已删除")
+                },
+            )
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ 生成 */
+
+@Composable
+private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
+    val ios = IosTheme.palette
     val settings by viewModel.image.collectAsState()
-    val scope = rememberCoroutineScope()
+    val models by viewModel.diffusionModels.collectAsState()
+    val busy by viewModel.imgBusy.collectAsState()
+    val step by viewModel.imgStep.collectAsState()
+    val total by viewModel.imgTotal.collectAsState()
+    val elapsed by viewModel.imgElapsed.collectAsState()
+    val result by viewModel.imgResult.collectAsState()
+    val note by viewModel.imgNote.collectAsState()
+    val error by viewModel.imgError.collectAsState()
+    val procedural by viewModel.imgProcedural.collectAsState()
+    val backendReady by viewModel.diffusionBackendReady.collectAsState()
 
     var prompt by remember { mutableStateOf("") }
-    var generating by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var preview by remember { mutableStateOf<File?>(null) }
-    var gallery by remember { mutableStateOf(ImageEngine.listGenerated(viewModel.storage)) }
+    var negativeShow by remember { mutableStateOf(false) }
+    var paramsShow by remember { mutableStateOf(false) }
 
-    // 上一张图**是怎么来的**。以前这里没有这个状态：兜底渲染出来的渐变图
-    // 和真正的模型出图长得不一样，但界面上一句解释都没有，用户只会得出
-    // "生图不能用"的结论 —— 而真实原因往往是"后端没装"或"没下模型"。
-    var lastNote by remember { mutableStateOf<String?>(null) }
-    var lastVia by remember { mutableStateOf<ImageEngine.Via?>(null) }
-
-    // 生成中显示「已用多久 / 上次多久」。没有这一步，用户在手机上等一张图
-    // 只能看到一个转圈 —— 分不清「在跑」和「卡死了」，而扩散出图本来就是几十秒到几分钟。
-    var elapsedMs by remember { mutableStateOf(0L) }
-    var lastTook by remember { mutableStateOf(0L) }
-    var lastInfo by remember { mutableStateOf<String?>(null) }
-    // 逐帧进度（通用版插件才会给）。没有时是 0，界面退回「已用 X 秒」。
-    var stepNow by remember { mutableStateOf(0) }
-    var stepTotal by remember { mutableStateOf(0) }
-
-    // ---- 预热：把 checkpoint 的加载挪到后台 ----
-    //
-    // 加载一个 2 GB 的扩散模型要几十秒到两分钟，而它原来**算在第一张图的时间里**：
-    // 用户点「生成图片」，看到的是转圈半分钟以上 —— 结论通常是「生图卡死了」。
-    // 现在一进这一页就在后台把它读进来（同一个 key 的重复调用是空操作，见 sd_jni）。
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            runCatching {
-                if (!com.localmind.native.image.ImageBridge.hasDiffusionBackend) return@runCatching
-                val conv = viewModel.activeConversation()
-                val path = settings.customModelPath?.takeIf { it.isNotBlank() }
-                    ?: conv?.let { viewModel.imageModelPathFor(it) }
-                    ?: ImageEngine.resolveDiffusionModel(viewModel.storage, settings)
-                if (path.isNullOrBlank()) return@runCatching
-                val ok = com.localmind.native.image.ImageBridge.loadDiffusionEx(
-                    path,
-                    com.localmind.data.MemoryPlanner.autoThreads(),
-                    if (settings.flashAttn) "auto" else "off",
-                )
-                android.util.Log.i("ImageScreen", "生图模型预热：" + (if (ok) "完成" else "失败") + "（" + path + "）")
-            }
-        }
+        viewModel.refreshDiffusionBackend()
+        viewModel.refreshDiffusionModels()
+        viewModel.refreshImageGallery()
     }
 
-    LaunchedEffect(generating) {
-        if (!generating) {
-            elapsedMs = 0L
-            return@LaunchedEffect
-        }
-        val startedAt = System.currentTimeMillis()
-        while (true) {
-            elapsedMs = System.currentTimeMillis() - startedAt
-            kotlinx.coroutines.delay(300)
-        }
+    val current = remember(models, settings.customModelPath) {
+        settings.customModelPath?.let { p -> models.firstOrNull { it.absolutePath == p } }
+            ?: models.firstOrNull()
     }
 
-    fun generate() {
-        if (prompt.isBlank() || generating) return
-        generating = true
-        error = null
-        scope.launch {
-            val result = withContext(Dispatchers.Default) {
-                // 用**当前生效的**生图模型（如果用户在对话里选过就优先它）。
-                val conv = viewModel.activeConversation()
-                ImageEngine.generateWithSettings(
-                    storage = viewModel.storage,
-                    prompt = prompt,
-                    settings = settings,
-                    // 在生图页「选择」过就用它；否则用对话里指定的；再否则让引擎自己扫。
-                    modelPath = settings.customModelPath?.takeIf { it.isNotBlank() }
-                        ?: conv?.let { viewModel.imageModelPathFor(it) },
-                    onStep = { s, total ->
-                        stepNow = s
-                        stepTotal = total
-                    },
-                )
-            }
-            generating = false
-            result.onSuccess { gen ->
-                gallery = ImageEngine.listGenerated(viewModel.storage)
-                preview = gen.file
-                lastVia = gen.via
-                lastNote = gen.note.ifBlank { null }
-                lastInfo = if (gen.via == ImageEngine.Via.DIFFUSION) {
-                    buildString {
-                        if (gen.renderSize > 0 && gen.renderSize != settings.width) {
-                            append(gen.renderSize).append("² 出图 → 放大到 ").append(settings.width)
-                            append("² · ")
-                        }
-                        append(gen.steps).append(" 步 · ")
-                        append(String.format(java.util.Locale.US, "%.1f", gen.elapsedMs / 1000.0)).append(" 秒")
-                    }
-                } else {
-                    null
-                }
-                lastTook = gen.elapsedMs
-                viewModel.toast(
-                    if (gen.via == ImageEngine.Via.DIFFUSION) "已生成（模型出图）"
-                    else "已生成（内置渲染器）"
-                )
-            }.onFailure { error = it.message ?: "生成失败" }
-        }
-    }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color.Transparent)
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp, end = 16.dp, top = 4.dp,
+            bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        IosNavigationBar(
-            title = "生图",
-            collapsed = true,
-            topInset = statusBarTopPadding(),
-            leading = {
-                com.localmind.ui.design.AuroraCircleButton(
-                    icon = AppIcons.ArrowBack,
-                    contentDescription = "返回",
-                    onClick = onBack,
-                    size = 36.dp,
-                    tint = ios.label,
-                )
-            },
-            trailing = {
-                com.localmind.ui.design.AuroraCircleButton(
-                    icon = AppIcons.Tune,
-                    contentDescription = "设置",
-                    onClick = { viewModel.openSettings(true) },
-                    size = 36.dp,
-                    tint = ios.label,
-                )
-            },
-        )
-        IosLargeTitle("文字生图")
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 28.dp),
-        ) {
-            // 生图后端状态。这是用户最需要知道、也最容易困惑的一件事：
-            // "我下了模型，为什么画出来的还是那种渐变图？"
-            //
-            // 答案通常是：没装推理后端。以前这个后端打在 APK 里，所以不存在
-            // 这个问题；现在它是按需下载的（36 MB，只有真要用的人付），
-            // 所以必须明确告诉用户它装没装。
-            item { DiffusionBackendSection(viewModel) { gallery = ImageEngine.listGenerated(viewModel.storage) } }
-
-            // 上一张图的出处。这是"生图不能用"这个反馈的正面回答：
-            // 到底是模型画的，还是内置渲染器画的，以及为什么。
-            lastVia?.let { via ->
-                item {
-                    Column(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp)
-                            .padding(bottom = 12.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (via == ImageEngine.Via.DIFFUSION) ios.green.copy(alpha = 0.14f)
-                                else ios.orange.copy(alpha = 0.14f)
-                            )
-                            .padding(14.dp)
-                    ) {
+        // ---- 当前模型 ----
+        item {
+            StudioCard2 {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(AppIcons.Brush, null, Modifier.size(15.dp), tint = ios.secondaryLabel)
+                    Spacer(Modifier.width(6.dp))
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            if (via == ImageEngine.Via.DIFFUSION) "这张是生图模型画的"
-                            else "这张是内置渲染器画的",
-                            style = IosTheme.typography.subheadline,
-                            color = if (via == ImageEngine.Via.DIFFUSION) ios.green else ios.warningText,
-                            fontWeight = FontWeight.SemiBold,
+                            current?.name ?: "还没有生图模型",
+                            color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
-                        lastInfo?.let {
-                            Spacer(Modifier.height(4.dp))
-                            Text(it, style = IosTheme.typography.caption1, color = ios.secondaryLabel)
-                        }
-                        lastNote?.let {
-                            Spacer(Modifier.height(4.dp))
-                            Text(it, style = IosTheme.typography.caption1, color = ios.secondaryLabel)
-                        }
-                    }
-                }
-            }
-
-            item {
-                // 这个渲染器不「理解」提示词——必须先在界面上说清楚，
-                // 否则用户会以为它坏了（它只是按关键词换配色和构图）。
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 12.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(22.dp))
-                        .background(ios.orange.copy(alpha = 0.14f))
-                        .padding(14.dp)
-                ) {
-                    Text(
-                        "这里不是 AI 生图",
-                        style = IosTheme.typography.subheadline,
-                        color = ios.warningText,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "没有扩散模型时用的是本地程序化渲染器：它只按提示词里的「关键词」换配色和构图，" +
-                            "画不出「一只猫在雨中」这种具体内容。\n\n" +
-                            "想要真正的 AI 生图，去「模型 → 生图」下载一个 SD-Turbo / LCM 模型（约 2GB）。" +
-                            "扩散后端已经内置在 APK 里，不用另外安装。",
-                        style = IosTheme.typography.footnote,
-                        color = ios.secondaryLabel,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(ios.blue.copy(alpha = 0.14f))
-                            .clickable { viewModel.selectTab(Tab.MODELS) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(AppIcons.Download, contentDescription = null, tint = ios.blue, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(5.dp))
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            "去模型页选「生图」分类",
-                            style = IosTheme.typography.footnote,
-                            color = ios.blue,
-                            fontWeight = FontWeight.SemiBold,
+                            when {
+                                !backendReady -> "生图后端没起来，只能出内置渲染图"
+                                current == null -> "去「模型」下 1.6 GB 的 SD 1.5 就能真出图"
+                                else -> mb2(current.length()) + " · " + archHint(current.name)
+                            },
+                            color = if (current != null && backendReady) ios.secondaryLabel else ios.orange,
+                            fontSize = 11.sp,
                         )
                     }
+                    SmallBtn2("换") { onNeedModel() }
                 }
             }
+        }
 
-            item {
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(ios.secondaryGroupedBackground)
-                        .padding(14.dp)
-                ) {
-                    Text("描述你想要的画面", style = IosTheme.typography.headline, color = ios.label)
+        // ---- 提示词 ----
+        item {
+            StudioCard2 {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("提示词", color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "负面词",
+                        color = if (negativeShow) ios.blue else ios.secondaryLabel, fontSize = 12.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { negativeShow = !negativeShow }
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().height(96.dp)) {
+                    if (prompt.isEmpty()) {
+                        Text(
+                            "一只在雨夜霓虹街头走路的柴犬，电影感，浅景深",
+                            color = ios.tertiaryLabel, fontSize = 13.sp,
+                        )
+                    }
+                    BasicTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        modifier = Modifier.fillMaxSize(),
+                        textStyle = TextStyle(color = ios.label, fontSize = 14.sp, lineHeight = 21.sp),
+                        cursorBrush = SolidColor(ios.blue),
+                    )
+                }
+                if (negativeShow) {
                     Spacer(Modifier.height(8.dp))
                     Box(
-                        modifier = Modifier
+                        Modifier
                             .fillMaxWidth()
-                            .height(96.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(ios.fillSecondary)
-                            .padding(12.dp)
-                    ) {
-                        if (prompt.isEmpty()) {
-                            Text(
-                                "例如：夜晚的海边，星空，极光，电影感",
-                                style = IosTheme.typography.footnote,
-                                color = ios.tertiaryLabel,
-                            )
-                        }
-                        BasicTextField(
-                            value = prompt,
-                            onValueChange = { prompt = it },
-                            textStyle = LocalTextStyle.current.merge(IosTheme.typography.body).copy(color = ios.label),
-                            cursorBrush = SolidColor(ios.blue),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    Spacer(Modifier.height(6.dp))
-                    // 说明英文这件事比再给一个开关重要：SD/SDXL 的 CLIP 只认英文，
-                    // 中文提示词在它眼里接近噪声 —— 用户会以为"模型太差"。
-                    Text(
-                        "扩散模型只认英文提示词。中文写出来也能出图，但那基本是随机画面；" +
-                            "想要精美，用英文描述（例：a cat sitting by the window, sunlight, detailed fur）。",
-                        style = IosTheme.typography.caption2,
-                        color = ios.tertiaryLabel,
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-                    Text("负面提示词（可选）", style = IosTheme.typography.footnote, color = ios.secondaryLabel)
-                    Spacer(Modifier.height(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 52.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(ios.fillSecondary)
-                            .padding(12.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(ios.fill)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                     ) {
                         if (settings.negativePrompt.isEmpty()) {
                             Text(
-                                "留空 = 自动排除：低清 / 糊 / 水印 / 畸形手",
-                                style = IosTheme.typography.footnote,
-                                color = ios.tertiaryLabel,
+                                "留空 = 用默认（模糊、水印、畸形手、多肢体）",
+                                color = ios.tertiaryLabel, fontSize = 12.sp,
                             )
                         }
                         BasicTextField(
                             value = settings.negativePrompt,
                             onValueChange = { v -> viewModel.updateImage { it.copy(negativePrompt = v) } },
-                            textStyle = LocalTextStyle.current.merge(IosTheme.typography.footnote).copy(color = ios.label),
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            textStyle = TextStyle(color = ios.label, fontSize = 12.sp, lineHeight = 17.sp),
                             cursorBrush = SolidColor(ios.blue),
-                            maxLines = 3,
-                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
+                }
+            }
+        }
 
-                    Spacer(Modifier.height(12.dp))
-                    Text("风格", style = IosTheme.typography.footnote, color = ios.secondaryLabel)
+        // ---- 风格 ----
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(ImageStyle.entries.toList()) { s ->
+                    ChoiceChip(s.label, settings.style == s) {
+                        viewModel.updateImage { it.copy(style = s) }
+                    }
+                }
+            }
+        }
+
+        // ---- 参数概览 ----
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { ChoiceChip("${settings.width}²", false) { paramsShow = !paramsShow } }
+                item {
+                    ChoiceChip(
+                        if (settings.steps > 0) "${settings.steps} 步" else "步数自动",
+                        false,
+                    ) { paramsShow = !paramsShow }
+                }
+                item {
+                    ChoiceChip(
+                        String.format(Locale.US, "CFG %.1f", settings.guidance), false,
+                    ) { paramsShow = !paramsShow }
+                }
+                item {
+                    ChoiceChip(
+                        if (settings.seed > 0) "种子 ${settings.seed}" else "随机种子", false,
+                    ) { paramsShow = !paramsShow }
+                }
+            }
+        }
+        if (paramsShow) {
+            item {
+                StudioCard2(padding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)) {
+                    Text("边长", color = ios.secondaryLabel, fontSize = 11.sp)
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ImageStyle.entries.forEach { style ->
-                            IosTag(
-                                text = style.label,
-                                selected = settings.style == style,
-                                onClick = { viewModel.updateImage { it.copy(style = style) } },
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    Text("分辨率", style = IosTheme.typography.footnote, color = ios.secondaryLabel)
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // 512² 是默认值，也是性价比最高的一档：耗时差不多是 768² 的 44%，
-                        // 而且正好是 SD 1.5 的训练分辨率（更大反而容易崩构图）。
-                        listOf(512, 768, 1024).forEach { size ->
-                            IosTag(
-                                text = "${size}²",
-                                selected = settings.width == size,
-                                onClick = { viewModel.updateImage { it.copy(width = size, height = size) } },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "耗时和像素数成正比：768² 是 512² 的 2.25 倍，1024² 是 4 倍。",
-                        style = IosTheme.typography.caption2,
-                        color = ios.tertiaryLabel,
-                    )
-
-                    // 快速放大：大图先 512 出、再放大。默认开 —— 手机上这是
-                    // 「要一张 768 的图」最划算的做法（快 2 倍多，细节差异很小）。
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("快速放大", style = IosTheme.typography.body, color = ios.label)
-                            Text(
-                                if (settings.width > 512) {
-                                    "先用 512 出图再放大到 512 以上：快 2 倍多，细节略软"
-                                } else {
-                                    "目标就是 512 时这一项不生效（本来就没得省）"
-                                },
-                                style = IosTheme.typography.caption1,
-                                color = ios.secondaryLabel,
-                            )
-                        }
-                        IosSwitch(
-                            checked = settings.fastUpscale,
-                            onCheckedChange = { on -> viewModel.updateImage { it.copy(fastUpscale = on) } },
-                        )
-                    }
-
-                    // 后端插件是不是支持新入口（带步数 / 加速）。
-                    // 判定放在这里而不是在 ViewModel：它只影响这一块的显示。
-                    val extendedBackend = com.localmind.native.image.ImageBridge.hasExtendedDiffusion
-
-                    // 步数：CPU 出图最大的一根杠杆，耗时几乎和它成正比。
-                    // 这一栏以前**根本没有** —— ImageSettings.steps 既没有界面入口，
-                    // 也从来没有被传给原生侧，所以 SD 2.1 一直按 20 步跑，
-                    // 用户只能等（实测同一台机器：20 步 70 秒，8 步 28 秒）。
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        if (extendedBackend) "采样步数" else "采样步数（需要更新生图后端插件）",
-                        style = IosTheme.typography.footnote,
-                        color = if (extendedBackend) ios.secondaryLabel else ios.warningText,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    // 老插件（14 MB 那份）没有 nativeSdGenerateEx，传不进步数。
-                    // 这时候**不能**让这一栏看起来能用 —— 那就是又一个「能拨但没用」。
-                    if (!extendedBackend) {
-                        // 两种「用不了」要分开说：**没加载**（点启用就行）与
-                        // **插件版本旧**（要重新导入）。混成一句会让用户白跑一趟插件页。
-                        val backendLoaded = com.localmind.native.image.ImageBridge.hasDiffusionBackend
-                        Text(
-                            if (!backendLoaded) {
-                                "生图后端还没加载进来 —— 先点上面的「启用」，" +
-                                    "加载之后再选步数才会生效。"
-                            } else {
-                                "当前装的生图后端不认识「步数」这个参数（插件版本较旧），" +
-                                    "到「我的 → 插件」重新导入一个新生图后端插件即可。"
-                            },
-                            style = IosTheme.typography.caption2,
-                            color = ios.warningText,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(0 to "自动", 4 to "4", 8 to "8", 15 to "15", 25 to "25").forEach { (v, label) ->
-                            IosTag(
-                                text = label,
-                                selected = settings.steps == v,
-                                onClick = { viewModel.updateImage { it.copy(steps = v) } },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        if (settings.steps == 0) {
-                            "自动：按模型名判断 —— SDXS 这类一步模型 2 步，Turbo / LCM / Hyper 系 4 步" +
-                                "（且 CFG 固定 1.0，每步只跑一遍，快一倍以上）；普通 SD 1.5 / 2.1 用 12 步。"
-                        } else {
-                            "步数越少越快、细节越少。Turbo / LCM 系模型用 4 步就够。"
-                        },
-                        style = IosTheme.typography.caption2,
-                        color = ios.tertiaryLabel,
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("后端 Flash Attention", style = IosTheme.typography.body, color = ios.label)
-                            Text(
-                                "省内存（768² 约省 1.4 GB），个别模型上出图异常时可以关",
-                                style = IosTheme.typography.caption1,
-                                color = ios.secondaryLabel,
-                            )
-                        }
-                        IosSwitch(
-                            checked = settings.flashAttn,
-                            onCheckedChange = { on -> viewModel.updateImage { it.copy(flashAttn = on) } },
-                        )
-                    }
-
-                    Spacer(Modifier.height(14.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (generating || prompt.isBlank()) ios.fill else ios.pink)
-                                .clickable(enabled = !generating && prompt.isNotBlank()) { generate() }
-                                .padding(vertical = 13.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (generating) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = ios.onAccent)
-                            } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(AppIcons.AutoAwesome, contentDescription = null, tint = ios.onAccent, modifier = Modifier.size(17.dp))
-                                    Spacer(Modifier.width(7.dp))
-                                    Text("生成图片", style = IosTheme.typography.headline, color = ios.onAccent)
-                                }
+                        listOf(384, 512, 640, 768, 1024).forEach { side ->
+                            ChoiceChip("$side", settings.width == side) {
+                                viewModel.updateImage { it.copy(width = side, height = side) }
                             }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("步数", color = ios.secondaryLabel, fontSize = 11.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(0, 4, 8, 12, 16, 24).forEach { n ->
+                            ChoiceChip(if (n == 0) "自动" else "$n", settings.steps == n) {
+                                viewModel.updateImage { it.copy(steps = n) }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    SliderRow("CFG", settings.guidance, 1f..12f) {
+                        viewModel.updateImage { v -> v.copy(guidance = it) }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("种子", color = ios.secondaryLabel, fontSize = 11.sp, modifier = Modifier.width(38.dp))
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(ios.fill)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                if (settings.seed > 0) settings.seed.toString() else "每次随机",
+                                color = ios.label, fontSize = 12.sp,
+                            )
                         }
                         Spacer(Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(ios.fillSecondary)
-                                .clickable {
-                                    viewModel.updateImage { it.copy(seed = ImageEngine.randomSeed()) }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(AppIcons.Casino, contentDescription = "随机种子", tint = ios.blue, modifier = Modifier.size(20.dp))
-                        }
+                        SmallBtn2("随机") { viewModel.updateImage { it.copy(seed = -1) } }
                     }
-
-                    // 生成中：已用多久 / 上次多久。
-                    // 扩散出图在手机上是几十秒到几分钟的事，只给一个转圈等于让用户干等，
-                    // 他分不清「在跑」和「卡死」。给个秒表 + 上一次的参照，等待就变得可预期。
-                    if (generating && lastTook == 0L) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "正在出图…已用 " + (elapsedMs / 1000) + " 秒（第一张要加载模型，会更久）",
-                            style = IosTheme.typography.caption1,
-                            color = ios.warningText,
-                        )
+                    Spacer(Modifier.height(4.dp))
+                    ToggleRow2("快速放大", "先按 512 出图再放大到目标尺寸，快一倍多，边缘略软", settings.fastUpscale) { on ->
+                        viewModel.updateImage { it.copy(fastUpscale = on) }
                     }
-                    if (generating && stepTotal > 0) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "正在出图…第 " + stepNow + "/" + stepTotal + " 步 · 已用 " +
-                                (elapsedMs / 1000) + " 秒" +
-                                if (lastTook > 0L) "（上次 " + (lastTook / 1000) + " 秒）" else "",
-                            style = IosTheme.typography.caption1,
-                            color = ios.warningText,
-                        )
-                    }
-                    if (generating && stepTotal == 0 && lastTook > 0L) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "正在出图…已用 " + (elapsedMs / 1000) + " 秒 / 上次同样的设置用了 " +
-                                (lastTook / 1000) + " 秒",
-                            style = IosTheme.typography.caption1,
-                            color = ios.warningText,
-                        )
-                    }
-
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "种子 ${if (settings.seed > 0) settings.seed.toString() else "随机"} · " +
-                            "同一提示词 + 同一种子 = 同一张图（可复现）",
-                        style = IosTheme.typography.caption2,
-                        color = ios.tertiaryLabel,
-                    )
-                    if (error != null) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(error!!, style = IosTheme.typography.caption1, color = ios.red)
-                    }
+                    ToggleRow2(
+                        "Flash Attention",
+                        "省内存（SD2 768² 约省 1.4 GB）。个别模型上算错时可以关掉",
+                        settings.flashAttn,
+                    ) { on -> viewModel.updateImage { it.copy(flashAttn = on) } }
+                    Spacer(Modifier.height(6.dp))
                 }
-            }
-
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 32.dp, end = 16.dp, top = 22.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "作品（${gallery.size}）",
-                        style = IosTheme.typography.footnote,
-                        color = ios.secondaryLabel,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "清空",
-                        style = IosTheme.typography.footnote,
-                        color = ios.red,
-                        modifier = Modifier.clickable {
-                            viewModel.storage.clearImages()
-                            gallery = emptyList()
-                            preview = null
-                            viewModel.toast("已清空生成图片")
-                        },
-                    )
-                }
-            }
-
-            if (gallery.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(AppIcons.Image, contentDescription = null, tint = ios.tertiaryLabel, modifier = Modifier.size(48.dp))
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            "还没有作品。生成后可在这里回看，\n也会通过 /v1/images 对外提供。",
-                            style = IosTheme.typography.footnote,
-                            color = ios.secondaryLabel,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-            } else {
-                gallery.chunked(3).forEach { row ->
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            row.forEach { file ->
-                                Box(Modifier.weight(1f)) {
-                                    Thumbnail(file = file, onClick = { preview = file })
-                                }
-                            }
-                            repeat(3 - row.size) {
-                                Box(Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Spacer(Modifier.height(20.dp))
-                Text(
-                    "内置渲染器为本地程序化生成（离线、毫秒级、可复现）。" +
-                        "stable-diffusion.cpp 后端已内置；下载一个生图模型即可切换到真实模型，见 docs/IMAGE_ENGINE.md。",
-                    style = IosTheme.typography.caption1,
-                    color = ios.secondaryLabel,
-                    modifier = Modifier.padding(horizontal = 32.dp),
-                )
             }
         }
-    }
 
-    preview?.let { file ->
-        ImagePreviewDialog(file = file, onDismiss = { preview = null })
-    }
-}
-
-@Composable
-private fun Thumbnail(file: File, onClick: () -> Unit) {
-    val ios = IosTheme.palette
-    val bitmap = remember(file.absolutePath) { decodeSampled(file, 256) }
-    Box(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(8.dp))
-            .background(ios.fillSecondary)
-            .clickable(onClick = onClick),
-    ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = file.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+        // ---- 生成 ----
+        item {
+            AuroraButton(
+                text = when {
+                    busy && total > 0 -> "第 $step/$total 步 · ${"%.0f".format(Locale.US, elapsed / 1000f)}s"
+                    busy -> "正在加载模型…"
+                    else -> "生成图片"
+                },
+                onClick = { viewModel.generateImage(prompt) },
+                enabled = !busy && backendReady,
+                loading = busy,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
+        if (busy) {
+            item {
+                Column {
+                    ProgressBar2(if (total > 0) step.toFloat() / total else 0f)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (total > 0) {
+                            "已用 ${"%.0f".format(Locale.US, elapsed / 1000f)}s" +
+                                if (step > 0) " · 每步约 ${"%.1f".format(Locale.US, elapsed / 1000f / step)}s" else ""
+                        } else {
+                            "第一次加载模型要读 1.6 GB，慢在这里是正常的"
+                        },
+                        color = ios.tertiaryLabel, fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text("可以切到别的页签，出图不会中断。", color = ios.tertiaryLabel, fontSize = 11.sp)
+                }
+            }
+        }
+
+        error?.let { msg ->
+            item {
+                StudioCard2 {
+                    Text("出图失败", color = ios.red, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(msg, color = ios.secondaryLabel, fontSize = 11.sp)
+                }
+            }
+        }
+
+        result?.let { f ->
+            item {
+                StudioCard2(padding = PaddingValues(10.dp)) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .clickable { viewModel.openImagePreview(f) },
+                    ) {
+                        val bmp = rememberImage(f, 960)
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat()),
+                                contentScale = ContentScale.Fit,
+                            )
+                        } else {
+                            Box(Modifier.fillMaxWidth().height(180.dp).background(ios.fill))
+                        }
+                    }
+                    if (procedural) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("这张不是模型画的 —— 下面写了原因。", color = ios.orange, fontSize = 11.sp)
+                    }
+                    if (note.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(note, color = ios.secondaryLabel, fontSize = 10.sp, lineHeight = 15.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SmallBtn2("保存相册") {
+                            viewModel.toast(if (viewModel.exportImage(f)) "已保存到相册" else "保存失败")
+                        }
+                        SmallBtn2("用回种子") { viewModel.reuseSeedOf(f) }
+                        SmallBtn2("再来一张") { viewModel.generateImage(prompt) }
+                        Spacer(Modifier.weight(1f))
+                        SmallBtn2("删除", danger = true) { viewModel.deleteImage(f) }
+                    }
+                }
+            }
+        }
+
+        if (current == null) {
+            item {
+                HintCard2(
+                    if (!backendReady) "这个包的生图后端没起来（可能是 ABI 不支持）。去「模型」看看。"
+                    else "还没下载生图模型。SD 1.5 Q4_0 约 1.6 GB，下完立刻能出图。",
+                    "去下载",
+                ) { onNeedModel() }
+            }
+        }
     }
 }
 
-/**
- * 全屏预览：点开图 → 长按出「保存 / 取消」→ 保存进系统相册。
- *
- * 为什么不是原来那个小弹窗：用户要的是"看大图、存到相册"，小弹窗里
- * 只能显示文件名和路径，既看不清图，也没法交给别的 App 用。
- */
-@Composable
-private fun ImagePreviewDialog(file: File, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val bitmap = remember(file.absolutePath) { decodeSampled(file, 2048) }
-    var showActions by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
+/* ------------------------------------------------------------------ 模型 */
 
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+@Composable
+private fun ModelSection(viewModel: AppViewModel) {
+    val ios = IosTheme.palette
+    val models by viewModel.diffusionModels.collectAsState()
+    val settings by viewModel.image.collectAsState()
+    val dlStates by viewModel.imageDownloadStates.collectAsState()
+    val backendReady by viewModel.diffusionBackendReady.collectAsState()
+    val bundled = viewModel.hasDiffusionBundled
+
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tick) {
+        viewModel.refreshDiffusionBackend()
+        viewModel.refreshDiffusionModels()
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp, end = 16.dp, top = 8.dp,
+            bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            StudioCard2 {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "生图后端（stable-diffusion.cpp）",
+                            color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            when {
+                                backendReady && bundled -> "随包内置 · 已就绪，不用再装插件"
+                                backendReady -> "插件已加载"
+                                else -> "不可用（这个 ABI 没打包后端）"
+                            },
+                            color = if (backendReady) ios.green else ios.orange,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    if (!backendReady) SmallBtn2("重试") { tick++ }
+                }
+            }
+        }
+
+        item {
+            Text(
+                "下载走「设置 → 下载代理」，服务器支持时自动多线程分段。" +
+                    "模型目录：models/（也可以自己把 .gguf 丢进去）",
+                color = ios.secondaryLabel, fontSize = 11.sp,
+            )
+        }
+
+        item {
+            Text("已安装", color = ios.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+
+        if (models.isEmpty()) {
+            item { Text("还没有。下面挑一个下载。", color = ios.tertiaryLabel, fontSize = 12.sp) }
+        }
+        items(models) { f ->
+            val active = (settings.customModelPath?.isNotBlank() == true &&
+                settings.customModelPath == f.absolutePath) ||
+                (settings.customModelPath.isNullOrBlank() && models.firstOrNull() == f)
+            StudioCard2(stroke = if (active) ios.blue else ios.separator) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                f.name, color = ios.label, fontSize = 12.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (active) {
+                                Spacer(Modifier.width(6.dp))
+                                Tag2("使用中", ios.blue)
+                            }
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            mb2(f.length()) + " · " + archHint(f.name),
+                            color = ios.secondaryLabel, fontSize = 10.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    if (!active) {
+                        SmallBtn2("使用") {
+                            viewModel.updateImage { it.copy(customModelPath = f.absolutePath) }
+                            viewModel.toast("已切到 " + f.name)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    SmallBtn2("删除", danger = true) {
+                        val entry = ImageModels.byFileName(f.name)
+                        if (entry != null) {
+                            viewModel.deleteImageModel(entry)
+                        } else {
+                            runCatching { f.delete() }
+                            viewModel.refreshDiffusionModels()
+                            viewModel.toast("已删除")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Text("可下载", color = ios.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+
+        items(ImageModels.all) { entry ->
+            DownloadRow(entry, viewModel, dlStates[entry.id])
+        }
+    }
+}
+
+@Composable
+private fun DownloadRow(
+    entry: ImageModelEntry,
+    viewModel: AppViewModel,
+    st: com.localmind.service.ImageModelDownloader.State?,
+) {
+    val ios = IosTheme.palette
+    val installed = viewModel.imageModelInstalled(entry)
+    StudioCard2 {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(entry.label, color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.width(6.dp))
+                    Tag2(entry.badge)
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(entry.note, color = ios.secondaryLabel, fontSize = 10.sp, lineHeight = 14.sp)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    when {
+                        st?.busy == true -> progressLine2(st.downloadedBytes, st.totalBytes, st.bytesPerSecond)
+                        installed -> mb2(viewModel.imageModelBytes(entry)) + " · 已就绪"
+                        st?.status == com.localmind.service.ImageModelDownloader.Status.FAILED ->
+                            "下载失败：" + (st.error ?: "网络问题")
+                        else -> mb2(entry.sizeBytes)
+                    },
+                    color = when {
+                        st?.busy == true -> ios.blue
+                        installed -> ios.green
+                        st?.status == com.localmind.service.ImageModelDownloader.Status.FAILED -> ios.orange
+                        else -> ios.secondaryLabel
+                    },
+                    fontSize = 10.sp, maxLines = 2,
+                )
+                if (st?.busy == true) {
+                    Spacer(Modifier.height(6.dp))
+                    ProgressBar2(st.progress)
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            when {
+                st?.busy == true -> SmallBtn2("取消") { viewModel.cancelImageModel(entry) }
+                installed -> SmallBtn2("使用") {
+                    val f = File(viewModel.storage.modelsDir, entry.fileName)
+                    viewModel.updateImage { it.copy(customModelPath = f.absolutePath) }
+                    viewModel.toast("已切到 " + entry.label)
+                }
+                else -> SmallBtn2("下载", primary = true) { viewModel.downloadImageModel(entry) }
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ 图库 */
+
+@Composable
+private fun GallerySection(viewModel: AppViewModel) {
+    val ios = IosTheme.palette
+    val gallery by viewModel.imgGallery.collectAsState()
+    LaunchedEffect(Unit) { viewModel.refreshImageGallery() }
+
+    if (gallery.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(AppIcons.Image, null, Modifier.size(34.dp), tint = ios.tertiaryLabel)
+                Spacer(Modifier.height(10.dp))
+                Text("还没有生成过图", color = ios.secondaryLabel, fontSize = 13.sp)
+            }
+        }
+        return
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp, end = 16.dp, top = 8.dp,
+            bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(gallery.chunked(2)) { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { f ->
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(ios.fill)
+                            .clickable { viewModel.openImagePreview(f) },
+                    ) {
+                        val bmp = rememberImage(f, 360)
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                    }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ 组件 */
+
+@Composable
+private fun rememberImage(file: File, target: Int) = remember(file, file.lastModified()) {
+    runCatching {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, opts)
+        var sample = 1
+        while (opts.outWidth / (sample * 2) >= target || opts.outHeight / (sample * 2) >= target) sample *= 2
+        BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply { inSampleSize = sample },
+        )
+    }.getOrNull()
+}
+
+@Composable
+private fun ImageFullScreen(
+    file: File,
+    onClose: () -> Unit,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.94f))
+            .clickable { onClose() },
+    ) {
+        val bmp = rememberImage(file, 1440)
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxWidth().align(Alignment.Center),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        Row(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SmallBtn2("保存") { onSave() }
+            SmallBtn2("分享") { onShare() }
+            SmallBtn2("删除", danger = true) { onDelete() }
+        }
+        Text(
+            file.name,
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 10.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun StudioCard2(
+    stroke: Color? = null,
+    padding: PaddingValues = PaddingValues(14.dp),
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    val ios = IosTheme.palette
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ios.secondaryGroupedBackground)
+            .border(1.dp, stroke ?: ios.separator, RoundedCornerShape(12.dp))
+            .padding(padding),
+        content = content,
+    )
+}
+
+@Composable
+private fun ChoiceChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    val ios = IosTheme.palette
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (selected) ios.blue.copy(alpha = 0.14f) else ios.fillSecondary)
+            .border(1.dp, if (selected) ios.blue else Color.Transparent, RoundedCornerShape(9.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+    ) {
+        Text(
+            text,
+            color = if (selected) ios.blue else ios.label,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun SliderRow(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+) {
+    val ios = IosTheme.palette
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = ios.secondaryLabel, fontSize = 11.sp, modifier = Modifier.width(38.dp))
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            modifier = Modifier.weight(1f).height(28.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = ios.blue, activeTrackColor = ios.blue, inactiveTrackColor = ios.fill,
+            ),
+        )
+        Text(
+            String.format(Locale.US, "%.1f", value),
+            color = ios.secondaryLabel, fontSize = 11.sp, modifier = Modifier.width(36.dp),
+        )
+    }
+}
+
+@Composable
+private fun ToggleRow2(title: String, desc: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val ios = IosTheme.palette
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = ios.label, fontSize = 12.sp)
+            Spacer(Modifier.height(2.dp))
+            Text(desc, color = ios.tertiaryLabel, fontSize = 9.sp, lineHeight = 12.sp)
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier
+                .width(42.dp)
+                .height(24.dp)
+                .clip(CircleShape)
+                .background(if (checked) ios.green else ios.fill),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(Modifier.padding(horizontal = 2.dp).size(20.dp).clip(CircleShape).background(Color.White))
+        }
+    }
+}
+
+@Composable
+private fun SmallBtn2(
+    text: String,
+    primary: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val ios = IosTheme.palette
+    val bg = when {
+        primary -> ios.blue
+        danger -> ios.red.copy(alpha = 0.12f)
+        else -> ios.fillSecondary
+    }
+    val fg = when {
+        primary -> ios.onAccent
+        danger -> ios.red
+        else -> ios.label
+    }
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) { Text(text, color = fg, fontSize = 11.sp, fontWeight = FontWeight.Medium) }
+}
+
+@Composable
+private fun Tag2(text: String, color: Color? = null) {
+    val ios = IosTheme.palette
+    val c = color ?: ios.secondaryLabel
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(c.copy(alpha = 0.14f))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) { Text(text, color = c, fontSize = 9.sp) }
+}
+
+@Composable
+private fun ProgressBar2(fraction: Float) {
+    val ios = IosTheme.palette
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(ios.fill),
     ) {
         Box(
             Modifier
-                .fillMaxSize()
-                .background(Color.Black),
-        ) {
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = file.name,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onLongPress = { showActions = true },
-                                // 点一下收起按钮；再点空白处也不会误关预览。
-                                onTap = { if (showActions) showActions = false },
-                            )
-                        },
-                )
-            } else {
-                Text(
-                    "图片读取失败",
-                    color = Color.White,
-                    style = IosTheme.typography.body,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            }
-
-            // 关闭（不保存）。
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 24.dp, end = 18.dp)
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.16f))
-                    .clickable(onClick = onDismiss),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    AppIcons.Close,
-                    contentDescription = "关闭",
-                    tint = Color.White,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
-
-            if (showActions) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 46.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    PreviewAction("保存", busy = saving) {
-                        if (saving) return@PreviewAction
-                        saving = true
-                        scope.launch {
-                            val ok = withContext(Dispatchers.IO) { GallerySaver.save(context, file) }
-                            saving = false
-                            showActions = false
-                            Toast.makeText(
-                                context,
-                                if (ok) "已保存到相册" else "保存失败，请检查存储权限",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                            if (ok) onDismiss()
-                        }
-                    }
-                    PreviewAction("取消") { showActions = false }
-                }
-            } else {
-                Text(
-                    "长按图片可保存到相册",
-                    color = Color.White.copy(alpha = 0.62f),
-                    style = IosTheme.typography.footnote,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 48.dp),
-                )
-            }
-        }
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(ios.blue),
+        )
     }
 }
 
-/** 预览页底部的胶囊按钮（保存 / 取消）。 */
 @Composable
-private fun PreviewAction(label: String, busy: Boolean = false, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color.White.copy(alpha = 0.18f))
-            .clickable(enabled = !busy, onClick = onClick)
-            .padding(horizontal = 30.dp, vertical = 13.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (busy) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(17.dp),
-                color = Color.White,
-                strokeWidth = 2.dp,
-            )
-        } else {
-            Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-private fun decodeSampled(file: File, target: Int): Bitmap? = runCatching {
-    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
-    var sample = 1
-    while (bounds.outWidth / sample > target * 2) sample *= 2
-    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-    android.graphics.BitmapFactory.decodeFile(file.absolutePath, options)
-}.getOrNull()
-
-/**
- * 生图后端状态与安装入口。
- *
- * ## 为什么这块必须存在
- *
- * 后端现在是**按需下载**的（36 MB，只有真要用的人付这个体积）。
- * 代价是出现了一种新的困惑：
- *
- *   用户下了 2 GB 的 SD 模型 → 生图 → 看到程序化渲染的渐变图
- *   → "模型没用上？是不是坏了？"
- *
- * 所以这一块要明确说出三件事：**装没装**、**有没有模型**、**不装会怎样**。
- * 含糊其辞会让用户去反复换模型，而问题根本不在模型上。
- */
-@Composable
-private fun DiffusionBackendSection(viewModel: AppViewModel, onChanged: () -> Unit) {
+private fun HintCard2(text: String, action: String, onAction: () -> Unit) {
     val ios = IosTheme.palette
-    val models by viewModel.diffusionModels.collectAsState()
-    val abi = remember { com.localmind.service.NativeLibraryInstaller.currentAbi() }
-    // 用 lastModified 做键，这样在插件页装完之后回到这一页会重新读一次。
-    var tick by remember { mutableIntStateOf(0) }
-    val backendFile = remember(tick) {
-        com.localmind.service.NativeLibraryInstaller.installedFile(viewModel.storage, abi)
-    }
-    // "文件在磁盘上"和"这个进程能用"是**两件事**，必须分开显示。
-    //
-    // 前者是插件安装的产物；后者要 System.load 之后由原生层回答。只按前者显示，
-    // 就会出现"这里写着已安装、生图却还在出程序化渐变图"——用户会去反复换模型，
-    // 而问题根本不在模型上。
-    val onDisk = backendFile.isFile && backendFile.length() > 0
-    val ready by viewModel.diffusionBackendReady.collectAsState()
-    // 通用版插件（1.1.0 起）会回答 true；旧插件没有这个 JNI 符号，回答 false。
-    val universal = remember(ready, tick) {
-        ready && com.localmind.native.image.ImageBridge.hasUniversalDiffusion
-    }
-
-    IosSection(
-        header = "生图后端",
-        footer = when {
-            ready -> "后端已内置在 APK 里（约 37 MB/ABI），不用另外下载；" +
-                "它不影响对话与语音，下载一个生图模型就能用。"
-            onDisk -> "文件已经装好了，但还没加载进当前进程 —— 点「启用」。"
-            else -> "这个 APK 的后端没有加载成功（常见于 ABI 不匹配）。" +
-                "先重启应用；仍然失败时只能用程序化渲染，画不出具体内容。"
-        },
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(ios.orange.copy(alpha = 0.12f))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        when {
-                            ready -> "已启用"
-                            onDisk -> "已安装 · 未启用"
-                            else -> "未安装"
-                        },
-                        style = IosTheme.typography.body,
-                        color = ios.label,
-                    )
-                    Text(
-                        when {
-                            ready -> "${com.localmind.util.Formatters.size(backendFile.length())} · $abi" +
-                                (if (universal) " · 通用版" else "")
-                            onDisk -> "点「启用」把它加载进来（$abi）"
-                            else -> "内置后端未加载（$abi）"
-                        },
-                        style = IosTheme.typography.caption1,
-                        color = if (ready) ios.green else ios.warningText,
-                    )
-                    if (ready) {
-                        Text(
-                            if (universal) "采样器 / 调度器、逐帧进度已启用"
-                            else "旧版后端：只有步数与线程，重新装通用版可拿到采样器与进度",
-                            style = IosTheme.typography.caption2,
-                            color = if (universal) ios.secondaryLabel else ios.warningText,
-                        )
-                    }
-                }
-                if (!onDisk) {
-                    ImageRowAction("去插件页装", ios.blue) { viewModel.openPlugins(true) }
-                } else {
-                    if (!ready) {
-                        ImageRowAction("启用", ios.blue) {
-                            viewModel.enableDiffusionBackend { ok ->
-                                if (!ok) viewModel.toast("后端加载失败，见「诊断」或日志")
-                            }
-                            tick++
-                        }
-                    }
-                    ImageRowAction("重新检测", ios.secondaryLabel) {
-                        viewModel.refreshDiffusionBackend()
-                        tick++
-                    }
-                }
-            }
-
-            // 后端装了但没模型，同样生不出真图 —— 而用户往往以为装完后端就好了。
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.fillMaxWidth().height(0.5.dp).background(ios.separator))
-            Spacer(Modifier.height(10.dp))
-            // 生图模型：**可以选**。
-            //
-            // 以前这一行只显示「本机没有检测到扩散模型」+ 一个「重新扫描」，没有任何
-            // 选择入口 —— 用户的原话是「生图里面生图模型怎么不能选」。本机放了好几个
-            // checkpoint 的人没法指定用哪一个，只能赌扫描顺序。
-            // 选中的路径写进 ImageSettings.customModelPath（对话里的 AI 主动生图也用它）。
-            val imageSettings by viewModel.image.collectAsState()
-            var pickingModel by remember { mutableStateOf(false) }
-            val chosen = imageSettings.customModelPath?.takeIf { it.isNotBlank() }?.let { File(it) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("生图模型", style = IosTheme.typography.body, color = ios.label)
-                    Text(
-                        when {
-                            chosen != null -> chosen.name
-                            models.isNotEmpty() -> "自动：" + models.first().name
-                            else -> "本机没有检测到扩散模型"
-                        },
-                        style = IosTheme.typography.caption1,
-                        color = if (chosen == null && models.isEmpty()) ios.warningText else ios.secondaryLabel,
-                    )
-                }
-                ImageRowAction("选择", ios.blue) { pickingModel = true }
-                ImageRowAction("重新扫描", ios.secondaryLabel) { viewModel.refreshDiffusionModels() }
-            }
-            if (pickingModel) {
-                ModelPickerSheet(
-                    title = "生图模型",
-                    subtitle = "只列本机已下载的扩散 checkpoint；下载去「模型 → 生图」",
-                    allowDefault = false,
-                    options = listOf(
-                        PickerOption(
-                            id = "",
-                            title = "自动（用检测到的第一个）",
-                            subtitle = models.firstOrNull()?.name ?: "本机还没有扩散模型",
-                        ),
-                    ) + models.map { f ->
-                        PickerOption(
-                            id = f.absolutePath,
-                            title = f.name.removeSuffix(".gguf").removeSuffix(".GGUF"),
-                            subtitle = com.localmind.util.Formatters.size(f.length()),
-                            badge = if (ImageEngine.isTurboModel(f.name)) "快" else null,
-                        )
-                    },
-                    selectedId = imageSettings.customModelPath.orEmpty(),
-                    onSelect = { id ->
-                        viewModel.updateImage { it.copy(customModelPath = id.ifBlank { null }) }
-                        onChanged()
-                    },
-                    onDismiss = { pickingModel = false },
-                )
-            }
-            if (models.isEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "去「模型」页下载一个生图模型，或把已有的 .gguf 放进 " +
-                        "files/models/。SD1.5 / SDXL / SD-Turbo 都认。",
-                    style = IosTheme.typography.caption2,
-                    color = ios.tertiaryLabel,
-                )
-            }
-        }
+        Text(text, color = ios.orange, fontSize = 11.sp, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        SmallBtn2(action) { onAction() }
     }
-
-    // 进这一页就扫一次：模型可能是刚下载的，也可能是用户手动放进去的。
-    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshDiffusionModels() }
 }
 
-/** 这一页自己的小按钮。样式和 VoiceScreen 的 RowAction 一致。 */
-@Composable
-private fun ImageRowAction(label: String, tint: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
-    Text(
-        label,
-        style = IosTheme.typography.footnote,
-        color = tint,
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-    )
+/* ------------------------------------------------------------------ 工具 */
+
+private fun mb2(bytes: Long): String =
+    if (bytes >= 1024L * 1024 * 1024) String.format(Locale.US, "%.2f GB", bytes / 1024.0 / 1024 / 1024)
+    else String.format(Locale.US, "%d MB", bytes / 1024 / 1024)
+
+/** 从文件名粗判模型族 —— 只用来给用户一句"这大概是几代模型"，不参与逻辑。 */
+private fun archHint(name: String): String {
+    val n = name.lowercase(Locale.US)
+    return when {
+        n.contains("turbo") || n.contains("lcm") || n.contains("hyper") -> "少步模型（自动降步数）"
+        n.contains("xl") -> "SDXL（吃内存，慎用）"
+        n.contains("2-1") || n.contains("v2") -> "SD 2.1"
+        n.contains("1-5") || n.contains("v1") -> "SD 1.5"
+        else -> "扩散 checkpoint"
+    }
+}
+
+private fun progressLine2(done: Long, total: Long, speed: Double): String {
+    val pct = if (total > 0) (done * 100 / total).coerceIn(0, 100) else 0
+    val sp = com.localmind.service.DownloadSources.speedText(speed)
+    return buildString {
+        append(mb2(done))
+        if (total > 0) append(" / ").append(mb2(total)).append(" · ").append(pct).append("%")
+        if (sp.isNotBlank()) append(" · ").append(sp)
+    }
 }

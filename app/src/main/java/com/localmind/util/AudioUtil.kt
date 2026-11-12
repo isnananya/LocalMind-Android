@@ -132,8 +132,7 @@ object AudioUtil {
         }.getOrDefault(false)
     }
 
-    /** 把 16-bit 采样的 ShortArray 写成同格式 WAV（录音路径用，省一次 Float 转换）。 */
-    fun writeWavShorts(path: String, samples: ShortArray, sampleRate: Int): Boolean {
+    /** 把 16-bit 采样的 ShortArray 写成同格式 WAV（录音路径用，省一次 Float 转换）。 */    fun writeWavShorts(path: String, samples: ShortArray, sampleRate: Int): Boolean {
         if (samples.isEmpty() || sampleRate <= 0) return false
         return runCatching {
             val file = File(path)
@@ -155,6 +154,28 @@ object AudioUtil {
             }
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * 把多个 WAV 按顺序拼成一个，句间插 [gapMs] 毫秒静音。
+     *
+     * 为什么按文件拼而不是内存里拼：合成是**按句调引擎、每句落一个临时 WAV**
+     * （引擎的 API 就是写文件），所以这里是"读回来、接着写"。
+     * 采样率取第一个文件的；中途遇到不一致的直接放弃 —— 拼出来的是垃圾。
+     */
+    fun concatWavs(files: List<File>, gapMs: Int, target: File): Boolean {
+        if (files.isEmpty()) return false
+        val first = readWavToMonoFloat(files.first().absolutePath) ?: return false
+        val rate = first.second
+        val out = ArrayList<Float>(first.first.size * files.size)
+        val gap = (rate.toLong() * gapMs / 1000).toInt().coerceAtLeast(0)
+        files.forEachIndexed { index, f ->
+            val parsed = readWavToMonoFloat(f.absolutePath) ?: return false
+            if (parsed.second != rate) return false
+            if (index > 0 && gap > 0) repeat(gap) { out.add(0f) }
+            parsed.first.forEach { out.add(it) }
+        }
+        return writeWav(target.absolutePath, out.toFloatArray(), rate)
     }
 
     private fun readLE32(raf: RandomAccessFile): Int {

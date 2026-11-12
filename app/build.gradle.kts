@@ -149,6 +149,10 @@ android {
         }
         jniLibs {
             useLegacyPackaging = false
+            // 生图后端是**预编译好**放进来的一份（arm64，36 MB），AGP 默认会对
+            // jniLibs 里的 .so 跑一遍 strip。这份已经是 release 产物，strip 一遍
+            // 既没有收益，又可能因为缺 debug 段而报错；显式声明"别动它"。
+            keepDebugSymbols += "**/liblocalmind-sd.so"
         }
     }
 

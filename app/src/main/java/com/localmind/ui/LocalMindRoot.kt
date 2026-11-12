@@ -140,7 +140,6 @@ fun LocalMindRoot(
     val showSettings by viewModel.showSettings.collectAsState()
     val showImageStudio by viewModel.showImageStudio.collectAsState()
     val showVoiceScreen by viewModel.showVoiceScreen.collectAsState()
-    val showVoiceClone by viewModel.showVoiceCloneScreen.collectAsState()
     val showBreeze by viewModel.showBreeze.collectAsState()
     val showConversationDetail by viewModel.showConversationDetail.collectAsState()
     val activeConversationId by viewModel.activeId.collectAsState()
@@ -179,7 +178,7 @@ fun LocalMindRoot(
         return
     }
 
-    val canGoBack = showSettings || showImageStudio || showVoiceClone || showVoiceScreen || showBreeze || showPlugins ||
+    val canGoBack = showSettings || showImageStudio || showVoiceScreen || showBreeze || showPlugins ||
         showPluginDocs || showConversationDetail || showDebug || showStatus || (tab == Tab.CHAT && inChat) ||
         (tab != Tab.CHAT && tab != Tab.MODELS && tab != Tab.ME && tab != Tab.HOME)
     val goBack: () -> Unit = {
@@ -189,7 +188,6 @@ fun LocalMindRoot(
             showSettings -> viewModel.openSettings(false)
             showConversationDetail -> viewModel.openConversationDetail(false)
             showBreeze -> viewModel.openBreeze(false)
-            showVoiceClone -> viewModel.openVoiceCloneScreen(false)
             showVoiceScreen -> viewModel.openVoiceScreen(false)
             showPluginDocs -> viewModel.openPluginDocs(false)
             showPlugins -> viewModel.openPlugins(false)
@@ -215,7 +213,7 @@ fun LocalMindRoot(
 
     val tabStyleTop = uiTokens["tabStyle"] ?: "glass"
     val canHideTop = tabs.size > 1
-    val subPageTop = showVoiceClone || showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
+    val subPageTop = showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
         showPluginDocs || showDebug || showStatus || showSettings || meFullPage ||
         showImageStudio
     val immersiveTop = tab == Tab.CHAT && inChat
@@ -224,7 +222,7 @@ fun LocalMindRoot(
     Box(Modifier.fillMaxSize()) {
         AuroraBackground {
             Box(Modifier.fillMaxSize()) {
-                val subPage = showVoiceClone || showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
+                val subPage = showVoiceScreen || showBreeze || showConversationDetail || showPlugins ||
                     showPluginDocs || showDebug || showStatus || showSettings || meFullPage ||
                     showImageStudio
                 val immersiveChat = tab == Tab.CHAT && inChat
@@ -247,7 +245,6 @@ fun LocalMindRoot(
                             showStatus -> "status"
                             showConversationDetail -> "convdetail"
                             showBreeze -> "breeze"
-                            showVoiceClone -> "voiceclone"
                             showVoiceScreen -> "voice"
                             showPluginDocs -> "plugindocs"
                             showPlugins -> "plugins"
@@ -326,11 +323,6 @@ fun LocalMindRoot(
                             }
                             "debug" -> DebugScreen(viewModel) { viewModel.openDebug(false) }
                             "status" -> StatusScreen(viewModel) { viewModel.openStatus(false) }
-                            "voiceclone" -> VoiceStudioScreen(
-                                viewModel = viewModel,
-                                initialTab = com.localmind.ui.screen.StudioTab.CLONE,
-                                onClose = { viewModel.openVoiceCloneScreen(false) },
-                            )
                             "voice" -> VoiceStudioScreen(
                                 viewModel = viewModel,
                                 onClose = { viewModel.openVoiceScreen(false) },
