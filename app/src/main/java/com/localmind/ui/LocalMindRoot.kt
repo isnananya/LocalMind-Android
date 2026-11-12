@@ -54,7 +54,7 @@ import com.localmind.ui.screen.PluginDevDocsScreen
 import com.localmind.ui.screen.PluginsScreen
 import com.localmind.ui.screen.SettingsScreen
 import com.localmind.ui.screen.StatusScreen
-import com.localmind.ui.screen.VoiceScreen
+import com.localmind.ui.screen.VoiceStudioScreen
 import com.localmind.ui.theme.IosTheme
 import com.example.liquiddock.*
 import com.localmind.ui.icons.AppIcons
@@ -326,8 +326,15 @@ fun LocalMindRoot(
                             }
                             "debug" -> DebugScreen(viewModel) { viewModel.openDebug(false) }
                             "status" -> StatusScreen(viewModel) { viewModel.openStatus(false) }
-                            "voiceclone" -> com.localmind.ui.screen.VoiceCloneScreen(viewModel)
-                            "voice" -> VoiceScreen(viewModel)
+                            "voiceclone" -> VoiceStudioScreen(
+                                viewModel = viewModel,
+                                initialTab = com.localmind.ui.screen.StudioTab.CLONE,
+                                onClose = { viewModel.openVoiceCloneScreen(false) },
+                            )
+                            "voice" -> VoiceStudioScreen(
+                                viewModel = viewModel,
+                                onClose = { viewModel.openVoiceScreen(false) },
+                            )
                             "plugins" -> PluginsScreen(viewModel) { viewModel.openPlugins(false) }
                             "plugindocs" -> PluginDevDocsScreen { viewModel.openPluginDocs(false) }
                             "image" -> ImageScreen(viewModel) { viewModel.openImageStudio(false) }

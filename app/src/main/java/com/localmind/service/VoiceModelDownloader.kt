@@ -63,6 +63,10 @@ class VoiceModelDownloader(
         val downloadedBytes: Long = 0,
         val totalBytes: Long = 0,
         val error: String? = null,
+        /** 瞬时速度（字节/秒）。分段下载时是所有段合起来的速度。 */
+        val bytesPerSecond: Double = 0.0,
+        /** 实际用的地址（直连还是某个代理）。UI 上显示出来，用户才知道代理生效没有。 */
+        val source: String = "",
     ) {
         val progress: Float
             get() = if (totalBytes > 0) (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f
@@ -70,12 +74,7 @@ class VoiceModelDownloader(
         val busy: Boolean get() = status == Status.DOWNLOADING || status == Status.EXTRACTING
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .followRedirects(true)
-        .build()
+    private val client = DownloadSources.client()
 
     private val _states = MutableStateFlow<Map<String, State>>(emptyMap())
     val states: StateFlow<Map<String, State>> = _states.asStateFlow()
@@ -113,7 +112,9 @@ class VoiceModelDownloader(
         jobs[LIBRARY_KEY] = scope.launch {
             val installer = SherpaLibraryInstaller(storage)
             installer.onProgress = { bytes ->
-                update(LIBRARY_KEY) { it.copy(downloadedBytes = bytes) }
+                update(LIBRARY_KEY) {
+                    it.copy(downloadedBytes = bytes, bytesPerSecond = installer.speedNow)
+                }
             }
             val ok = runCatching { installer.ensureInstalled() }.getOrElse { t ->
                 Log.w(TAG, "原生库安装失败：${t.message}", t)
@@ -126,6 +127,7 @@ class VoiceModelDownloader(
                     downloadedBytes = if (ok) installer.installedBytes() else 0,
                     totalBytes = if (ok) installer.installedBytes() else it.totalBytes,
                     error = if (ok) null else "下载或解压失败（网络？存储空间？）",
+                    bytesPerSecond = 0.0,
                 )
             }
         }
@@ -161,7 +163,12 @@ class VoiceModelDownloader(
         
         if (jobs[voice.id]?.isActive == true) return
         cancelled.remove(voice.id)
-        update(voice.id) { it.copy(status = Status.DOWNLOADING, error = null, downloadedBytes = 0) }
+        update(voice.id) {
+            it.copy(
+                status = Status.DOWNLOADING, error = null, downloadedBytes = 0,
+                bytesPerSecond = 0.0, source = "",
+            )
+        }
         // 同样要兜住：scope 是 SupervisorJob 且无异常处理器，runInstall 里任何
         // 未捕获异常都会变成 FATAL EXCEPTION 把应用带走（下载路径上这很常见）。
         jobs[voice.id] = scope.launch {
@@ -205,7 +212,7 @@ class VoiceModelDownloader(
         // 之前这里按 id 现拼，导致**插件里写的镜像永远不生效** —— 明明允许插件
         // 换地址，却不读那个字段，等于把可维护性又退回发版。
         // 顺序：插件 url（或默认 tarball 地址）→ mirrors → gh-proxy 兜底。
-        val urls = com.localmind.data.VoiceCatalog.urlsFor(voice)
+        val urls = DownloadSources.order(storage, com.localmind.data.VoiceCatalog.urlsFor(voice))
 
         var lastError: String? = null
         for ((i, url) in urls.withIndex()) {
@@ -258,7 +265,57 @@ class VoiceModelDownloader(
     }
 
     /** 断点续传；服务端忽略 `Range` 时从零重来。 */
-    private fun download(url: String, archive: File, voice: VoiceEntry): Boolean {
+    private suspend fun download(url: String, archive: File, voice: VoiceEntry): Boolean {
+        // ---- 先试多连接分段 ----
+        //
+        // 单连接的速度上限就是这条 TCP 能跑多快；移动网络一丢包，
+        // 拥塞窗口掉下去就再也爬不起来（实测 109 MB 的克隆底模只有 13 KB/s）。
+        // 分段之后每段各有一条连接、各自的拥塞窗口，这是下载器的标准做法。
+        //
+        // 服务端不认 Range（回 200）时 probe 会给 rangeSupported=false，
+        // 那就老老实实单连接 —— 硬分段拼出来的是错位文件，比慢可怕得多。
+        archive.parentFile?.mkdirs()
+        update(voice.id) { it.copy(source = url) }
+
+        val probe = MultiPartDownload.probe(client, url)
+        if (probe != null && probe.rangeSupported && probe.totalBytes > 8L * 1024 * 1024) {
+            val segments = MultiPartDownload.segmentsFor(probe.totalBytes)
+            val segDir = MultiPartDownload.segmentDir(
+                archive.parentFile ?: return false, archive.name, probe.totalBytes,
+            )
+            Log.i(
+                TAG,
+                "${voice.id}：分段下载 $segments 路，共 ${probe.totalBytes / 1024 / 1024} MB — $url",
+            )
+            val ok = MultiPartDownload.download(
+                client = client,
+                scope = scope,
+                url = url,
+                target = segDir,
+                assembleTo = archive,
+                totalBytes = probe.totalBytes,
+                segments = segments,
+                isCancelled = { cancelled.contains(voice.id) },
+                onProgress = { done, total, speed ->
+                    update(voice.id) {
+                        it.copy(downloadedBytes = done, totalBytes = total, bytesPerSecond = speed)
+                    }
+                },
+            )
+            if (ok) {
+                update(voice.id) { it.copy(bytesPerSecond = 0.0) }
+                return true
+            }
+            if (cancelled.contains(voice.id)) return false
+            // 分段失败：段目录留着没意义了（下一轮可能换镜像，总长也未必一样）。
+            segDir.deleteRecursively()
+            Log.w(TAG, "${voice.id} 分段下载未完成，退回单连接")
+        }
+        return downloadSingle(url, archive, voice)
+    }
+
+    /** 单连接兜底：服务端不支持 Range，或者分段中途失败。 */
+    private fun downloadSingle(url: String, archive: File, voice: VoiceEntry): Boolean {
         val existing = if (archive.isFile) archive.length() else 0L
         val builder = Request.Builder().url(url).header("User-Agent", "LocalMind/1.0 (Android)")
         if (existing > 0) builder.header("Range", "bytes=$existing-")
@@ -308,10 +365,15 @@ class VoiceModelDownloader(
 
                         val now = System.currentTimeMillis()
                         if (now - windowStart >= 400) {
+                            val speed = window * 1000.0 / (now - windowStart).coerceAtLeast(1)
                             window = 0
                             windowStart = now
                             update(voice.id) {
-                                it.copy(downloadedBytes = written, totalBytes = if (total > 0) total else voice.sizeBytes)
+                                it.copy(
+                                    downloadedBytes = written,
+                                    totalBytes = if (total > 0) total else voice.sizeBytes,
+                                    bytesPerSecond = speed,
+                                )
                             }
                         }
                     }

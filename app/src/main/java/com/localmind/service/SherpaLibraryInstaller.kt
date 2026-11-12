@@ -48,8 +48,6 @@ class SherpaLibraryInstaller(private val storage: Storage) {
 
         private val URLS = listOf(
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$VERSION/$TARBALL_NAME",
-            // 直连 GitHub 在本机实测会随机超时，代理是稳定那条路。
-            "https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/v$VERSION/$TARBALL_NAME",
         )
 
         /** 需要落盘的文件（也是 `System.load` 的顺序）。 */
@@ -95,6 +93,15 @@ class SherpaLibraryInstaller(private val storage: Storage) {
      */
     @Volatile
     var onProgress: ((Long) -> Unit)? = null
+
+    /** 当前速度（字节/秒），UI 直接显示。0 表示没有在下载。 */
+    @Volatile
+    var speedNow: Double = 0.0
+        private set
+
+    private val client = DownloadSources.client()
+    private val ioScope =
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     /** 四个 `.so` 都在，且已经成功 `System.load` 过（或 APK 里自带）。 */
     val isInstalled: Boolean
@@ -144,37 +151,13 @@ class SherpaLibraryInstaller(private val storage: Storage) {
         if (archive.isFile && doneMarker.isFile && archive.length() > 40_000_000) return true
         archive.parentFile?.mkdirs()
 
-        for ((i, url) in URLS.withIndex()) {
-            val label = if (i == 0) "直连" else "代理"
-            Log.i(TAG, "下载原生库（$label）：$url")
-            val ok = runCatching {
-                val conn = java.net.URI(url).toURL().openConnection().apply {
-                    connectTimeout = 20_000
-                    readTimeout = 600_000
-                    setRequestProperty("User-Agent", "LocalMind/1.0 (Android)")
-                }
-                conn.getInputStream().use { input ->
-                    archive.outputStream().use { out ->
-                        val buf = ByteArray(256 * 1024)
-                        var written = 0L
-                        var last = 0L
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n <= 0) break
-                            out.write(buf, 0, n)
-                            written += n
-                            val now = System.currentTimeMillis()
-                            if (now - last >= 500) {
-                                last = now
-                                onProgress?.invoke(written)
-                            }
-                        }
-                        onProgress?.invoke(written)
-                    }
-                }
-                archive.length() > 40_000_000
-            }.getOrElse { t ->
-                Log.w(TAG, "  $label 失败：${t.message}")
+        // 地址与代理：走和模型下载同一套规则（设置里的代理模板，不写死 gh-proxy）。
+        val urls = DownloadSources.order(storage, URLS)
+
+        for ((i, url) in urls.withIndex()) {
+            Log.i(TAG, "下载原生库（${i + 1}/${urls.size}）：$url")
+            val ok = runCatching { downloadOne(url) }.getOrElse { t ->
+                Log.w(TAG, "  失败：${t.message}")
                 archive.delete()
                 false
             }
@@ -184,6 +167,74 @@ class SherpaLibraryInstaller(private val storage: Storage) {
             }
         }
         return false
+    }
+
+    /** 单地址下载：先试多连接分段，服务端不认 `Range` 时退回单流。 */
+    private fun downloadOne(url: String): Boolean {
+        archive.delete()
+        val probe = MultiPartDownload.probe(client, url)
+        if (probe != null && probe.rangeSupported && probe.totalBytes > 8L * 1024 * 1024) {
+            val segments = MultiPartDownload.segmentsFor(probe.totalBytes)
+            val segDir = MultiPartDownload.segmentDir(
+                archive.parentFile ?: return false, archive.name, probe.totalBytes,
+            )
+            Log.i(TAG, "分段下载 $segments 路，共 ${probe.totalBytes / 1024 / 1024} MB")
+            val done = kotlinx.coroutines.runBlocking {
+                MultiPartDownload.download(
+                    client = client,
+                    scope = ioScope,
+                    url = url,
+                    target = segDir,
+                    assembleTo = archive,
+                    totalBytes = probe.totalBytes,
+                    segments = segments,
+                    isCancelled = { false },
+                    onProgress = { bytes, _, speed ->
+                        speedNow = speed
+                        onProgress?.invoke(bytes)
+                    },
+                )
+            }
+            if (done) {
+                speedNow = 0.0
+                return archive.length() > 40_000_000
+            }
+            segDir.deleteRecursively()
+            Log.w(TAG, "分段下载未完成，退回单连接")
+        }
+
+        val conn = java.net.URI(url).toURL().openConnection().apply {
+            connectTimeout = 20_000
+            readTimeout = 600_000
+            setRequestProperty("User-Agent", "LocalMind/1.0 (Android)")
+        }
+        conn.getInputStream().use { input ->
+            archive.outputStream().use { out ->
+                val buf = ByteArray(256 * 1024)
+                var written = 0L
+                var last = 0L
+                var window = 0L
+                var windowStart = System.currentTimeMillis()
+                while (true) {
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    out.write(buf, 0, n)
+                    written += n
+                    window += n
+                    val now = System.currentTimeMillis()
+                    if (now - windowStart >= 500) {
+                        speedNow = window * 1000.0 / (now - windowStart).coerceAtLeast(1)
+                        window = 0
+                        windowStart = now
+                        last = now
+                        onProgress?.invoke(written)
+                    }
+                }
+                onProgress?.invoke(written)
+            }
+        }
+        speedNow = 0.0
+        return archive.length() > 40_000_000
     }
 
     /**

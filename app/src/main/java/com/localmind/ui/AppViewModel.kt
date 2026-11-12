@@ -3941,6 +3941,190 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ------------------------------------------------------------ 语音工作室（VoiceStudio 界面）
+    //
+    // 这一组状态只服务于 ui/screen/VoiceStudioScreen.kt。它们不在 init 里被读写，
+    // 所以可以放在这里（不像上面那几个 StateFlow 必须提前声明）。
+
+    private val _studioDraft = MutableStateFlow("")
+    val studioDraft: StateFlow<String> = _studioDraft.asStateFlow()
+    fun setStudioDraft(text: String) { _studioDraft.value = text }
+
+    private val _synthBusy = MutableStateFlow(false)
+
+    /** 正在合成（按钮转圈、禁止重复点）。 */
+    val synthBusy: StateFlow<Boolean> = _synthBusy.asStateFlow()
+
+    private val _synthFile = MutableStateFlow<File?>(null)
+
+    /** 最后一次合成出的 WAV；null = 还没合成过 / 已清空。 */
+    val synthFile: StateFlow<File?> = _synthFile.asStateFlow()
+
+    private val _synthError = MutableStateFlow<String?>(null)
+    val synthError: StateFlow<String?> = _synthError.asStateFlow()
+
+    private val _synthMeta = MutableStateFlow("")
+
+    /** 播放器下面那行说明：用哪个音色合成的、多少秒。 */
+    val synthMeta: StateFlow<String> = _synthMeta.asStateFlow()
+
+    /** 工作室的产物目录（重合成会覆盖同一个文件，用户要留就导出）。 */
+    val studioDir: File get() = File(storage.appContext().filesDir, "studio").apply { mkdirs() }
+
+    /**
+     * 合成到文件（VoiceStudio 的「Synthesize audio」）。
+     *
+     * 为什么写文件而不是直接播：VoiceStudio 的核心交互是"生成 → 波形条 → 播放/导出"，
+     * 波形条要有总时长、要能拖进度，这些都要一个真实的可寻址音频源。
+     * AudioTrack 直推是播不了进度条的。
+     */
+    fun synthesizeStudio(text: String) {
+        val body = text.trim()
+        if (body.isEmpty()) {
+            toast("先写点要念的内容")
+            return
+        }
+        if (_synthBusy.value) return
+        val clone = _activeClone.value
+        val neuralId = _activeNeuralVoice.value
+        if (clone == null && neuralId.isBlank()) {
+            toast("先在上面选一个音色")
+            return
+        }
+        _synthBusy.value = true
+        _synthError.value = null
+        viewModelScope.launch {
+            val target = File(studioDir, "last.wav")
+            val v = _voice.value
+            val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+            val label = clone?.name ?: com.localmind.data.VoiceCatalog.byId(neuralId)?.label ?: "音色"
+            val ok = withContext(Dispatchers.Default) {
+                runCatching {
+                    if (clone != null) {
+                        val audio = cloneAudio
+                        if (audio == null) {
+                            // 选中的克隆还没解析过（比如刚启动）：先补上再合成。
+                            val rt = withContext(Dispatchers.IO) { buildCloneRuntime(clone) }
+                                ?: return@runCatching false
+                            if (!withContext(Dispatchers.IO) { loadCloneBase() }) return@runCatching false
+                            cloneAudio = rt.audio
+                            cloneSampleRate = rt.sampleRate
+                            cloneText = rt.referenceText
+                            neuralTts.synthesizeCloneToWav(
+                                body, rt.audio, rt.sampleRate, rt.referenceText, rate, pitch, target,
+                            )
+                        } else {
+                            if (neuralTts.loadedVoiceId !=
+                                com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID &&
+                                !withContext(Dispatchers.IO) { loadCloneBase() }
+                            ) {
+                                return@runCatching false
+                            }
+                            neuralTts.synthesizeCloneToWav(
+                                body, audio, cloneSampleRate, cloneText, rate, pitch, target,
+                            )
+                        }
+                    } else {
+                        if (neuralTts.loadedVoiceId != neuralId) {
+                            val entry = com.localmind.data.VoiceCatalog.byId(neuralId)
+                            if (entry == null) return@runCatching false
+                            val loaded = withContext(Dispatchers.IO) { neuralTts.load(storage, entry) }
+                            if (loaded == null) return@runCatching false
+                        }
+                        neuralTts.synthesizeToWav(body, rate, pitch, target)
+                    }
+                }.getOrElse { t ->
+                    Log.w("AppViewModel", "工作室合成失败：${t.message}", t)
+                    false
+                }
+            }
+            _synthBusy.value = false
+            if (ok && target.isFile && target.length() > 44L) {
+                _synthFile.value = target
+                _synthMeta.value = label + " · " + body.take(24).replace("\n", " ") +
+                    (if (body.length > 24) "…" else "")
+            } else {
+                _synthFile.value = null
+                _synthError.value = "合成失败：音色没加载起来，或参考音频有问题"
+                toast("合成失败")
+            }
+        }
+    }
+
+    fun clearStudioAudio() {
+        _synthFile.value = null
+        _synthMeta.value = ""
+        _synthError.value = null
+        runCatching { File(studioDir, "last.wav").delete() }
+    }
+
+    /** 试听一段本地 WAV（克隆页"录完还没保存"时用，也用于确认上传的文件能播）。 */
+    private var previewPlayer: android.media.MediaPlayer? = null
+
+    fun previewWavFile(file: File) {
+        if (!file.isFile) {
+            toast("文件不存在")
+            return
+        }
+        runCatching {
+            previewPlayer?.let { runCatching { it.release() } }
+            previewPlayer = android.media.MediaPlayer().apply {
+                setDataSource(file.absolutePath)
+                prepare()
+                start()
+            }
+        }.onFailure { t ->
+            toast("放不出来：" + (t.message ?: "格式不支持"))
+        }
+    }
+
+    /**
+     * 把最后一次合成导出到「音乐/LocalMind」。
+     *
+     * 走 MediaStore（API 29+）而不是直接写 `Environment.getExternalStoragePublicDirectory`：
+     * 后者从 Android 10 起就被分区存储挡掉了，写进去用户也看不到。
+     * 26–28 上退回 App 外部目录，至少文件能拿到。
+     *
+     * @return 导出后的可读位置；失败返回 null。
+     */
+    fun exportSynthAudio(): String? {
+        val src = _synthFile.value?.takeIf { it.isFile } ?: return null
+        val name = "LocalMind-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+            .format(java.util.Date()) + ".wav"
+        return runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val resolver = storage.appContext().contentResolver
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+                    put(
+                        android.provider.MediaStore.Audio.Media.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_MUSIC + "/LocalMind",
+                    )
+                    put(android.provider.MediaStore.Audio.Media.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(
+                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values,
+                ) ?: return null
+                resolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+                values.clear()
+                values.put(android.provider.MediaStore.Audio.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                "音乐/LocalMind/$name"
+            } else {
+                val dir = File(
+                    storage.appContext().getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC),
+                    "LocalMind",
+                ).apply { mkdirs() }
+                val dst = File(dir, name)
+                src.inputStream().use { input -> dst.outputStream().use { input.copyTo(it) } }
+                dst.absolutePath
+            }
+        }.getOrNull()
+    }
+
     /**
      * 神经语音引擎（原生库）的下载状态。
      *

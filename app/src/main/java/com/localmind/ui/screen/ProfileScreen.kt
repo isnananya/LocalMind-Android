@@ -157,7 +157,7 @@ fun ProfileScreen(viewModel: AppViewModel) {
     // 语音与音色同理：情绪、语速、音色、试听是一整页的内容。
     if (showVoice) {
         androidx.activity.compose.BackHandler(enabled = true) { showVoice = false }
-        VoiceScreen(viewModel)
+        VoiceStudioScreen(viewModel) { showVoice = false }
         return
     }
 
