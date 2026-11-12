@@ -706,6 +706,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 用户手动覆盖的界面令牌。 */
     private val _themeOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
 
+    // ---------------------------------------------------- 语音 / 克隆音色的状态
+    //
+    // 同样**必须声明在 `init` 之前**（同上一段的原因）：init 里会调
+    // refreshClonedVoices() 和 restoreNeuralVoice()。放在语音相关代码旁边
+    // 读起来更顺，但 init 跑的时候它们还是 null，R8 一旦把小函数内联进构造函数，
+    // 就是 `MutableStateFlow.setValue ... on a null object reference` 直接启动崩溃。
+
+    /** 现在真正加载着的神经音色 id；空串表示在用系统 TTS。 */
+    private val _activeNeuralVoice = MutableStateFlow("")
+    val activeNeuralVoice: StateFlow<String> = _activeNeuralVoice.asStateFlow()
+
+    /** 用户存过的克隆音色列表（UI 展示用）。 */
+    private val _clonedVoices = MutableStateFlow<List<ClonedVoice>>(emptyList())
+    val clonedVoices: StateFlow<List<ClonedVoice>> get() = _clonedVoices.asStateFlow()
+
+    /** 当前选中的克隆音色（元数据，UI 显示「使用中」用）。 */
+    private val _activeClone = MutableStateFlow<ClonedVoice?>(null)
+    val activeClone: StateFlow<ClonedVoice?> get() = _activeClone.asStateFlow()
+
     /** 已安装的界面主题包（key = 插件 id）。 */
     private val _installedUiThemes =
         MutableStateFlow<Map<String, com.localmind.data.UiTheme>>(emptyMap())
@@ -1032,6 +1051,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         def("appTitleOverride") { _appTitleOverride }
         def("themeOverrides") { _themeOverrides }
         def("installedUiThemes") { _installedUiThemes }
+        def("activeNeuralVoice") { _activeNeuralVoice }
+        def("clonedVoices") { _clonedVoices }
+        def("activeClone") { _activeClone }
         def("pendingImage") { _pendingImage }
         def("diffusionModels") { _diffusionModels }
     }
@@ -3710,10 +3732,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val voiceDownloadStates: StateFlow<Map<String, com.localmind.service.VoiceModelDownloader.State>> =
         voiceDownloader.states
 
-    /** 现在真正加载着的神经音色 id；空串表示在用系统 TTS。 */
-    private val _activeNeuralVoice = MutableStateFlow("")
-    val activeNeuralVoice: StateFlow<String> = _activeNeuralVoice.asStateFlow()
-
     // ---- 声音克隆（零样本）：上传参考音频复刻音色 ----
     //
     // 克隆不是一种「独立的音色」，而是「ZipVoice2 底模 + 一段参考音频」。所以状态分两层：
@@ -3722,14 +3740,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     //    [cloneAudio]/[cloneSampleRate]/[cloneText]，speak 时直接喂给 ZipVoice2。
     // 选中克隆时会把底模加载进来（loadedVoiceId == ZIPVOICE_CLONE_BASE_ID），
     // 这样 speak() 一眼就能判断「现在该走克隆链路还是普通神经链路」。
-
-    /** 用户存过的克隆音色列表（UI 展示用）。 */
-    private val _clonedVoices = MutableStateFlow<List<ClonedVoice>>(emptyList())
-    val clonedVoices: StateFlow<List<ClonedVoice>> get() = _clonedVoices.asStateFlow()
-
-    /** 当前选中的克隆音色（元数据，UI 显示「使用中」用）。 */
-    private val _activeClone = MutableStateFlow<ClonedVoice?>(null)
-    val activeClone: StateFlow<ClonedVoice?> get() = _activeClone.asStateFlow()
+    //
+    // 注：`_activeNeuralVoice` / `_clonedVoices` / `_activeClone` 这三个 StateFlow
+    // **声明在文件上方 `init` 之前那一区**（init 会碰它们，放这里就是启动崩溃）。
 
     /** 选中的克隆音色解析后的参考音频（已重采样到 [cloneSampleRate]）。 */
     @Volatile private var cloneAudio: FloatArray? = null
