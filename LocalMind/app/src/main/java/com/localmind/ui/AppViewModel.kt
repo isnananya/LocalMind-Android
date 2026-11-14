@@ -5388,6 +5388,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _themeDownloadStatus = MutableStateFlow("")
     val themeDownloadStatus: StateFlow<String> by lazy { _themeDownloadStatus.asStateFlow() }
 
+    /** 正在下载的主题 → 已完成的百分比（0–100）。下载结束（成功/失败）就移除。 */
+    private val _themeProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val themeProgress: StateFlow<Map<String, Int>> by lazy { _themeProgress.asStateFlow() }
+
     /**
      * 已经下载到本机、可以直接安装（不用再联网）的主题 id。
      *
@@ -5464,8 +5468,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val file = themeStore.download(entry) { done, total ->
                     if (total > 0 && !entry.isBuiltin) {
+                        val pct = (done * 100 / total).toInt().coerceIn(0, 100)
+                        _themeProgress.value = _themeProgress.value + (entry.id to pct)
                         _themeDownloadStatus.value =
-                            "正在下载「${entry.name}」 ${done / 1024 / 1024} / ${total / 1024 / 1024} MB"
+                            "正在下载「${entry.name}」 $pct%（${done / 1024} / ${total / 1024} KB）"
                     }
                 }
                 if (file == null) {
@@ -5499,6 +5505,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _themeDownloadStatus.value = "出错：${t.message?.take(60)}"
             } finally {
                 _themeDownloading.value = ""
+                _themeProgress.value = _themeProgress.value - entry.id
                 refreshThemeCache()
             }
         }

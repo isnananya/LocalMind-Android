@@ -13,6 +13,7 @@
 """
 import json
 import os
+import re
 import shutil
 import zipfile
 
@@ -417,12 +418,48 @@ MIT。
 ]
 
 
+def _token_defaults():
+    """从 UiTheme.kt 提取全部令牌的默认值 —— 主题没写的键用默认补齐。
+
+    主题包令牌不全时，没写的键回落到 App 内置默认值，用户看到的
+    「主题完整度」就忽高忽低；打包时统一补到全量，深浅色都一样。
+    """
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "app", "src", "main", "java", "com", "localmind",
+                       "data", "UiTheme.kt")
+    text = open(src, encoding="utf-8").read()
+    pairs = re.findall(r'UiToken\(\s*"([A-Za-z]+)".*?,\s*TokenType\.[A-Z]+,\s*"([^"]*)"', text, re.S)
+    return dict(pairs)
+
+
+TOKEN_DEFAULTS = _token_defaults()
+# 玻璃主题的底栏细节，老主题当年没写这些键，补上统一质感
+GLASS_EXTRAS = {
+    "tabBarHeight": "60", "tabBarBlur": "16", "tabIconSize": "23",
+    "barBorderWidth": "0.5", "uiKit": "auto", "glassBarLiquid": "true",
+    "dynamicColor": "false", "glassBarOutline": "true", "glassBarHighlight": "0.35",
+    "glassBarSlotWidth": "76", "glassBarBottomBlur": "true", "glassBarIconOnly": "false",
+    "glassBarLabelSize": "11", "dockImpl": "liquidTabBar",
+}
+
+
+def complete_tokens(ui):
+    light = dict(TOKEN_DEFAULTS)
+    light.update(GLASS_EXTRAS)
+    light.update(ui.get("tokens", {}))
+    dark = dict(light)
+    dark.update(ui.get("darkTokens", {}))
+    ui["tokens"] = dict(sorted(light.items()))
+    ui["darkTokens"] = dict(sorted(dark.items()))
+
+
 def build(theme):
     d = os.path.join(SRC, theme["dir"])
     # 不删整个目录再重建 —— 覆盖写就行，而且删目录在这台机器上
     # 会被回收站机制拦下来（"系统找不到指定的文件"）。
     os.makedirs(os.path.join(d, "assets"), exist_ok=True)
 
+    complete_tokens(theme["ui"])
     with open(os.path.join(d, "plugin.json"), "w", encoding="utf-8") as f:
         json.dump(theme["plugin"], f, ensure_ascii=False, indent=2)
     with open(os.path.join(d, "ui.json"), "w", encoding="utf-8") as f:

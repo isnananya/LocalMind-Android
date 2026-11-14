@@ -3,9 +3,13 @@ package com.localmind.service
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -151,8 +155,9 @@ class ThemeStoreService(private val context: Context) {
      * 大包下载必须给宽一点，否则会在"马上就好了"的时候被掐断。
      */
     private val downloadClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val dir = File(context.filesDir, "remote_data").apply { mkdirs() }
@@ -322,14 +327,16 @@ class ThemeStoreService(private val context: Context) {
                 return@withContext copyBuiltin(entry.builtinAsset, target, onProgress, entry.name)
             }
 
-            // GitHub 直连在国内常常不通。把清单里的主地址、备用地址、以及
-            // 自动展开的 ghproxy 镜像排成一队，逐个试 —— 一个挂了不影响下一个。
+            // GitHub 直连在国内常常不通。候选 = 清单地址 + 内置代理展开，
+            // 先**并行测速**（谁先回谁排前面），再按实测顺序逐个下 ——
+            // 不再把时间浪费在"第一个源挂了才知道"上。
             // 进度回调按「当前这个源」汇报，换源时从 0 重新开始是如实反映。
-            val urls = entry.packageUrls
+            val urls = raceSources(entry.packageUrls)
             if (urls.isEmpty()) {
                 Log.w(TAG, "没有合法的下载地址：${entry.id}")
                 return@withContext null
             }
+            Log.i(TAG, "源竞速结果：${urls.joinToString("  ")}")
             for ((index, url) in urls.withIndex()) {
                 val ok = runCatching { downloadFrom(url, target, onProgress) }
                     .onFailure { Log.w(TAG, "源 ${index + 1} 失败：${it.message}", it) }
@@ -360,6 +367,30 @@ class ThemeStoreService(private val context: Context) {
         }
 
     /**
+     * 候选源竞速：**并行**对每个地址发一次 `Range: bytes=0-0` 的小探测，
+     * 按响应快慢排序 —— 最快的排最前，探测失败/超时的排最后（但还是给它们
+     * 兜底机会，万一是探测被限流而真下载没事）。
+     *
+     * 探测超时 4 秒：公共代理大多秒回，4 秒还没响应的基本就是挂了；
+     * 全部超时时保持原顺序（直连优先），行为退化为旧版。
+     */
+    private suspend fun raceSources(urls: List<String>): List<String> =
+        coroutineScope {
+            val probed = urls.map { url ->
+                async(Dispatchers.IO) {
+                    val latency = withTimeoutOrNull(4_000L) {
+                        val t0 = System.currentTimeMillis()
+                        if (MultiPartDownload.probe(downloadClient, url) != null) {
+                            System.currentTimeMillis() - t0
+                        } else null
+                    }
+                    url to (latency ?: Long.MAX_VALUE)
+                }
+            }.awaitAll()
+            probed.sortedBy { it.second }.map { it.first }
+        }
+
+    /**
      * 从一个地址下载到 [target]。
      *
      * **多连接分段**：先用 `Range: bytes=0-0` 探一次（顺带拿到文件大小），
@@ -380,7 +411,10 @@ class ThemeStoreService(private val context: Context) {
 
         val probe = MultiPartDownload.probe(downloadClient, url)
         if (probe != null && probe.rangeSupported) {
-            val segments = MultiPartDownload.segmentsFor(probe.totalBytes)
+            // 段数拉满：主题包虽小，但公共代理的**单连接吞吐很可怜**
+            // （几十 KB/s 很常见），8 条连接把握手开销换来的并行度吃满。
+            // 这是用户明确的要求 —— "多线程默认拉满，越快越好"。
+            val segments = maxOf(MultiPartDownload.segmentsFor(probe.totalBytes), 8)
             if (segments > 1) {
                 val segDir = MultiPartDownload.segmentDir(packsDir, target.name, probe.totalBytes)
                 val ok = kotlinx.coroutines.coroutineScope {
@@ -613,8 +647,15 @@ internal fun githubMirrorsFor(url: String): List<String> {
     if (!url.startsWith("https://") && !url.startsWith("http://")) return emptyList()
     val isGithub = GH_HOSTS.any { url.startsWith("https://$it/") || url.startsWith("http://$it/") }
     if (!isGithub) return emptyList()
-    return listOf(
-        "https://ghproxy.net/$url",
-        "https://gh-proxy.com/$url",
+    // 内置多个公共 GitHub 加速代理。哪个活着、哪个快不在这里猜 ——
+    // 下载前会全部探一轮延迟（见 ThemeStoreService.raceSources），按实测排序。
+    // 代理挂了顶多白测一次，不影响其它源。
+    val proxies = listOf(
+        "https://ghfast.top/",
+        "https://gh-proxy.com/",
+        "https://ghproxy.net/",
+        "https://gh.llkk.cc/",
+        "https://ghproxy.cc/",
     )
+    return proxies.map { it + url }
 }

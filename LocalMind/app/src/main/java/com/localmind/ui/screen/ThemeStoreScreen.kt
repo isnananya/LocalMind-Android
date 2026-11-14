@@ -68,6 +68,7 @@ fun ThemeStoreScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val error by viewModel.themeStore.lastError.collectAsState()
     val busyId by viewModel.themeDownloading.collectAsState()
     val status by viewModel.themeDownloadStatus.collectAsState()
+    val progressMap by viewModel.themeProgress.collectAsState()
     val cachedIds by viewModel.themeCachedIds.collectAsState()
     val installed by viewModel.installedUiThemes.collectAsState()
     val active by viewModel.activeUiTheme.collectAsState()
@@ -80,9 +81,16 @@ fun ThemeStoreScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         if (storeThemes.none { !it.isBuiltin }) viewModel.refreshThemeStore()
     }
 
-    val builtinThemes = storeThemes.filter { it.isBuiltin }
-    val onlineThemes = storeThemes.filter { !it.isBuiltin }
-    val installedEntries = storeThemes.filter { installed.containsKey(it.id) }
+    // 云端清单优先；清单里没有的主题（离线兜底的内置包）补在后面。
+    // **必须按 id 去重**：同一个主题（如樱雪）同时存在于内置兜底和云端清单，
+    // 两个分组各自渲染一次会撞 LazyColumn 的 key，直接闪退（真机已踩过）。
+    val mergedThemes = run {
+        val online = storeThemes.filter { !it.isBuiltin }.distinctBy { it.id }
+        val fallback = storeThemes.filter { entry ->
+            entry.isBuiltin && online.none { it.id == entry.id }
+        }
+        online + fallback
+    }
 
     Column(Modifier.fillMaxSize()) {
         AuroraNavBar(title = "主题商店", onBack = onBack)
@@ -102,9 +110,9 @@ fun ThemeStoreScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                             status.isNotBlank() -> status
                             error.isNotBlank() -> error
                             else -> buildString {
-                                append("内置 ${builtinThemes.size}")
-                                if (onlineThemes.isNotEmpty()) append(" · 在线 ${onlineThemes.size}")
+                                append("共 ${mergedThemes.size} 个主题")
                                 if (cachedIds.isNotEmpty()) append(" · 已下载 ${cachedIds.size}")
+                                if (installed.isNotEmpty()) append(" · 已安装 ${installed.size}")
                             }
                         },
                         trailing = {
@@ -129,46 +137,21 @@ fun ThemeStoreScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 )
             }
 
-            if (installedEntries.isNotEmpty()) {
+            if (mergedThemes.isNotEmpty()) {
                 storeSection(
-                    label = "已安装",
-                    entries = installedEntries,
+                    label = "全部主题",
+                    entries = mergedThemes,
                     busyId = busyId,
                     cachedIds = cachedIds,
                     installedIds = installed.keys,
                     activeId = active?.packId,
+                    progressMap = progressMap,
                     onPreview = { previewEntry = it },
                     onAction = { viewModel.downloadAndInstallTheme(it) },
                 )
             }
 
-            if (builtinThemes.isNotEmpty()) {
-                storeSection(
-                    label = "内置主题 · 不用联网",
-                    entries = builtinThemes,
-                    busyId = busyId,
-                    cachedIds = cachedIds,
-                    installedIds = installed.keys,
-                    activeId = active?.packId,
-                    onPreview = { previewEntry = it },
-                    onAction = { viewModel.downloadAndInstallTheme(it) },
-                )
-            }
-
-            if (onlineThemes.isNotEmpty()) {
-                storeSection(
-                    label = "在线主题",
-                    entries = onlineThemes,
-                    busyId = busyId,
-                    cachedIds = cachedIds,
-                    installedIds = installed.keys,
-                    activeId = active?.packId,
-                    onPreview = { previewEntry = it },
-                    onAction = { viewModel.downloadAndInstallTheme(it) },
-                )
-            }
-
-            if (storeThemes.isEmpty() && !loading) {
+            if (mergedThemes.isEmpty() && !loading) {
                 item {
                     AuroraGroup {
                         AuroraRow(
@@ -210,6 +193,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.storeSection(
     cachedIds: Set<String>,
     installedIds: Set<String>,
     activeId: String?,
+    progressMap: Map<String, Int>,
     onPreview: (ThemeStoreService.ThemeEntry) -> Unit,
     onAction: (ThemeStoreService.ThemeEntry) -> Unit,
 ) {
@@ -223,6 +207,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.storeSection(
             installed = installedIds.contains(entry.id),
             active = activeId == entry.id,
             cached = cachedIds.contains(entry.id),
+            progress = progressMap[entry.id],
             onPreview = { onPreview(entry) },
             onAction = { onAction(entry) },
         )
@@ -242,6 +227,7 @@ private fun ThemeStoreCard(
     installed: Boolean,
     active: Boolean,
     cached: Boolean,
+    progress: Int?,
     onPreview: () -> Unit,
     onAction: () -> Unit,
 ) {
@@ -305,7 +291,7 @@ private fun ThemeStoreCard(
             Spacer(Modifier.height(3.dp))
             Text(
                 buildString {
-                    if (entry.isBuiltin) append("内置 · ")
+                    if (entry.isBuiltin) append("离线可用 · ")
                     else if (entry.author.isNotBlank()) append(entry.author).append(" · ")
                     if (entry.sizeBytes > 0) append(fmtSize(entry.sizeBytes)).append(" · ")
                     append(entry.tags.take(2).joinToString(" / ").ifBlank { entry.description.ifBlank { "主题包" } })
@@ -344,11 +330,23 @@ private fun ThemeStoreCard(
             contentAlignment = Alignment.Center,
         ) {
             when {
-                busy -> CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = ios.blue,
-                )
+                busy -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = if (installed || cached) ios.blue else ios.onAccent,
+                    )
+                    // 下载中有百分比就跟着转圈显示 —— 用户要的是"看得见在动"，
+                    // 只有一个小圈圈转会被当成卡死。
+                    if (progress != null) {
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "$progress%",
+                            style = IosTheme.typography.caption2,
+                            color = if (installed || cached) ios.blue else ios.onAccent,
+                        )
+                    }
+                }
                 active -> Text("使用中", style = IosTheme.typography.caption1, color = ios.secondaryLabel)
                 installed -> Text("使用", style = IosTheme.typography.callout, color = ios.blue, fontWeight = FontWeight.SemiBold)
                 cached -> Text("安装", style = IosTheme.typography.callout, color = ios.blue, fontWeight = FontWeight.SemiBold)

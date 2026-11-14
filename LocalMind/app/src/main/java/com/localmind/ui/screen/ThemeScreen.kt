@@ -62,7 +62,6 @@ fun ThemeScreen(
     onOpenStore: () -> Unit = {},
 ) {
     val ios = IosTheme.palette
-    val themes by viewModel.installedUiThemes.collectAsState()
     val activeTheme by viewModel.activeUiTheme.collectAsState()
     val overrides by viewModel.themeOverrides.collectAsState()
     val layouts by viewModel.installedLayouts.collectAsState()
@@ -111,7 +110,7 @@ fun ThemeScreen(
                         subtitle = when {
                             activeTheme != null -> activeTheme!!.packName
                             activePreset != null -> "预设 · " + activePreset!!.name
-                            else -> "内置外观"
+                            else -> "默认外观"
                         },
                         showChevron = false,
                     )
@@ -368,47 +367,28 @@ fun ThemeScreen(
             }
 
             item {
-                AuroraSectionLabel("主题包")
-                AuroraGroup {
-                    AuroraRow(
-                        title = "内置外观",
-                        subtitle = "跟随系统深浅色",
-                        trailing = { CheckMark(activeTheme == null) },
-                        onClick = { viewModel.useBuiltinTheme() },
-                    )
-                    themes.values.sortedBy { it.packName }.forEach { theme ->
-                        AuroraRow(
-                            title = theme.packName,
-                            subtitle = (theme.tokens.size + theme.darkTokens.size).toString() +
-                                " 项令牌" +
-                                if (theme.author.isNotBlank()) " · " + theme.author else "",
-                            trailing = { CheckMark(activeTheme?.packId == theme.packId) },
-                            onClick = { viewModel.useUiTheme(theme) },
-                        )
-                    }
-                }
-            }
-
-            item {
                 // ---- 主题商店入口 ----
                 //
-                // 原来这一段是内嵌列表，主题一多就把底栏/布局那些开关挤到看不见；
-                // 现在只留一行入口，真正的列表在 ThemeStoreScreen（独立一屏）。
+                // 换主题只有这一个入口：商店里点「使用」直接切换。
+                // （原来的「主题包」选择区已删 —— 内置/已装主题的分列让用户
+                //  分不清哪个是哪个，现在一切以商店列表为准。）
                 val storeThemes by viewModel.themeStore.themes.collectAsState()
                 val cachedIds by viewModel.themeCachedIds.collectAsState()
+                val installedThemes by viewModel.installedUiThemes.collectAsState()
                 val installing by viewModel.themeDownloading.collectAsState()
 
                 LaunchedEffect(Unit) { viewModel.refreshThemeCache() }
 
-                AuroraSectionLabel("主题商店")
+                AuroraSectionLabel("主题")
                 AuroraGroup {
                     AuroraRow(
-                        title = "浏览主题商店",
+                        title = "主题商店",
                         subtitle = buildString {
-                            val online = storeThemes.count { !it.isBuiltin }
-                            val builtin = storeThemes.count { it.isBuiltin }
-                            append("内置 ").append(builtin)
-                            if (online > 0) append(" · 在线 ").append(online)
+                            if (installedThemes.isNotEmpty()) {
+                                append("已安装 ").append(installedThemes.size)
+                            } else {
+                                append("挑选并一键应用界面主题")
+                            }
                             if (cachedIds.isNotEmpty()) append(" · 已下载 ").append(cachedIds.size)
                             if (installing.isNotBlank()) append(" · 正在安装…")
                         },
