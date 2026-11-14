@@ -64,7 +64,8 @@ enum class Tab(val title: String) {
     HOME("首页"),
     CHAT("对话"),
     MODELS("模型"),
-    ME("我的"),
+    /** 「更多」：外观 / 插件 / 状态 / 更新通道 / 关于 等入口都收在这里。 */
+    ME("更多"),
     /** TTS 测试整页。默认不是标签，但界面布局插件可以把它放到底栏。 */
     VOICE("TTS"),
     /** Breeze TTS 2（外部语音引擎）整页。 */
@@ -176,6 +177,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val remoteData get() = localApp.remoteData
     /** 在线主题商店，见 [com.localmind.service.ThemeStoreService]。 */
     val themeStore get() = localApp.themeStore
+    /** 在线字体商店，见 [com.localmind.service.FontStoreService]。 */
+    val fontStore get() = localApp.fontStore
+    /** 云端气泡目录，见 [com.localmind.service.BubbleStoreService]。 */
+    val bubbleStore get() = localApp.bubbleStore
     val emoji get() = localApp.emoji
     val voiceDownloader get() = localApp.voiceDownloader
     val stt get() = localApp.stt
@@ -220,18 +225,165 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun consumeAnnouncement() { _pendingAnnouncement.value = null }
     fun consumeUpdate() { _pendingUpdate.value = null }
 
+    /** 更新通道：stable / beta。改了就立刻重拉该通道的版本信息。 */
+    val updateChannel: StateFlow<String> get() = remoteData.channel
+
+    fun setUpdateChannel(channel: String) {
+        remoteData.setChannel(channel)
+        viewModelScope.launch {
+            runCatching { remoteData.refreshRelease() }
+            val rel = remoteData.pendingUpdate(com.localmind.BuildConfig.VERSION_CODE)
+            if (rel != null) {
+                _pendingUpdate.value = rel
+            } else {
+                toast(
+                    if (channel == "beta") "已切到测试版通道 · 当前没有更新的测试版"
+                    else "已切到稳定版通道 · 当前已是最新",
+                )
+            }
+        }
+    }
+
+    /** 「更多 → 检查更新」：手动触发一次。 */
+    fun checkUpdateNow() {
+        viewModelScope.launch {
+            toast("正在检查更新…")
+            runCatching { remoteData.refreshRelease() }
+            val rel = remoteData.pendingUpdate(com.localmind.BuildConfig.VERSION_CODE)
+            if (rel != null) {
+                _pendingUpdate.value = rel
+            } else {
+                val ch = if (remoteData.channel.value == "beta") "测试版" else "稳定版"
+                toast("已是最新版本 v" + com.localmind.BuildConfig.VERSION_NAME + "（$ch 通道）")
+            }
+        }
+    }
+
+    /**
+     * 公告实时获取。
+     *
+     * 以前只在启动时拉一次，后台发了公告，正在用的人要杀进程重开才看得到。
+     * 现在前台每 60 秒轻量轮询「公告 + 版本」两个小 JSON（几 KB），
+     * 有新公告就直接弹窗 —— 这才是"发公告马上生效"。
+     *
+     * 只在 App 前台跑：跟着 viewModelScope 走，进程在后台时协程也会被系统挂起。
+     */
+    private var livePollingJob: Job? = null
+
+    private fun startLivePolling() {
+        if (livePollingJob?.isActive == true) return
+        livePollingJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(60_000L)
+                runCatching { remoteData.refreshLive() }
+                // 新公告 → 弹；同一 id 看过就不再弹（判定在 RemoteDataService 里）
+                remoteData.pendingAnnouncement()?.let { ann ->
+                    if (_pendingAnnouncement.value?.id != ann.id) {
+                        _pendingAnnouncement.value = ann
+                    }
+                }
+                // 版本下发也顺手看一眼（强制更新要尽快生效）
+                remoteData.pendingUpdate(com.localmind.BuildConfig.VERSION_CODE)?.let { rel ->
+                    if (_pendingUpdate.value?.versionCode != rel.versionCode) {
+                        _pendingUpdate.value = rel
+                    }
+                }
+            }
+        }
+    }
+
     fun refreshRemoteData() {
         viewModelScope.launch {
+            // 匿名统计：只上报事件，不上报身份；失败静默
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    localApp.telemetry.reportLaunch(com.localmind.BuildConfig.VERSION_CODE)
+                }
+            }
             runCatching { remoteData.refreshAll() }.onFailure {
                 Log.w("AppViewModel", "远程数据刷新失败（不影响使用）：${it.message}")
             }
+            // 设备画像：每个 App 版本上报一次（机型/运存/CPU/系统），后台「数据」页就看这个
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    localApp.telemetry.reportDevice(
+                        com.localmind.BuildConfig.VERSION_CODE,
+                        com.localmind.BuildConfig.VERSION_NAME,
+                        remoteData.channel.value,
+                    )
+                }
+            }
             _pendingAnnouncement.value = remoteData.pendingAnnouncement()
             _pendingUpdate.value = remoteData.pendingUpdate(com.localmind.BuildConfig.VERSION_CODE)
+            // 上次是不是崩了？崩了就等用户决定要不要上传
+            _pendingCrash.value = com.localmind.service.CrashReporter.pending(localApp)
+            startLivePolling()
+        }
+    }
+
+    // ---------------------------------------------------------- 崩溃与反馈
+
+    private val _pendingCrash = MutableStateFlow<com.localmind.service.CrashReporter.Report?>(null)
+
+    /** 上次启动留下的崩溃报告（只落盘，未上传）。 */
+    val pendingCrash: StateFlow<com.localmind.service.CrashReporter.Report?> = _pendingCrash
+
+    /**
+     * 用户点了「上传」：把堆栈发到回收通道，然后删掉本地文件。
+     * 发不发得出去都不再打扰用户 —— 这是帮忙，不是义务。
+     */
+    fun submitCrash(report: com.localmind.service.CrashReporter.Report, note: String) {
+        _pendingCrash.value = null
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    localApp.telemetry.sendCrash(report.stack, report.versionName, report.versionCode, note)
+                }
+            }
+            com.localmind.service.CrashReporter.dismiss(localApp)
+            toast("崩溃日志已上传，谢谢！")
+        }
+    }
+
+    /** 用户点了「不上传」：直接删，等于没发生过。 */
+    fun dismissCrash() {
+        _pendingCrash.value = null
+        runCatching { com.localmind.service.CrashReporter.dismiss(localApp) }
+    }
+
+    /** 意见留言：成功返回 true，UI 据此清空输入框。 */
+    suspend fun sendFeedback(text: String, contact: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { localApp.telemetry.sendFeedback(text, contact) }.getOrDefault(false)
+    }
+
+    /** 「功能建议」页展示的本机信息（和上报内容完全一致）。 */
+    fun localDeviceSummary(): String =
+        runCatching { localApp.telemetry.localDeviceSummary() }.getOrDefault("")
+
+    /** 更新弹窗的选择（用于后台看内测推送的接受率）。 */
+    fun reportUpdateDecision(action: String, to: com.localmind.service.RemoteDataService.ReleaseInfo) {
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    localApp.telemetry.reportUpdateDecision(
+                        action = action,
+                        fromVersion = com.localmind.BuildConfig.VERSION_NAME,
+                        toVersion = to.latestVersion,
+                        channel = remoteData.channel.value,
+                    )
+                }
+            }
         }
     }
 
     fun dismissAnnouncementRead(id: String) {
         remoteData.markAnnouncementRead(id)
+        // 公告已读：给后台一个 +1（每台设备每条公告只报一次）
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { localApp.telemetry.reportAnnouncementRead(id) }
+            }
+        }
         _pendingAnnouncement.value = null
     }
 
@@ -719,6 +871,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 用户手动覆盖的界面令牌。 */
     private val _themeOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
 
+    /**
+     * 当前生效的字体 id（存在覆盖表的 `fontId` 键里）。
+     *
+     * ⚠️ 1.0.10 启动闪退就是它：声明原本写在文件末尾（字体商店那一段），
+     * 而 `init` 里的 `refreshUiTheme()` 会写 `_activeFontId.value`。
+     * 构造期间属性还没初始化 → null → `getClass() on a null object reference`，
+     * 崩在 `Cannot create an instance of class AppViewModel`。
+     * **凡是 init 会写到的状态，一律放这一段。**
+     */
+    private val _activeFontId = MutableStateFlow("")
+
     // ---------------------------------------------------- 语音 / 克隆音色的状态
     //
     // 同样**必须声明在 `init` 之前**（同上一段的原因）：init 里会调
@@ -1045,6 +1208,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *
      * 加了新状态就往列表里补一项，这是唯一的维护成本。
      */
+    /**
+     * 启动期的"可失败步骤"。
+     *
+     * 构造函数里做的事（读设置、建令牌、重建插件状态）**任何一步抛异常，用户看到的就是
+     * "打开即闪退"** —— 1.0.10 的 `Cannot create an instance of class AppViewModel`
+     * 就是这么来的。界面层面的失败只应该让界面退化成默认外观，不应该拦住整个 App。
+     *
+     * 所以这里只记日志并继续。真正的字段顺序问题仍然由 [assertFieldsInitialized] 在开发期喊出来。
+     */
+    private inline fun bootStep(name: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (t: Throwable) {
+            Log.e("AppViewModel", "启动步骤 `$name` 失败（已降级继续）：${t.message}", t)
+        }
+    }
+
     private fun assertFieldsInitialized() {
         fun def(name: String, read: () -> Any?) {
             check(read() != null) {
@@ -1062,6 +1242,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         def("visibleTabs") { _visibleTabs }
         def("appTitleOverride") { _appTitleOverride }
         def("themeOverrides") { _themeOverrides }
+        // 1.0.10 漏了这一条，于是它是 null 却没人拦，直接崩在 refreshUiTheme。
+        def("activeFontId") { _activeFontId }
         def("installedUiThemes") { _installedUiThemes }
         def("activeNeuralVoice") { _activeNeuralVoice }
         def("clonedVoices") { _clonedVoices }
@@ -1073,7 +1255,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // 第一件事：确认下面要用到的字段都真的初始化了。
         // 放在最前面，报错才离原因近。见 assertFieldsInitialized 的说明。
-        assertFieldsInitialized()
+        bootStep("assertFields") { assertFieldsInitialized() }
 
         _settings.value = storage.loadGenerationSettings()
         _voice.value = storage.loadVoiceSettings()
@@ -1189,10 +1371,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
         // 界面令牌也先建一遍。深浅色在这里是**自己算出来的**（见 isDarkTheme），
         // 所以第一帧就是对的；MainActivity 之后还会用真实值再对一次。
-        refreshUiTheme(isDarkTheme)
+        bootStep("uiTheme") { refreshUiTheme(isDarkTheme) }
         // 语音引擎同理：插件可能在别处被装上/停用。
-        refreshBreeze()
-        refreshPipelines()
+        bootStep("breeze") { refreshBreeze() }
+        bootStep("pipelines") { refreshPipelines() }
 
         // 预热：等首帧画完再动手，别和界面初始化抢 IO / 内存。
         if (storage.loadUserProfile().onboarded) {
@@ -3730,6 +3912,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ) {
             val v = _voice.value
             val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+            markSpeaking()
             viewModelScope.launch {
                 withContext(Dispatchers.Default) {
                     neuralTts.speakClone(text, cloneAudio!!, cloneSampleRate, cloneText, rate, pitch, v.volume)
@@ -3743,6 +3926,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (neural.isNotBlank() && neuralTts.loadedVoiceId == neural) {
             val v = _voice.value
             val (rate, pitch) = tts.effective(v.speed, v.pitch, v.emotion)
+            markSpeaking()
             viewModelScope.launch {
                 withContext(Dispatchers.Default) {
                     neuralTts.speak(text, speed = rate, pitch = pitch, volume = v.volume)
@@ -3751,7 +3935,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         tts.init { }
-        tts.speak(text, _voice.value)
+        if (tts.speak(text, _voice.value)) markSpeaking()
     }
 
     /**
@@ -3764,6 +3948,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             neuralTts.loadedVoiceId == com.localmind.data.BuiltinVoices.ZIPVOICE_CLONE_BASE_ID
         ) {
             val (rate, pitch) = tts.effective(settings.speed, settings.pitch, settings.emotion)
+            markSpeaking()
             viewModelScope.launch {
                 withContext(Dispatchers.Default) {
                     neuralTts.speakClone(text, cloneAudio!!, cloneSampleRate, cloneText, rate, pitch, settings.volume)
@@ -3774,17 +3959,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val neural = _activeNeuralVoice.value
         if (neural.isNotBlank() && neuralTts.loadedVoiceId == neural) {
             val (rate, pitch) = tts.effective(settings.speed, settings.pitch, settings.emotion)
+            markSpeaking()
             viewModelScope.launch {
                 withContext(Dispatchers.Default) { neuralTts.speak(text, speed = rate, pitch = pitch, volume = settings.volume) }
             }
             return
         }
-        tts.speakQueued(text, settings)
+        if (tts.speakQueued(text, settings)) markSpeaking()
     }
 
     fun stopSpeaking() {
+        speakWatcher?.cancel()
+        speakWatcher = null
+        _speaking.value = false
         runCatching { neuralTts.stop() }
         tts.stop()
+    }
+
+    // ------------------------------------------------- 朗读状态（全局可停）
+
+    private val _speaking = MutableStateFlow(false)
+
+    /** 现在是不是在念（系统 TTS / 神经音色 / 克隆音色都算）。UI 据此显示「停止朗读」。 */
+    val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
+
+    @Volatile private var speakWatcher: Job? = null
+
+    /**
+     * 标记"开始朗读"，并起一个轮询来判断读完了没有。
+     *
+     * 为什么只能轮询：系统 TTS 的 `UtteranceProgressListener` 是**逐句**回调的，
+     * 而自动朗读是用 `QUEUE_ADD` 把整段拆成的多句排进队列，逐句回调拼不出
+     * "全部念完"这个时刻；神经音色那条链路则是阻塞调用，压根没有事件。
+     * `tts.isSpeaking()` 把两者都覆盖了，700ms 一次的开销可以忽略，
+     * 换来的是一个不会永远卡在「正在朗读」的按钮。
+     */
+    private fun markSpeaking() {
+        _speaking.value = true
+        if (speakWatcher?.isActive == true) return
+        speakWatcher = viewModelScope.launch {
+            while (isActive) {
+                delay(700)
+                val on = runCatching { tts.isSpeaking() }.getOrDefault(false)
+                if (!on) {
+                    _speaking.value = false
+                    break
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------- 神经音色（TTS）
@@ -4461,6 +4683,79 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val dst = File(dir, name)
                 src.inputStream().use { input -> dst.outputStream().use { input.copyTo(it) } }
                 dst.absolutePath
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * 试听用的固定短句。
+     *
+     * 选句的标准：短到 2–3 秒能念完（改参数要能反复试），长到能听出音色、
+     * 断句和情绪差别（"你好"两个字听不出语速）。中英混排也顺便验证了前端。
+     */
+    private val previewLine =
+        "你好，我是 LocalMind 的本地语音。这句话用来试听当前的音色和参数，2.0 倍速也一样清楚。"
+
+    /**
+     * 按**当前音色和参数**合成一句短句并立刻播放。
+     *
+     * 为什么需要它：改语速 / 音高 / 情绪之后，唯一的验证方式是"把整段脚本合成一次"
+     * —— 脚本长一点就是几十秒的等待，还会覆盖 `last.wav`、多一条合成记录。
+     * 试听走独立的 `preview.wav`：不覆盖产物、不写记录、不占导出配额。
+     *
+     * 和合成共用 [_synthBusy]：同一个引擎实例不能并发 `createTts`，而且 UI 上
+     * 一起转圈也比"两个按钮都能点、点完互相打断"更诚实。
+     */
+    fun previewVoiceLine() {
+        if (_synthBusy.value) return
+        if (_activeClone.value == null && _activeNeuralVoice.value.isBlank()) {
+            toast("先选一个音色")
+            return
+        }
+        if (!voiceEngineReady) {
+            toast("神经语音引擎还没装")
+            return
+        }
+        _synthBusy.value = true
+        viewModelScope.launch {
+            val f = File(studioDir, "preview.wav")
+            val ok = runCatching { synthToWavWithTimeline(previewLine, f, false) }
+                .getOrDefault(false to emptyList()).first
+            _synthBusy.value = false
+            if (ok && f.isFile && f.length() > 44L) previewWavFile(f)
+            else toast("试听失败：这个音色可能还没下完，或者缺少对应前端")
+        }
+    }
+
+    /**
+     * 把一条 WAV 分享给别的 App（微信 / QQ / 邮件 / 剪辑软件）。
+     *
+     * 为什么要先复制到 `files/shared`：FileProvider 白名单里只有
+     * shared / models / images / chat_images / cache，而合成产物在 `studio`、
+     * 记录在 `voice_takes` —— 用原路径会抛
+     * `IllegalArgumentException: Failed to find configured root`。
+     * 复制一份到已授权目录，比给每个内部目录都开白名单更省事，
+     * 顺带把文件名换成对人有意义的 `LocalMind-20261114-203000.wav`。
+     *
+     * @return 可以直接 `startActivity` 的 ACTION_SEND；失败返回 null。
+     */
+    fun shareAudio(src: File): Intent? {
+        if (!src.isFile) return null
+        return runCatching {
+            val ctx = storage.appContext()
+            val dir = File(ctx.filesDir, "shared").apply { mkdirs() }
+            val name = "LocalMind-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                .format(java.util.Date()) + ".wav"
+            val dst = File(dir, name)
+            src.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                ctx, ctx.packageName + ".fileprovider", dst,
+            )
+            Intent(Intent.ACTION_SEND).apply {
+                type = "audio/wav"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "LocalMind 语音")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }.getOrNull()
     }
@@ -5254,6 +5549,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _appTitleOverride.value = layout?.appName?.takeIf { it.isNotBlank() } ?: theme?.appName.orEmpty()
         _startTab.value = layout?.startTab?.takeIf { it.isNotBlank() } ?: theme?.startTab.orEmpty()
         _themeOverrides.value = overrides
+        _activeFontId.value = overrides["fontId"].orEmpty()
         refreshChatActions()
         _installedUiThemes.value = packs
         // 界面真正收集的那一份。放在最后，保证它和上面几个字段是同一次刷新算出来的。
@@ -5334,9 +5630,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         toast("已套用「${preset.name}」")
     }
 
+    /**
+     * 套用一个气泡样式。
+     *
+     * 和 [applyUiPreset] 的区别：气泡是**合并**进现有覆盖，不整表替换。
+     * 理由见 [com.localmind.data.UiPresets.BUBBLES] —— 用户可能已经用主题包调好了
+     * 整页配色，只想换气泡；整表替换会把那套配色一起清掉。
+     */
+    fun applyBubblePreset(preset: com.localmind.data.UiPresets.Preset) {
+        val next = storage.themeOverrides().toMutableMap()
+        next.putAll(preset.tokens)
+        preset.darkTokens.forEach { (k, v) ->
+            next[com.localmind.data.UiPresets.Preset.DARK_PREFIX + k] = v
+        }
+        storage.saveThemeOverrides(next)
+        localApp.bumpOverrideRevision()
+        refreshUiTheme()
+        toast("气泡已换成「${preset.name}」")
+    }
+
+    /** 当前气泡最像哪个样式（用于打勾）。 */
+    fun currentBubblePreset(): com.localmind.data.UiPresets.Preset? =
+        com.localmind.data.UiPresets.matchBubble(storage.themeOverrides())
+
     /** 当前覆盖最像哪个预设（用于界面上标"当前：暖橙"）。 */
-    fun currentUiPreset(): com.localmind.data.UiPresets.Preset? =
-        com.localmind.data.UiPresets.match(storage.themeOverrides())
+    fun currentUiPreset(): com.localmind.data.UiPresets.Preset? =        com.localmind.data.UiPresets.match(storage.themeOverrides())
 
     /**
      * 启用某个主题。
@@ -5406,6 +5724,189 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _themeCachedIds.value = runCatching { themeStore.cachedIds() }.getOrDefault(emptySet())
     }
 
+    // ---------------------------------------------------- 字体商店
+
+    /** 正在下载的字体 id；空 = 空闲。 */
+    private val _fontDownloading = MutableStateFlow("")
+    val fontDownloading: StateFlow<String> by lazy { _fontDownloading.asStateFlow() }
+
+    private val _fontProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val fontProgress: StateFlow<Map<String, Int>> by lazy { _fontProgress.asStateFlow() }
+
+    private val _fontStatus = MutableStateFlow("")
+    val fontStatus: StateFlow<String> by lazy { _fontStatus.asStateFlow() }
+
+    private val _installedFontIds = MutableStateFlow<Set<String>>(emptySet())
+    val installedFontIds: StateFlow<Set<String>> by lazy { _installedFontIds.asStateFlow() }
+
+    /** 当前生效的字体 id。字段本体在文件顶部「插件驱动的状态」（init 会写它）。 */
+    val activeFontId: StateFlow<String> by lazy { _activeFontId.asStateFlow() }
+
+    fun refreshFontCache() {
+        _installedFontIds.value = runCatching { fontStore.installedIds() }.getOrDefault(emptySet())
+    }
+
+    fun refreshFontStore() {
+        viewModelScope.launch {
+            _fontStatus.value = "正在获取字体列表…"
+            runCatching { fontStore.refresh() }
+                .onFailure { _fontStatus.value = "获取失败：${it.message?.take(60)}" }
+            refreshFontCache()
+            if (fontStore.lastError.value.isNotBlank()) {
+                _fontStatus.value = fontStore.lastError.value
+            } else if (_fontStatus.value.startsWith("正在")) {
+                _fontStatus.value = ""
+            }
+        }
+    }
+
+    /**
+     * 只设置生效字体（文件已经在本地时用）。
+     *
+     * 写进的是**用户覆盖**的 `fontId` 键 —— 和主题令牌同一张表，
+     * 所以持久化、诊断、恢复默认全都自动复用，不需要第二套存储。
+     */
+    fun applyFontId(id: String, name: String = "") {
+        val next = storage.themeOverrides().toMutableMap()
+        if (id.isBlank()) next.remove("fontId") else next["fontId"] = id
+        storage.saveThemeOverrides(next)
+        localApp.bumpOverrideRevision()
+        refreshUiTheme()
+        toast(
+            when {
+                id.isBlank() -> "已恢复默认字体"
+                name.isNotBlank() -> "字体已换成「$name」"
+                else -> "字体已切换"
+            }
+        )
+    }
+
+    /** 下载并应用一款字体。已下过的直接应用，不再走网络。 */
+    fun downloadAndApplyFont(entry: com.localmind.service.FontStoreService.FontEntry) {
+        if (_fontDownloading.value.isNotBlank()) {
+            toast("正在下载另一款字体，稍等")
+            return
+        }
+        viewModelScope.launch {
+            _fontDownloading.value = entry.id
+            try {
+                val cached = fontStore.cached(entry)
+                if (cached != null) {
+                    val ok = com.localmind.ui.theme.FontRegistry.register(
+                        getApplication(), entry.id, cached,
+                    )
+                    if (ok) {
+                        applyFontId(entry.id, entry.name)
+                        _fontStatus.value = ""
+                    } else {
+                        _fontStatus.value = "字体解析失败，换一款试试"
+                    }
+                    return@launch
+                }
+
+                _fontStatus.value = "正在下载「${entry.name}」…"
+                val file = fontStore.download(entry) { done, total ->
+                    if (total > 0) {
+                        val pct = (done * 100 / total).toInt().coerceIn(0, 100)
+                        _fontProgress.value = _fontProgress.value + (entry.id to pct)
+                        _fontStatus.value = "正在下载「${entry.name}」 $pct%"
+                    }
+                }
+                if (file == null) {
+                    _fontStatus.value = "字体下载失败，换个网络再试"
+                    toast("字体下载失败")
+                    return@launch
+                }
+                val ok = com.localmind.ui.theme.FontRegistry.register(getApplication(), entry.id, file)
+                if (!ok) {
+                    _fontStatus.value = "字体文件损坏，换一款试试"
+                    toast("字体解析失败")
+                    return@launch
+                }
+                refreshFontCache()
+                applyFontId(entry.id, entry.name)
+                _fontStatus.value = ""
+            } catch (t: Throwable) {
+                Log.w("AppViewModel", "字体下载失败", t)
+                _fontStatus.value = "出错：${t.message?.take(60)}"
+            } finally {
+                _fontDownloading.value = ""
+                _fontProgress.value = _fontProgress.value - entry.id
+                refreshFontCache()
+            }
+        }
+    }
+
+    /** 从系统文件选择器导入本机字体（用户自己的收藏），导入后立刻应用。 */
+    fun importLocalFont(uri: android.net.Uri, displayName: String) {
+        viewModelScope.launch {
+            val id = "local-" + System.currentTimeMillis().toString(36)
+            val ok = com.localmind.ui.theme.FontRegistry.importFromUri(getApplication(), uri, id)
+            if (!ok) {
+                toast("这个文件不是有效的字体")
+                return@launch
+            }
+            refreshFontCache()
+            applyFontId(id, displayName.ifBlank { "本机字体" })
+        }
+    }
+
+    fun deleteFont(entry: com.localmind.service.FontStoreService.FontEntry) {
+        val wasActive = activeFontId.value == entry.id
+        val ok = fontStore.delete(entry)
+        refreshFontCache()
+        if (wasActive) applyFontId("")
+        toast(if (ok) "已删除「${entry.name}」" else "没有找到字体文件")
+    }
+
+    // ---------------------------------------------------- 云端气泡
+
+    fun refreshBubbleStore() {
+        viewModelScope.launch { runCatching { bubbleStore.refresh() } }
+    }
+
+    /** 应用一个云端气泡（合并进覆盖，不清掉已有的配色）。 */
+    fun applyBubblePresetCloud(preset: com.localmind.data.UiPresets.Preset) =
+        applyBubblePreset(preset)
+
+    /**
+     * 主题包"带字体/气泡"的落地动作。
+     *
+     * 主题包自身的令牌已经通过 [useUiTheme] 生效；这里补两件令牌表达不了的事：
+     *  1. 字体是**一个文件**，得下载 + 注册；
+     *  2. 气泡预设如果要盖住用户之前选过的气泡，必须写进用户覆盖（优先级最高）。
+     */
+    private fun applyThemeExtras(
+        fontId: String,
+        bubbleId: String,
+        themeName: String,
+    ) {
+        if (bubbleId.isNotBlank()) {
+            bubbleStore.cloudBubbles.value.firstOrNull { it.id == bubbleId }?.let { applyBubblePreset(it) }
+        }
+        if (fontId.isBlank()) return
+        val entry = fontStore.fonts.value.firstOrNull { it.id == fontId }
+        if (entry == null) {
+            // 清单还没拉到：先把 id 写上，等字体文件存在时 IosTheme 会自己加载。
+            if (fontStore.cached(com.localmind.service.FontStoreService.FontEntry(fontId, fontId)) != null) {
+                applyFontId(fontId)
+            }
+            return
+        }
+        if (fontStore.cached(entry) != null) {
+            viewModelScope.launch {
+                val f = fontStore.cached(entry) ?: return@launch
+                if (com.localmind.ui.theme.FontRegistry.register(getApplication(), entry.id, f)) {
+                    applyFontId(entry.id)
+                }
+            }
+        } else {
+            // 字体要下载：不阻塞主题启用，后台拉完再换上。
+            toast("「$themeName」自带字体，正在后台下载…")
+            downloadAndApplyFont(entry)
+        }
+    }
+
     /** 删掉某个主题的本地安装包，腾空间。 */
     fun deleteCachedTheme(entry: com.localmind.service.ThemeStoreService.ThemeEntry) {
         val ok = themeStore.deleteCached(entry)
@@ -5453,6 +5954,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     setPluginEnabled(entry.id, true)
                     val theme = storage.loadUiThemes()[entry.id] ?: installed
                     useUiTheme(theme)
+                    applyThemeExtras(entry.fontId, entry.bubbleId, entry.name)
                     _themeDownloadStatus.value = ""
                     toast("「${entry.name}」已启用")
                 } finally {
@@ -5494,6 +5996,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // 装完启用它。
                 setPluginEnabled(manifestId, true)
                 storage.loadUiThemes()[manifestId]?.let { theme -> useUiTheme(theme) }
+                applyThemeExtras(entry.fontId, entry.bubbleId, entry.name)
 
                 // **不删安装包**：留着重装/换机前复用，删了下次又得下一遍。
                 // 占用很小（主题包 1–2 MB），清单里另给了「删除安装包」的入口。
