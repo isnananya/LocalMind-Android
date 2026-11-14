@@ -4,14 +4,15 @@
       "id": "dev.localmind.theme.sakura",
       "name": "樱雪物语",
       "author": "LocalMind",
-      "description": "二次元粉紫风格：带樱花壁纸、尾巴气泡、玻璃卡片、圆头像。",
-      "version": "1.0.0",
+      "description": "二次元粉紫风格：樱花壁纸、带尾巴气泡、玻璃卡片、圆头像。",
+      "version": "2.0.0",
       "builtinAsset": "builtin/themes/sakura.zip",
-      "sizeBytes": 1704821,
+      "sizeBytes": 1406141,
       "tags": [
         "二次元",
         "浅色",
-        "壁纸"
+        "壁纸",
+        "粉紫"
       ],
       "previewAsset": "builtin/themes/previews/sakura.png"
     },
@@ -19,14 +20,14 @@
       "id": "dev.localmind.theme.aurora-night",
       "name": "极光夜航",
       "author": "LocalMind",
-      "description": "暗色极光风格：星空壁纸、霓虹青强调色、拟物卡片、方角头像。",
-      "version": "1.0.0",
+      "description": "暗色极光风格：星空壁纸、霓虹青强调色、拟物卡片、下划线标签栏、方角头像。",
+      "version": "2.0.0",
       "builtinAsset": "builtin/themes/aurora-night.zip",
-      "sizeBytes": 1998106,
+      "sizeBytes": 947644,
       "tags": [
         "暗色",
         "壁纸",
-        "极简"
+        "极光"
       ],
       "previewAsset": "builtin/themes/previews/aurora-night.png"
     },
