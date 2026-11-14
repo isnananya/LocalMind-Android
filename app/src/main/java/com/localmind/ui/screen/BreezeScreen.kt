@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -75,6 +76,7 @@ fun BreezeScreen(viewModel: AppViewModel) {
         AuroraNavBar(title = "Breeze 语音", onBack = { viewModel.openBreeze(false) })
 
         LazyColumn(
+            flingBehavior = ScrollPhysics.fling(),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 44.dp),
         ) {

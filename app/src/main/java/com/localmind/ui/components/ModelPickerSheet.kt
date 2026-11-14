@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +95,7 @@ fun ModelPickerSheet(
             }
 
             LazyColumn(
+                flingBehavior = ScrollPhysics.fling(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 420.dp),
@@ -204,5 +206,3 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
     Box(Modifier.fillMaxWidth().height(0.5.dp).background(IosTheme.palette.separator))
 }
 
-// RouteRow 也一起删了：它唯一的消费端是那个已经撤掉的「模型分工」全局面板。
-// 现在每个槽位的行为 ConversationModelRow（见 ui/screen/ConversationSettings.kt）。

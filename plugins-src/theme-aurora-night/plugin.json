@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.aurora-night",
+  "name": "极光夜航",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "暗色极光主题：星空壁纸、霓虹强调色、悬浮卡片、方角头像。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

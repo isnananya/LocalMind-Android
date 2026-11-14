@@ -119,6 +119,54 @@ object ImageBridge {
     /** 这个插件是不是「通用版」（支持采样器覆盖 + 进度回调）。 */
     private external fun nativeSdUniversal(): Boolean
 
+    // ------------------------------------------------------- 1.1.0：图生图 / 超分
+    /** 能力位：bit0 = 图生图（含蒙版重绘），bit1 = ESRGAN 超分。不碰锁、不碰模型。 */
+    private external fun nativeSdCaps(): Int
+
+    private external fun nativeSdGenerateEx3(
+        modelPath: String,
+        prompt: String,
+        negative: String,
+        width: Int,
+        height: Int,
+        steps: Int,
+        seed: Int,
+        guidance: Float,
+        threads: Int,
+        flashMode: String,
+        sampler: String,
+        scheduler: String,
+        pixels: IntArray,
+        progress: ProgressSink?,
+        /** 初始图 ARGB；null = 文生图 */
+        initArgb: IntArray?,
+        initW: Int,
+        initH: Int,
+        strength: Float,
+        /** 蒙版灰度（低 8 位），255 = 重绘；null = 整图 */
+        maskGray: IntArray?,
+    ): Int
+
+    private external fun nativeSdUpscale(
+        esrganPath: String,
+        threads: Int,
+        factor: Int,
+        inArgb: IntArray,
+        inW: Int,
+        inH: Int,
+        outArgb: IntArray,
+    ): Int
+
+    @Volatile private var capsProbed: Int? = null
+    private val caps: Int
+        get() = capsProbed ?: runCatching { nativeSdCaps() }.getOrDefault(0).also { capsProbed = it }
+
+    /** 后端支不支持以图生图 / 局部重绘。 */
+    val hasImg2Img: Boolean get() = hasDiffusionBackend && (caps and 1) != 0
+
+    /** 后端支不支持 ESRGAN 超分。 */
+    val hasUpscaler: Boolean get() = hasDiffusionBackend && (caps and 2) != 0
+
     // ---- 探测结果要缓存 ----
     //
     // 这三个 getter 以前每次调用都进原生：nativeSdUniversal / nativeSdLoad / nativeSdAccelInfo
@@ -161,8 +209,11 @@ object ImageBridge {
     @Volatile private var backendProbed: Boolean? = null
 
     val hasDiffusionBackend: Boolean
-        get() = backendProbed ?: runCatching { nativeSdLoad("") }
-            .getOrDefault(false).also { backendProbed = it }
+        get() = backendProbed ?: runCatching {
+            // 随包内置的那份已经 load 进进程了，直接算可用：省掉一次 JNI 探测，
+            // 也避免在 .so 缺失的 ABI 上先抛一次 UnsatisfiedLinkError 再被 catch。
+            if (backendBundled) true else nativeSdLoad("")
+        }.getOrDefault(false).also { backendProbed = it }
 
     /**
      * 加载 [modelPath] 到常驻上下文。上下文跨调用存活，所以换图不会重读
@@ -222,11 +273,43 @@ object ImageBridge {
         scheduler: String = "",
         /** 逐帧回调：现在第 step 步 / 共 steps 步。插件太旧时不会被调用。 */
         onStep: ((Int, Int) -> Unit)? = null,
+        /** 初始图。给了就走图生图；尺寸会自动缩放到 [width]×[height]。 */
+        init: Bitmap? = null,
+        /** 局部重绘蒙版，长度必须 = width*height，值 255 = 重绘、0 = 保留。 */
+        mask: IntArray? = null,
+        /** 重绘强度 0..1，越小越贴近原图。 */
+        strength: Float = 0.6f,
     ): Bitmap? {
         if (modelPath.isBlank() || !hasDiffusionBackend) return null
         val safeW = width.coerceIn(64, 1024)
         val safeH = height.coerceIn(64, 1024)
         val pixels = IntArray(safeW * safeH)
+
+        // 图生图走 Ex3。它是新符号：后端不支持时**明确失败**而不是悄悄退化成
+        // 文生图 —— 后者会让用户以为「我选的参考图生效了」，那比报错更难查。
+        if (init != null) {
+            if (!hasImg2Img) return null
+            val initPx = IntArray(safeW * safeH)
+            val scaled = if (init.width == safeW && init.height == safeH) init
+                         else Bitmap.createScaledBitmap(init, safeW, safeH, true)
+            scaled.getPixels(initPx, 0, safeW, 0, 0, safeW, safeH)
+            val sink3 = onStep?.let { StepSink(it) }
+            val written3 = runCatching {
+                nativeSdGenerateEx3(
+                    modelPath, prompt, negative, safeW, safeH, steps, seed, guidance,
+                    threads, flashMode, sampler, scheduler, pixels, sink3,
+                    initPx, safeW, safeH, strength,
+                    mask?.takeIf { it.size >= safeW * safeH },
+                )
+            }.getOrElse { t ->
+                android.util.Log.w("ImageBridge", "图生图入口不可用：${t.message}")
+                return null
+            }
+            if (written3 <= 0) return null
+            return Bitmap.createBitmap(safeW, safeH, Bitmap.Config.ARGB_8888).also {
+                it.setPixels(pixels, 0, safeW, 0, 0, safeW, safeH)
+            }
+        }
         // 三级回退：通用版 Ex2（采样器 + 进度）→ Ex（步数 + 加速）→ 最老的签名。
         // 每一级都对应一类用户手机上的插件版本，缺一级就是「某些人升级后不能出图」。
         val sink = onStep?.let { StepSink(it) }
@@ -250,6 +333,41 @@ object ImageBridge {
         val bitmap = Bitmap.createBitmap(safeW, safeH, Bitmap.Config.ARGB_8888)
         bitmap.setPixels(pixels, 0, safeW, 0, 0, safeW, safeH)
         return bitmap
+    }
+
+    /**
+     * ESRGAN 放大。返回 [bitmap] 放大 [factor] 倍后的新位图；后端或模型不可用时 null。
+     *
+     * 手机上应该「小图采样 + 超分」，而不是直接在大尺寸上采样 —— 后者内存
+     * 按边长平方涨，6 GB 机上 1024² 就足以触发 LMK。超分只吃几十 MB 的权重。
+     */
+    fun upscale(
+        esrganPath: String,
+        bitmap: Bitmap,
+        factor: Int = 4,
+        threads: Int = 0,
+    ): Bitmap? {
+        if (!hasUpscaler || esrganPath.isBlank()) return null
+        val f = factor.coerceIn(1, 4)
+        val w = bitmap.width
+        val h = bitmap.height
+        // 4x 的 1024 输入就是 4096² = 6400 万字节，夹住上限防止一次申请把进程打爆。
+        if (w <= 0 || h <= 0 || w.toLong() * h * f * f > 16_000_000L) return null
+        val src = IntArray(w * h)
+        bitmap.getPixels(src, 0, w, 0, 0, w, h)
+        val outW = w * f
+        val outH = h * f
+        val dst = IntArray(outW * outH)
+        return runCatching {
+            val writtenW = nativeSdUpscale(esrganPath, threads, f, src, w, h, dst)
+            if (writtenW <= 0) return null
+            Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888).also {
+                it.setPixels(dst, 0, outW, 0, 0, outW, outH)
+            }
+        }.getOrElse { t ->
+            android.util.Log.w("ImageBridge", "超分失败：${t.message}")
+            null
+        }
     }
 
     /**

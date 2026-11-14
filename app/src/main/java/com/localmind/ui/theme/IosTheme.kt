@@ -240,6 +240,34 @@ data class IosTypographySet(
         )
     }
 
+    /**
+     * 换字体族。
+     *
+     * 二次元主题最明显的一步就是换字体。这里用**系统自带**的字体族，
+     * 不打包字体文件 —— 少几 MB，而且不用操心授权。
+     *
+     * 用 [FontFamily.Monospace] 那种等宽时要注意：中文在等宽字体里
+     * 字宽是按半角算的，整页会显得很挤。所以等宽只适合"代码块"，
+     * 不适合当界面主字体 —— 但那是用户的自由，主题作者自己负责效果。
+     */
+    fun withFontFamily(family: FontFamily): IosTypographySet {
+        if (family == FontFamily.SansSerif) return this
+        fun TextStyle.ff() = copy(fontFamily = family)
+        return copy(
+            largeTitle = largeTitle.ff(),
+            title1 = title1.ff(),
+            title2 = title2.ff(),
+            title3 = title3.ff(),
+            headline = headline.ff(),
+            body = body.ff(),
+            callout = callout.ff(),
+            subheadline = subheadline.ff(),
+            footnote = footnote.ff(),
+            caption1 = caption1.ff(),
+            caption2 = caption2.ff(),
+        )
+    }
+
     /** Material3 counterpart used by MaterialTheme. */
     val material: Typography
         get() = Typography(
@@ -306,6 +334,8 @@ fun LocalMindTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     tokens: Map<String, String> = emptyMap(),
     themeState: ThemeState = ThemeState(tokens = tokens),
+    /** 当前主题包的 assets 目录。壁纸这类"包内文件"靠它定位。null = 没有。 */
+    themeAssetsDir: java.io.File? = null,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = darkTheme
@@ -383,11 +413,13 @@ fun LocalMindTheme(
 
     // 字号。这两行是"界面插件能改字号"的**唯一入口** ——
     // 之前 fontScale 传给了 MaterialTheme，但没有任何组件读它，等于没接。
+    //
+    // 字体族接在缩放之后：顺序无所谓，两者都是纯变换，可以叠加。
     val typography = DefaultIosTypography.scaled(
         scale = tokFloat("fontScale", 1f),
         bodyBoost = tokFloat("bodySize", 17f),
         baseBodySize = 17f,
-    )
+    ).withFontFamily(fontFamilyFor(tokens["fontFamily"] ?: "system"))
 
     val scheme = if (darkTheme) {
         darkColorScheme(
@@ -421,6 +453,7 @@ fun LocalMindTheme(
         LocalIosTypography provides typography,
         LocalUiTokens provides tokens,
         LocalUiTheme provides themeState,
+        LocalThemeAssetsDir provides themeAssetsDir,
     ) {
         MaterialTheme(
             colorScheme = scheme,
@@ -428,6 +461,24 @@ fun LocalMindTheme(
             content = content,
         )
     }
+}
+
+/**
+ * 令牌里的字体族名 → Compose 的 [FontFamily]。
+ *
+ * 只用**系统自带**的字体族：不用下载、不用打包、不涉及授权。
+ * 想要更"二次元"的字（圆体、卡通体）得自己装字体到系统，主题只能选这些。
+ *
+ * 注意 `cursive`（手写体）在中文环境里通常会回退到默认字体，
+ * 因为 Android 的手写体族不含中文字形 —— 所以它对中文界面基本没效果，
+ * 但对英文界面（应用标题、英文菜单）还是有区别的。
+ */
+fun fontFamilyFor(key: String): FontFamily = when (key.lowercase()) {
+    "sans" -> FontFamily.SansSerif
+    "serif" -> FontFamily.Serif
+    "mono" -> FontFamily.Monospace
+    "cursive" -> FontFamily.Cursive
+    else -> FontFamily.Default
 }
 
 /**
@@ -468,6 +519,12 @@ data class ThemeState(
     val startTab: String = "",
     val appName: String = "",
     val themeName: String = "",
+    /**
+     * 生效的主题包的插件 id。空 = 没装界面插件。
+     *
+     * 壁纸这类"包内文件"靠它定位磁盘目录：`filesDir/plugins/<pluginId>/assets`。
+     */
+    val pluginId: String = "",
 )
 
 /**
@@ -476,6 +533,18 @@ data class ThemeState(
  * 只读这个拿不到令牌 —— 要令牌用 [LocalUiTokens]，要颜色用 [IosTheme.palette]。
  */
 val LocalUiTheme = staticCompositionLocalOf { ThemeState() }
+
+/**
+ * 当前主题包的**资源目录**（`filesDir/plugins/<pluginId>/assets`）。
+ *
+ * 壁纸、图标这类"主题包自带的文件"要靠它找到磁盘上的位置。
+ * 为 null 表示没装界面插件（或这个主题包没带资源）——调用方要能优雅退回。
+ *
+ * 用 [staticCompositionLocalOf] 而不是 [compositionLocalOf]：它不跟踪读取，
+ * 只在**提供方**变化时通知所有订阅者。这正好是我们要的 —— 换主题包时
+ * 整体换一次，而不是每个读它的地方都单独订阅。
+ */
+val LocalThemeAssetsDir = staticCompositionLocalOf<java.io.File?> { null }
 
 /**
  * ⚠️ 这个函数已经**删除**，别再加回来。

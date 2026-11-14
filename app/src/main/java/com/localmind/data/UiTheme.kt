@@ -109,7 +109,29 @@ data class UiToken(
     val unitLabel: String = "",
 )
 
-enum class TokenType { COLOR, NUMBER, BOOL, ENUM }
+/**
+ * 令牌的取值类型。
+ *
+ * 新增类型时**必须同时**在 [UiTokens.normalize] 里加分支，否则会落到
+ * `else` 分支被当成未知类型丢掉。
+ */
+enum class TokenType {
+    /** 颜色。`#RGB` / `#RRGGBB` / `#AARRGGBB` / `rgb(r,g,b)` / `rgba(r,g,b,a)`。 */
+    COLOR,
+
+    /** 数值。越界会被夹到 [UiToken.min]~[UiToken.max]。 */
+    NUMBER,
+
+    /** 布尔。`true/false/1/0/yes/no/on/off`。 */
+    BOOL,
+
+    /** 枚举。合法值在 [UiTokens.enumValues] 里写死。 */
+    ENUM,
+
+    /** 自由文本。不会做格式校验，只做 trim 和长度限制。 */
+    TEXT,
+}
+
 
 object UiTokens {
 
@@ -255,6 +277,62 @@ object UiTokens {
     val navTitleAlign = UiToken("navTitleAlign", "导航栏标题位置", TokenType.ENUM, "center",
         note = "center（居中，iOS 默认）/ leading（靠左）")
 
+    // ---------------------------------------------------------------- 字体
+    //
+    // 二次元主题几乎都要换字体 —— 这是"一眼看出是二次元"最省力的一下。
+    // 用系统自带字体族，不打包字体文件：省体积，也不用担心授权。
+    val fontFamily = UiToken(
+        "fontFamily", "界面字体", TokenType.ENUM, "system",
+        note = "system（系统默认）/ sans（无衬线）/ serif（衬线，像书）/ mono（等宽，像代码）/ cursive（手写体）",
+    )
+
+    // ---------------------------------------------------------------- 壁纸
+    //
+    // 壁纸是**主题包自带的一张图**，装主题时一起落到插件资源目录。
+    // 这里存的是相对路径（插件 id 下的文件名），不是 URL —— URL 要下载，
+    // 那属于插件安装流程的事，主题令牌只负责"用哪张"。
+    val wallpaperFile = UiToken(
+        "wallpaperFile", "壁纸图片", TokenType.TEXT, "",
+        note = "主题包内的图片文件名（放在插件 assets/ 下）。留空 = 用内置极光背景",
+    )
+    val wallpaperDim = UiToken(
+        "wallpaperDim", "壁纸压暗", TokenType.NUMBER, "0.0", 0.0, 0.85,
+        note = "壁纸上的黑色遮罩浓度。压太深壁纸就白装了，太浅文字看不清",
+    )
+    val wallpaperBlur = UiToken(
+        "wallpaperBlur", "壁纸模糊", TokenType.NUMBER, "0", 0.0, 24.0,
+        unitLabel = "dp", note = "壁纸背景虚化半径。深色主题常用 12~20 让文字浮起来",
+    )
+    val wallpaperScale = UiToken(
+        "wallpaperScale", "壁纸缩放", TokenType.NUMBER, "1.0", 1.0, 2.0,
+        note = "壁纸放大倍数。手机屏幕比例和壁纸图比例不一致时会露边，放大能盖住",
+    )
+
+    // ---------------------------------------------------------------- 风格
+    //
+    // 这几个是"卡片长什么样"的开关。不同主题的差别往往不在颜色，
+    // 而在**卡片有没有厚度**（扁平 / 毛玻璃 / 渐变）、**气泡是什么形状**。
+    val cardStyle = UiToken(
+        "cardStyle", "卡片风格", TokenType.ENUM, "flat",
+        note = "flat（扁平）/ glass（毛玻璃，半透）/ gradient（渐变）/ neu（拟物，双层描边）",
+    )
+    val cardElevation = UiToken(
+        "cardElevation", "卡片厚度", TokenType.NUMBER, "0", 0.0, 12.0,
+        unitLabel = "dp", note = "卡片投影高度。0 = 纯扁平，靠描边分层",
+    )
+    val bubbleStyle = UiToken(
+        "bubbleStyle", "气泡形状", TokenType.ENUM, "rounded",
+        note = "rounded（全圆角）/ square（直角）/ tail（带小尾巴，像 QQ）",
+    )
+    val avatarShape = UiToken(
+        "avatarShape", "头像形状", TokenType.ENUM, "circle",
+        note = "circle（正圆）/ rounded（圆角方）/ square（直角）",
+    )
+    val bgStyle = UiToken(
+        "bgStyle", "页面背景", TokenType.ENUM, "aurora",
+        note = "aurora（内置极光）/ flat（纯色）/ gradient（双色渐变）/ wallpaper（主题壁纸）",
+    )
+
     val ALL: List<UiToken> = listOf(
         // 品牌与语义
         accent, accentOn, danger, success, warning,
@@ -277,6 +355,12 @@ object UiTokens {
         tabBarShape, tabBarMargin, tabBarLift, tabBarBlur, tabBarTint, tabBarIndicator, tabBarWidth, uiKit,
         glassBarLiquid, glassBarOutline, glassBarHighlight, glassBarSlotWidth,
         glassBarBottomBlur, glassBarIconOnly, glassBarLabelSize, dynamicColor, dockImpl,
+        // 字体
+        fontFamily,
+        // 壁纸
+        wallpaperFile, wallpaperDim, wallpaperBlur, wallpaperScale,
+        // 风格
+        cardStyle, cardElevation, bubbleStyle, avatarShape, bgStyle,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }
@@ -290,6 +374,11 @@ object UiTokens {
         tabBarWidth.key to setOf("compact", "full"),
         uiKit.key to setOf("auto", "library", "compose"),
         dockImpl.key to setOf("liquidTabBar", "liquidDock"),
+        fontFamily.key to setOf("system", "sans", "serif", "mono", "cursive"),
+        cardStyle.key to setOf("flat", "glass", "gradient", "neu"),
+        bubbleStyle.key to setOf("rounded", "square", "tail"),
+        avatarShape.key to setOf("circle", "rounded", "square"),
+        bgStyle.key to setOf("aurora", "flat", "gradient", "wallpaper"),
     )
 
     /** 合法的标签页 id。 */
@@ -415,6 +504,11 @@ object UiThemes {
             TokenType.ENUM -> {
                 val allowed = UiTokens.enumValues[token.key].orEmpty()
                 if (v.lowercase() in allowed) v.lowercase() else token.default
+            }
+            TokenType.TEXT -> {
+                // 自由文本只做长度限制。文件名这类东西在真正用到的��方
+                // 还会再过一次路径校验（见 WallpaperLoader）。
+                if (v.length > 200) v.take(200) else v
             }
         }
     }
@@ -715,7 +809,150 @@ object UiPresets {
     )
 
     /** 顺序即界面上的显示顺序。 */
-    val ALL: List<Preset> = listOf(EARTH, AURORA, PAPER, NIGHT)
+    /**
+     * 二次元。
+     *
+     * 目标不是"把颜色变粉"就完事 —— 二次元观感来自**一组特征同时出现**：
+     * 粉紫主色、大圆角、带尾巴的气泡、卡片带厚度、背景用渐变。
+     * 只改一个主色会显得只是"换了个色"。
+     *
+     * 气泡用 tail 形状、卡片用 neu（双层描边拟物），这两项是二次元最认得出的特征。
+     */
+    val ANIME = Preset(
+        id = "anime",
+        name = "二次元",
+        description = "粉紫主色、大圆角、带尾巴气泡、卡片带厚度",
+        tokens = mapOf(
+            "accent" to "#FF6FA5",
+            "accentOn" to "#FFFFFF",
+            "success" to "#3FC1A0",
+            "warning" to "#FFA53B",
+            "danger" to "#FF5B6E",
+            "groupedBackground" to "#FFF3F8",
+            "cardBackground" to "#FFFFFF",
+            "label" to "#3A2436",
+            "secondaryLabel" to "#9A7189",
+            "tertiaryLabel" to "#BE9AAC",
+            "separator" to "#1AFF6FA5",
+            "fill" to "#22FF8FC4",
+            "fillSecondary" to "#12FF8FC4",
+            "barBackground" to "#F7FFFFFF",
+            "barBorder" to "#26FF6FA5",
+            "bubbleUser" to "#FF6FA5",
+            "bubbleUserText" to "#FFFFFF",
+            "bubbleAi" to "#FFFFFF",
+            "bubbleAiBorder" to "#2AFF6FA5",
+            "composerBackground" to "#FFFFFF",
+            "codeBackground" to "#FFF0F6",
+            "selection" to "#FF6FA5",
+            // 二次元的三个特征：圆、软、有厚度。
+            "cardCorner" to "24",
+            "controlCorner" to "18",
+            "bubbleCorner" to "22",
+            "sheetCorner" to "28",
+            "cardStyle" to "neu",
+            "cardElevation" to "3",
+            "bubbleStyle" to "tail",
+            "avatarShape" to "circle",
+            "bgStyle" to "gradient",
+            "tabStyle" to "glass",
+            "tabBarShape" to "capsule",
+            "tabBarIndicator" to "capsule",
+            "showTabBarLabels" to "true",
+        ),
+        darkTokens = mapOf(
+            "accent" to "#FF8FB8",
+            "accentOn" to "#2A1622",
+            "groupedBackground" to "#160F14",
+            "cardBackground" to "#241A21",
+            "label" to "#F7EAF1",
+            "secondaryLabel" to "#BFA0B2",
+            "tertiaryLabel" to "#8F7385",
+            "separator" to "#26FF8FC4",
+            "barBackground" to "#E620161E",
+            "barBorder" to "#30FF8FC4",
+            "bubbleUser" to "#FF8FB8",
+            "bubbleUserText" to "#2A1622",
+            "bubbleAi" to "#241A21",
+            "bubbleAiBorder" to "#2AFF8FC4",
+            "codeBackground" to "#1E151B",
+        ),
+    )
+
+    /**
+     * QQ 经典。
+     *
+     * 2010 年代 QQ 的观感：蓝白、通栏直角底栏、小圆角、无渐变。
+     * 那时候的桌面端就是方方正正的列表加一个蓝色高亮条。
+     *
+     * 和现在的 iOS 风是完全相反的方向，所以做成一个预设正好 ——
+     * 有人就喜欢这种"复古桌面端"的味道。
+     */
+    val QQ_CLASSIC = Preset(
+        id = "qq-classic",
+        name = "QQ 经典",
+        description = "蓝白配色、直角卡片、通栏底栏、小圆角",
+        tokens = mapOf(
+            "accent" to "#12B7F5",
+            "accentOn" to "#FFFFFF",
+            "success" to "#2BC55B",
+            "warning" to "#FF9D2E",
+            "danger" to "#F2554A",
+            "groupedBackground" to "#F2F6FB",
+            "cardBackground" to "#FFFFFF",
+            "label" to "#1A2733",
+            "secondaryLabel" to "#7A8B99",
+            "tertiaryLabel" to "#A8B5C0",
+            "separator" to "#1F1A2733",
+            "fill" to "#1F12B7F5",
+            "fillSecondary" to "#0F12B7F5",
+            "barBackground" to "#FFFFFFFF",
+            "barBorder" to "#201A2733",
+            "bubbleUser" to "#12B7F5",
+            "bubbleUserText" to "#FFFFFF",
+            "bubbleAi" to "#FFFFFF",
+            "bubbleAiBorder" to "#201A2733",
+            "composerBackground" to "#FFFFFF",
+            "codeBackground" to "#F5F8FC",
+            "selection" to "#12B7F5",
+            // 直角、小圆角 —— 桌面端的方正感。
+            "cardCorner" to "4",
+            "controlCorner" to "3",
+            "bubbleCorner" to "6",
+            "sheetCorner" to "8",
+            "cardStyle" to "flat",
+            "cardElevation" to "0",
+            "bubbleStyle" to "square",
+            "avatarShape" to "rounded",
+            "bgStyle" to "flat",
+            "tabStyle" to "plain",
+            "tabBarShape" to "square",
+            "tabBarWidth" to "full",
+            "tabBarIndicator" to "underline",
+            "tabBarMargin" to "0",
+            "tabBarLift" to "0",
+            "showTabBarLabels" to "true",
+            "navTitleAlign" to "center",
+        ),
+        darkTokens = mapOf(
+            "accent" to "#35C3F8",
+            "accentOn" to "#06222C",
+            "groupedBackground" to "#111A21",
+            "cardBackground" to "#1A242C",
+            "label" to "#E8EFF5",
+            "secondaryLabel" to "#93A5B3",
+            "tertiaryLabel" to "#6B7C89",
+            "barBackground" to "#F01A242C",
+            "barBorder" to "#28FFFFFF",
+            "bubbleUser" to "#35C3F8",
+            "bubbleUserText" to "#06222C",
+            "bubbleAi" to "#1A242C",
+            "bubbleAiBorder" to "#28FFFFFF",
+            "codeBackground" to "#151E25",
+        ),
+    )
+
+    val ALL: List<Preset> = listOf(EARTH, AURORA, PAPER, NIGHT, ANIME, QQ_CLASSIC)
 
     fun byId(id: String): Preset? = ALL.firstOrNull { it.id == id }
 

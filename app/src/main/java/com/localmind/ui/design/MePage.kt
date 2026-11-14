@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,7 +60,11 @@ private enum class MeRoute { THEME, API, PIPELINE, ABOUT }
  * "知道自己在干嘛才点得下去"的功能，所以放在最下面且不写解释。
  */
 @Composable
-fun MePage(viewModel: AppViewModel) {
+fun MePage(
+    viewModel: AppViewModel,
+    scrollStates: com.localmind.ui.motion.ScrollStateHolder = com.localmind.ui.motion.rememberScrollStateHolder(),
+) {
+    val listState = scrollStates.state("me")
     val ios = IosTheme.palette
     val profile by viewModel.userProfile.collectAsState()
     val plugins by viewModel.plugins.collectAsState()
@@ -91,6 +96,8 @@ fun MePage(viewModel: AppViewModel) {
         AuroraTitle(text = "我的")
 
         LazyColumn(
+            state = listState,
+            flingBehavior = ScrollPhysics.fling(),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 108.dp),
         ) {
@@ -236,7 +243,8 @@ private fun ProfileCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (photo.isNotBlank()) {
-            val bmp = remember(photo) { android.graphics.BitmapFactory.decodeFile(photo) }
+            // 56 dp 的头像：按显示尺寸采样解码，别把相册原图整张解出来。
+            val bmp = com.localmind.ui.components.rememberThumbnail(photo, 56.dp)
             if (bmp != null) {
                 androidx.compose.foundation.Image(
                     bitmap = bmp.asImageBitmap(),
@@ -302,7 +310,7 @@ private fun ProfileEditSheet(
             Spacer(Modifier.height(18.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (pickedPhoto.isNotBlank()) {
-                    val bmp = remember(pickedPhoto) { android.graphics.BitmapFactory.decodeFile(pickedPhoto) }
+                    val bmp = com.localmind.ui.components.rememberThumbnail(pickedPhoto, 62.dp)
                     if (bmp != null) {
                         androidx.compose.foundation.Image(
                             bitmap = bmp.asImageBitmap(),

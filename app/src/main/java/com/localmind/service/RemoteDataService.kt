@@ -175,10 +175,14 @@ class RemoteDataService(private val context: Context) {
         // 1) GitHub Pages（同源托管，国内通常可达）
         // 2) jsDelivr 镜像（国内 CDN，通常可达）
         // 3) 官方 raw（兜底，可能被墙）
+        // 4-6) ghproxy 镜像：实测墙内前三个全挂时只有这些通，所以不能省
         val BASES = listOf(
             "https://isnananya.github.io/LocalMind-Data/data",
             "https://cdn.jsdelivr.net/gh/isnananya/LocalMind-Data@main/data",
             "https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
+            "https://ghproxy.net/https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
+            "https://gh-proxy.com/https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
+            "https://ghproxy.net/https://isnananya.github.io/LocalMind-Data/data",
         )
         const val KEY_ANN_READ = "ann_read_id"
     }

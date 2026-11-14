@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import com.localmind.ui.motion.appearIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -31,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,7 +73,11 @@ import java.util.Locale
  * 分类 chip、存储饼图、内存规划说明全部收进详情面板 —— 主界面不做技术展示。
  */
 @Composable
-fun ModelsPage(viewModel: AppViewModel) {
+fun ModelsPage(
+    viewModel: AppViewModel,
+    scrollStates: com.localmind.ui.motion.ScrollStateHolder = com.localmind.ui.motion.rememberScrollStateHolder(),
+) {
+    val listState = scrollStates.state("models")
     val ios = IosTheme.palette
     val models by viewModel.models.collectAsState()
     val engine by viewModel.engineState.collectAsState()
@@ -206,13 +213,16 @@ fun ModelsPage(viewModel: AppViewModel) {
             }
 
             else -> LazyColumn(
+                state = listState,
+                flingBehavior = ScrollPhysics.fling(),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 108.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(shown, key = { it.id }) { model ->
+                itemsIndexed(shown, key = { _, it -> it.id }) { index, model ->
                     ModelRow(
                         model = model,
+                        modifier = Modifier.appearIn(index = index),
                         active = engine.ready && engine.modelName == model.name,
                         state = downloads[model.id],
                         onClick = { detail = model },
@@ -360,6 +370,7 @@ private fun ModelRow(
     onDownload: () -> Unit,
     onPause: () -> Unit,
     onLoad: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val ios = IosTheme.palette
     val interaction = remember { MutableInteractionSource() }
@@ -369,7 +380,7 @@ private fun ModelRow(
     val running = state?.status == DownloadStatus.RUNNING || state?.status == DownloadStatus.QUEUED ||
         state?.status == DownloadStatus.VERIFYING
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Aurora.PagePadding)
             .pressScale(interaction)

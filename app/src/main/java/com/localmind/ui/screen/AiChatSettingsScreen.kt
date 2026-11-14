@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -121,21 +122,21 @@ fun AiChatSettingsScreen(
                 checked = true,
                 locked = true,
             ) { }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "发语音",
                 subtitle = if (voiceOk) "回复用 TTS 念出来" else "还缺语音引擎 —— 去「我的 → TTS 测试」下载（约 36 MB）",
                 checked = conversation.abilities.voice,
                 ready = voiceOk,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(voice = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "发图片",
                 subtitle = if (hasImageModel) "它可以画图并发给你" else "还没有生图模型 —— 去「模型 → 生图」下载一个",
                 checked = conversation.abilities.imageGeneration,
                 ready = hasImageModel,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(imageGeneration = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "看懂你发的图",
                 subtitle = visionSubtitle(hasVisionModel, viewModel.canSeeImages),
@@ -175,7 +176,7 @@ fun AiChatSettingsScreen(
                 subtitle = "只删消息，保留这个对话本身和它的设置",
                 icon = AppIcons.Delete,
             ) { viewModel.clearConversationMessages(conversation.id) }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             DangerRow(
                 title = "删除这个对话",
                 subtitle = "连同设置一起删掉，不可恢复",
@@ -188,7 +189,7 @@ fun AiChatSettingsScreen(
 /**
  * 多行提示词输入框。
  *
- * 不用 ProfileScreen 里那个单行 [Field]：系统提示词经常要写两三句，
+ * 不用「我的」页里那种单行输入框：系统提示词经常要写两三句，
  * 单行框里写起来会一直往右跑，看不到自己写了什么。
  */
 @Composable

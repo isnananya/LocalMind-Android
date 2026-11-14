@@ -58,6 +58,12 @@ std::string g_ctx_path;
 std::string g_ctx_key;
 std::string g_flash_mode = "auto";
 
+// 超分上下文独立于生图上下文：它不参与采样，两者可以同时加载。
+// 用单独的锁，超分不该被正在进行的一次生图挡住。
+std::mutex g_up_mutex;
+upscaler_ctx_t *g_up = nullptr;
+std::string g_up_key;
+
 void release_locked() {
     if (g_ctx != nullptr) {
         free_sd_ctx(g_ctx);
@@ -243,7 +249,11 @@ static jint sd_generate_common(
     // ---- 1.0.3 起的「通用版」参数（老入口传空）----
     // 采样器 / 调度器用 sd.cpp 自己的字符串词表（euler_a / lcm / dpm++2m …），
     // 空串 = 让 sd.cpp 按模型族自己决定 —— 那本来就是「通用」的默认行为。
-    jstring sampler, jstring scheduler, jobject progress) {
+    jstring sampler, jstring scheduler, jobject progress,
+    // ---- 1.1.0 起的图生图参数（文生图传 null / 0）----
+    // initArgb：初始图的 ARGB_8888 像素（宽 initW、高 initH），null = 文生图。
+    // maskGray：蒙版，单通道灰度值放在 int 的低 8 位，255 = 重绘区；null = 整图重绘。
+    jintArray initArgb, jint initW, jint initH, jfloat strength, jintArray maskGray) {
 
     if (modelPath == nullptr || prompt == nullptr || pixels == nullptr) return -1;
     if (width <= 0 || height <= 0) return -1;
@@ -305,6 +315,61 @@ static jint sd_generate_common(
         ~progress_guard() { sd_set_progress_callback(nullptr, nullptr); }
     } guard_progress;
 
+    // ---- 图生图的入参准备 ----
+    //
+    // 放在进锁之前：这里只做像素格式转换（纯 CPU、与模型无关），
+    // 没必要占着 g_mutex 让诊断页之类的调用方排队。
+    //
+    // 三件事：
+    //  1. ARGB_8888 int → sd.cpp 要的交错 RGB（每像素 3 字节）
+    //  2. 蒙版转单通道灰度（sd.cpp 约定 255 = 要重绘）
+    //  3. 尺寸校验 —— 初始图必须和请求的宽高一致，否则 VAE 编码出来的
+    //     latent 和采样时的噪声形状对不上，sd.cpp 会直接返回空图。
+    std::vector<uint8_t> initRgb;
+    std::vector<uint8_t> maskBytes;
+    sd_image_t initImage{0, 0, 0, nullptr};
+    sd_image_t maskImage{0, 0, 0, nullptr};
+
+    if (initArgb != nullptr) {
+        if (initW <= 0 || initH <= 0) return -1;
+        if (initW != width || initH != height) {
+            LOGE("图生图尺寸不一致：初始图 %dx%d，请求 %dx%d", initW, initH, (int) width, (int) height);
+            return -1;
+        }
+        const jsize n = env->GetArrayLength(initArgb);
+        if (n < initW * initH) {
+            LOGE("初始图像素数组太小：%d < %d", n, initW * initH);
+            return -1;
+        }
+        std::vector<jint> src(static_cast<size_t>(initW) * initH);
+        env->GetIntArrayRegion(initArgb, 0, initW * initH, src.data());
+        initRgb.resize(static_cast<size_t>(initW) * initH * 3);
+        for (size_t i = 0; i < src.size(); i++) {
+            const jint v = src[i];
+            initRgb[i * 3 + 0] = static_cast<uint8_t>((v >> 16) & 0xFF);
+            initRgb[i * 3 + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+            initRgb[i * 3 + 2] = static_cast<uint8_t>(v & 0xFF);
+        }
+        initImage = sd_image_t{static_cast<uint32_t>(initW), static_cast<uint32_t>(initH), 3,
+                               initRgb.data()};
+
+        if (maskGray != nullptr) {
+            const jsize mn = env->GetArrayLength(maskGray);
+            if (mn < initW * initH) {
+                LOGE("蒙版数组太小：%d < %d", mn, initW * initH);
+                return -1;
+            }
+            std::vector<jint> mv(static_cast<size_t>(initW) * initH);
+            env->GetIntArrayRegion(maskGray, 0, initW * initH, mv.data());
+            maskBytes.resize(static_cast<size_t>(initW) * initH);
+            for (size_t i = 0; i < mv.size(); i++) {
+                maskBytes[i] = static_cast<uint8_t>(mv[i] & 0xFF);
+            }
+            maskImage = sd_image_t{static_cast<uint32_t>(initW), static_cast<uint32_t>(initH), 1,
+                                   maskBytes.data()};
+        }
+    }
+
     sd_image_t *images = nullptr;
     int num_images = 0;
 
@@ -324,6 +389,22 @@ static jint sd_generate_common(
         gen.height = static_cast<int>(height);
         gen.seed = static_cast<int64_t>(seed);
         gen.batch_count = 1;
+
+        // ---- 图生图 / 局部重绘 ----
+        //
+        // strength = 从初始图出发再往前加多少噪声（0 = 原图不动，1 = 完全重画）。
+        // 0.35–0.5 是「换画风但保住构图」的常用区间，0.7+ 基本会改掉构图。
+        // 蒙版存在时 sd.cpp 走 inpaint 分支：蒙版外保留初始图，蒙版内按
+        // strength 重画 —— 所以蒙版模式下 strength 给 0.9~1.0 才有效果。
+        if (initImage.data != nullptr) {
+            gen.init_image = initImage;
+            gen.strength = strength > 0.f ? (strength > 1.f ? 1.f : strength) : 0.6f;
+            if (maskImage.data != nullptr) {
+                gen.mask_image = maskImage;
+            }
+            LOGI("图生图：%dx%d strength=%.2f%s", initW, initH, gen.strength,
+                 maskImage.data != nullptr ? " 带蒙版" : "");
+        }
         // ---- 步数：这是 CPU 出图最大的一根杠杆 ----
         //
         // 步数与耗时几乎线性：SD 2.1 的默认 20 步在手机上就是「等到怀疑人生」，
@@ -429,7 +510,7 @@ Java_com_localmind_native_image_ImageBridge_nativeSdGenerate(
     jint width, jint height, jint seed, jfloat guidance, jintArray pixels) {
     return sd_generate_common(env, modelPath, prompt, nullptr, width, height, 0,
                               seed, guidance, 0, nullptr, pixels,
-                              nullptr, nullptr, nullptr);
+                              nullptr, nullptr, nullptr, nullptr, 0, 0, 0.f, nullptr);
 }
 
 /**
@@ -446,7 +527,7 @@ Java_com_localmind_native_image_ImageBridge_nativeSdGenerateEx(
     jint threads, jstring flashMode, jintArray pixels) {
     return sd_generate_common(env, modelPath, prompt, negative, width, height, steps,
                               seed, guidance, threads, flashMode, pixels,
-                              nullptr, nullptr, nullptr);
+                              nullptr, nullptr, nullptr, nullptr, 0, 0, 0.f, nullptr);
 }
 
 /**
@@ -470,10 +551,159 @@ Java_com_localmind_native_image_ImageBridge_nativeSdGenerateEx2(
     jintArray pixels, jobject progress) {
     return sd_generate_common(env, modelPath, prompt, negative, width, height, steps,
                               seed, guidance, threads, flashMode, pixels,
-                              sampler, scheduler, progress);
+                              sampler, scheduler, progress, nullptr, 0, 0, 0.f, nullptr);
+}
+
+/**
+ * 1.1.0：图生图 / 局部重绘入口。
+ *
+ * 为什么又是一个新函数名：见 Ex2 的注释 —— JNI 短名不带参数签名，改老函数
+ * 的参数表会让用户手机上那个已经装好的旧 .so 按错位的栈帧解释参数，直接崩。
+ * 新函数 + Kotlin 侧按符号是否存在回退，是唯一安全的加法。
+ *
+ * @param initArgb 初始图 ARGB_8888（宽 initW、高 initH），必须与 width/height 一致
+ * @param strength 0..1，越小越贴近原图
+ * @param maskGray 单通道灰度蒙版（低 8 位有效），255 = 重绘；null = 整图重绘
+ */
+JNIEXPORT jint JNICALL
+Java_com_localmind_native_image_ImageBridge_nativeSdGenerateEx3(
+    JNIEnv *env, jobject, jstring modelPath, jstring prompt, jstring negative,
+    jint width, jint height, jint steps, jint seed, jfloat guidance,
+    jint threads, jstring flashMode, jstring sampler, jstring scheduler,
+    jintArray pixels, jobject progress,
+    jintArray initArgb, jint initW, jint initH, jfloat strength, jintArray maskGray) {
+    return sd_generate_common(env, modelPath, prompt, negative, width, height, steps,
+                              seed, guidance, threads, flashMode, pixels,
+                              sampler, scheduler, progress,
+                              initArgb, initW, initH, strength, maskGray);
+}
+
+/**
+ * ESRGAN 放大。独立于生图上下文：它不碰 g_ctx，用自己的一份 upscaler。
+ *
+ * 为什么值得单独一个入口：手机上出图受**内存**限制，通常只能 384–512 见方；
+ * 想拿到 1024 的成品，正确做法是「小图 + 超分」而不是「直接 1024 采样」——
+ * 后者在 6 GB 机上会直接 OOM。ESRGAN 的显存/内存开销只有采样的一小部分。
+ *
+ * 输出几何是**确定的**：固定写成 (inW*factor) x (inH*factor)，模型原生倍数
+ * 与 factor 不一致时用最近邻补齐 —— 调用方据此分配数组就够了，不用协商尺寸。
+ *
+ * @return 写出的宽度（即 inW*factor），失败 -1
+ */
+JNIEXPORT jint JNICALL
+Java_com_localmind_native_image_ImageBridge_nativeSdUpscale(
+    JNIEnv *env, jobject, jstring esrganPath, jint threads, jint factor,
+    jintArray inArgb, jint inW, jint inH, jintArray outArgb) {
+
+    if (esrganPath == nullptr || inArgb == nullptr || outArgb == nullptr) return -1;
+    if (inW <= 0 || inH <= 0 || factor < 1 || factor > 8) return -1;
+
+    const jsize inLen = env->GetArrayLength(inArgb);
+    const jsize outLen = env->GetArrayLength(outArgb);
+    const int outW = inW * factor;
+    const int outH = inH * factor;
+    if (inLen < inW * inH || outLen < outW * outH) {
+        LOGE("超分数组太小：in=%d/%d out=%d/%d", inLen, inW * inH, outLen, outW * outH);
+        return -1;
+    }
+
+    const char *rawPath = env->GetStringUTFChars(esrganPath, nullptr);
+    if (rawPath == nullptr) return -1;
+    std::string path(rawPath);
+    env->ReleaseStringUTFChars(esrganPath, rawPath);
+
+    std::vector<jint> src(static_cast<size_t>(inW) * inH);
+    env->GetIntArrayRegion(inArgb, 0, inW * inH, src.data());
+    std::vector<uint8_t> rgb(static_cast<size_t>(inW) * inH * 3);
+    for (size_t i = 0; i < src.size(); i++) {
+        const jint v = src[i];
+        rgb[i * 3 + 0] = static_cast<uint8_t>((v >> 16) & 0xFF);
+        rgb[i * 3 + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+        rgb[i * 3 + 2] = static_cast<uint8_t>(v & 0xFF);
+    }
+
+    std::lock_guard<std::mutex> lock(g_up_mutex);
+    // 路径或线程数变了就重建；ESRGAN 模型只有几十 MB，重建代价可以接受。
+    const std::string key = path + "|" + std::to_string(threads);
+    if (g_up == nullptr || g_up_key != key) {
+        if (g_up != nullptr) {
+            free_upscaler_ctx(g_up);
+            g_up = nullptr;
+        }
+        g_up_key.clear();
+        const int nThreads = threads > 0 ? threads
+                                         : static_cast<int>(std::thread::hardware_concurrency());
+        // tile_size 128：分块推理是手机上不 OOM 的关键，整图 1024→4096 一次算
+        // 峰值能吃掉几个 GB。分块会有一点点接缝，但比被杀进程好。
+        g_up = new_upscaler_ctx(path.c_str(), /*direct=*/false, nThreads > 0 ? nThreads : 4,
+                                /*tile_size=*/128, /*backend=*/nullptr, /*params_backend=*/nullptr);
+        if (g_up == nullptr) {
+            LOGE("超分模型加载失败：%s", path.c_str());
+            return -1;
+        }
+        g_up_key = key;
+        LOGI("超分模型已加载：%s threads=%d 原生倍数=%d", path.c_str(), nThreads,
+             get_upscaler_model_scale(path.c_str()));
+    }
+
+    sd_image_t input{static_cast<uint32_t>(inW), static_cast<uint32_t>(inH), 3, rgb.data()};
+    sd_image_t *out = nullptr;
+    int n = 0;
+    // upscale_factor 传 1：让模型用它自己的原生倍数（RealESRGAN 是 4），
+    // 再由下面的重采样统一到调用方要的 factor —— 传错反而会叠乘。
+    if (!upscale(g_up, input, 1, &out, &n) || n < 1 || out == nullptr || out[0].data == nullptr) {
+        LOGE("upscale 失败");
+        if (out != nullptr) free_sd_images(out, n);
+        return -1;
+    }
+
+    const int sw = static_cast<int>(out[0].width);
+    const int sh = static_cast<int>(out[0].height);
+    const int sc = static_cast<int>(out[0].channel);
+    if (sw <= 0 || sh <= 0 || (sc != 3 && sc != 4)) {
+        LOGE("超分输出格式不支持：%dx%d channel=%d", sw, sh, sc);
+        free_sd_images(out, n);
+        return -1;
+    }
+
+    std::vector<jint> dst(static_cast<size_t>(outW) * outH);
+    const uint8_t *base = out[0].data;
+    if (sw == outW && sh == outH) {
+        for (size_t i = 0; i < dst.size(); i++) {
+            const uint8_t *p = base + i * sc;
+            dst[i] = (0xFF << 24) | (p[0] << 16) | (p[1] << 8) | p[2];
+        }
+    } else {
+        // 最近邻：只在模型原生倍数 != factor 时走到。放大倍数是整数倍，
+        // 最近邻不会引入色带，比双线性少一次乘加。
+        for (int y = 0; y < outH; y++) {
+            const int sy = static_cast<int>((int64_t) y * sh / outH);
+            for (int x = 0; x < outW; x++) {
+                const int sx = static_cast<int>((int64_t) x * sw / outW);
+                const uint8_t *p = base + (static_cast<size_t>(sy) * sw + sx) * sc;
+                dst[static_cast<size_t>(y) * outW + x] =
+                    (0xFF << 24) | (p[0] << 16) | (p[1] << 8) | p[2];
+            }
+        }
+    }
+    env->SetIntArrayRegion(outArgb, 0, outW * outH, dst.data());
+    free_sd_images(out, n);
+    return outW;
 }
 
 /** 这个后端当前生效的配置（诊断页读）。 */
+/**
+ * 能力位。Kotlin 侧据此决定要不要显示「图生图 / 超分」入口。
+ *
+ * 为什么不能靠「版本号」：用户手机里可能还躺着从旧插件路径加载的 .so，
+ * 而 external 声明只要被调用、符号不存在就直接 UnsatisfiedLinkError。
+ * 一个不碰锁、不碰模型的常量返回，是最便宜也最可靠的探测。
+ */
+JNIEXPORT jint JNICALL
+Java_com_localmind_native_image_ImageBridge_nativeSdCaps(JNIEnv *, jobject) {
+    return 1 /* 图生图 */ | 2 /* 超分 */;
+}
+
 /** 这个插件是不是「通用版」（支持采样器覆盖 + 进度回调）。Kotlin 侧据此显示开关。 */
 JNIEXPORT jboolean JNICALL
 Java_com_localmind_native_image_ImageBridge_nativeSdUniversal(JNIEnv *, jobject) {

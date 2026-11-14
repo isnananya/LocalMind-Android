@@ -153,6 +153,9 @@ fun LocalMindRoot(
     val meFullPage by viewModel.meFullPage.collectAsState()
     val showPluginDocs by viewModel.showPluginDocs.collectAsState()
 
+    // 跨标签页保留滚动位置：AnimatedContent 会销毁离开的页面，
+    // 不把 LazyListState 提到根层的话，切回来列表就跳回顶部。
+    val scrollStates = com.localmind.ui.motion.rememberScrollStateHolder()
     val uiTheme = com.localmind.ui.theme.LocalUiTheme.current
     val uiTokens = uiTheme.tokens
     val tabIds = uiTheme.tabs
@@ -334,10 +337,11 @@ fun LocalMindRoot(
                             "breeze" -> com.localmind.ui.screen.BreezeScreen(viewModel)
                             "pipeline" -> com.localmind.ui.screen.PipelineScreen(viewModel)
                             "chat" -> {
-                                if (inChat) ChatScreen(viewModel, sharedText) else ChatListPage(viewModel)
+                                if (inChat) ChatScreen(viewModel, sharedText)
+                                else ChatListPage(viewModel, scrollStates)
                             }
-                            "models" -> ModelsPage(viewModel)
-                            else -> MePage(viewModel)
+                            "models" -> ModelsPage(viewModel, scrollStates)
+                            else -> MePage(viewModel, scrollStates)
                         }
                     }
                 }

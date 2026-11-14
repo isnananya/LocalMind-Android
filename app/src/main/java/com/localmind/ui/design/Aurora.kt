@@ -3,6 +3,7 @@ package com.localmind.ui.design
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,7 +39,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +56,9 @@ import com.localmind.ui.motion.Motion
 import com.localmind.ui.design.LiquidGlassLayer
 import com.localmind.ui.design.rememberLiquidGlassSupport
 import com.localmind.ui.theme.IosTheme
+import com.localmind.ui.theme.LocalThemeAssetsDir
+import com.localmind.ui.theme.LocalUiTokens
+import com.localmind.ui.theme.rememberWallpaper
 
 /**
  * 「Aurora」设计语言。
@@ -76,61 +84,145 @@ object Aurora {
     val BarHeight = 62.dp
 }
 
-/** 页面底色：极浅的竖向渐变 + 顶部两团几乎看不见的色晕，深色下是纯黑。 */
+/**
+ * 页面底色。
+ *
+ * 四种模式，由主题令牌 `bgStyle` 决定：
+ *
+ * | bgStyle | 效果 |
+ * |---|---|
+ * | aurora（默认） | 极浅竖向渐变 + 顶部两团几乎看不见的色晕 |
+ * | flat | 纯 `groupedBackground`，最省电 |
+ * | gradient | 主色 → 强调色的双色渐变 |
+ * | wallpaper | 主题包自带的壁纸图（可压暗、可虚化、可缩放） |
+ *
+ * 壁纸是**全局**的 —— 所有页面共用这一个背景，所以主题一换，
+ * 整�� App 的观感立刻变了。这也是"像 QQ 主题"最直接的一步。
+ */
 @Composable
 fun AuroraBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val ios = IosTheme.palette
+    val tokens = LocalUiTokens.current
+    val style = tokens["bgStyle"] ?: "aurora"
+
     val base = Brush.verticalGradient(
         if (ios.isDark) listOf(Color(0xFF04060A), Color(0xFF080B11), Color(0xFF05070B))
         else listOf(Color(0xFFEAF2FF), Color(0xFFF7F9FD), Color(0xFFF1F4F9))
     )
+
+    // 壁纸：主题包里的图片。找不到或解码失败就静默退回内置背景 ——
+    // 一张坏图不该让整个应用背景变黑。
+    val wallpaperName = tokens["wallpaperFile"].orEmpty()
+    val wallpaper = rememberWallpaper(wallpaperName, LocalThemeAssetsDir.current)
+
     Box(modifier.fillMaxSize().background(base)) {
-        // 大色团：让悬浮玻璃有真实的颜色可以弯折，不再是一块死白。
-        Box(
-            Modifier
-                .size(520.dp)
-                .offset(x = (-160).dp, y = (-120).dp)
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            ios.blue.copy(alpha = if (ios.isDark) 0.16f else 0.26f),
-                            Color.Transparent,
+        when {
+            wallpaper != null -> {
+                // 壁纸铺满。scale 用 graphicsLayer 而不是改 size，
+                // 这样放大时不会被父容器裁掉边缘。
+                val scale = tokens["wallpaperScale"]?.toFloatOrNull()?.coerceIn(1f, 2f) ?: 1f
+                Image(
+                    bitmap = wallpaper,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                )
+                // 虚化：Compose 没有内建的模糊，用 RenderEffect（API 31+）。
+                val blurDp = tokens["wallpaperBlur"]?.toFloatOrNull()?.coerceIn(0f, 24f) ?: 0f
+                if (blurDp > 0f && android.os.Build.VERSION.SDK_INT >= 31) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                renderEffect = BlurEffect(
+                                    radiusX = blurDp.dp.toPx(),
+                                    radiusY = blurDp.dp.toPx(),
+                                    TileMode.Clamp,
+                                )
+                            }
+                    )
+                }
+                // 压暗：保证上面的文字读得清。默认 0 = 不压。
+                val dim = tokens["wallpaperDim"]?.toFloatOrNull()?.coerceIn(0f, 0.85f) ?: 0f
+                if (dim > 0f) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
+                }
+            }
+
+            style == "flat" -> {
+                Box(Modifier.fillMaxSize().background(ios.groupedBackground))
+            }
+
+            style == "gradient" -> {
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.linearGradient(
+                            listOf(
+                                ios.blue.copy(alpha = if (ios.isDark) 0.22f else 0.16f),
+                                ios.purple.copy(alpha = if (ios.isDark) 0.18f else 0.12f),
+                                ios.groupedBackground,
+                            )
                         )
                     )
                 )
-        )
-        Box(
-            Modifier
-                .size(420.dp)
-                .offset(x = 220.dp, y = 60.dp)
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            ios.purple.copy(alpha = if (ios.isDark) 0.14f else 0.20f),
-                            Color.Transparent,
+            }
+
+            else -> {
+                // 极光：内置背景。大色团让悬浮玻璃有真实的颜色可以弯折，
+                // 不再是一块死白。
+                Box(
+                    Modifier
+                        .size(520.dp)
+                        .offset(x = (-160).dp, y = (-120).dp)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    ios.blue.copy(alpha = if (ios.isDark) 0.16f else 0.26f),
+                                    Color.Transparent,
+                                )
+                            )
                         )
-                    )
                 )
-        )
-        Box(
-            Modifier
-                .size(360.dp)
-                .offset(x = 40.dp, y = 560.dp)
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            (if (ios.isDark) Color(0xFF19C2B0) else Color(0xFF7BD8D0)).copy(alpha = 0.16f),
-                            Color.Transparent,
+                Box(
+                    Modifier
+                        .size(420.dp)
+                        .offset(x = 220.dp, y = 60.dp)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    ios.purple.copy(alpha = if (ios.isDark) 0.14f else 0.20f),
+                                    Color.Transparent,
+                                )
+                            )
                         )
-                    )
                 )
-        )
+                Box(
+                    Modifier
+                        .size(360.dp)
+                        .offset(x = 40.dp, y = 560.dp)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    (if (ios.isDark) Color(0xFF19C2B0) else Color(0xFF7BD8D0)).copy(alpha = 0.16f),
+                                    Color.Transparent,
+                                )
+                            )
+                        )
+                )
+            }
+        }
         content()
     }
 }
+
 
 /**
  * 子页顶栏：圆形返回 + 居中标题 + 可选右侧按钮。
@@ -290,27 +382,58 @@ fun AuroraGroup(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val ios = IosTheme.palette
-    val shape = RoundedCornerShape(Aurora.CardCorner)
+    val tokens = LocalUiTokens.current
+
+    // 圆角走令牌 —— 主题能改，改了所有分组一起变。
+    val corner = tokens["cardCorner"]?.toFloatOrNull()?.coerceIn(0f, 40f) ?: 22f
+    val shape = RoundedCornerShape(corner.dp)
+
+    // 四种卡片风格。差别不只是描边，而是**分层方式**：
+    //  flat     纯扁平，只有背景
+    //  glass    半透明 + 描边（毛玻璃感）
+    //  gradient 主色渐变（张扬，但很二次元）
+    //  neu      双层描边 + 投影（拟物）
+    val style = tokens["cardStyle"] ?: "flat"
+    val elevation = tokens["cardElevation"]?.toFloatOrNull()?.coerceIn(0f, 16f) ?: 0f
+
+    val borderColor = when (style) {
+        "neu" -> if (ios.isDark) ios.separator else Color.Black.copy(alpha = 0.16f)
+        else -> if (ios.isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.72f)
+    }
+    val borderWidth = if (style == "neu") 1.4.dp else 0.8.dp
+
+    val bg = when (style) {
+        "gradient" -> Brush.linearGradient(
+            listOf(
+                ios.blue.copy(alpha = if (ios.isDark) 0.22f else 0.12f),
+                ios.purple.copy(alpha = if (ios.isDark) 0.18f else 0.10f),
+                ios.secondaryGroupedBackground.copy(alpha = if (ios.isDark) 0.62f else 0.86f),
+            )
+        )
+        else -> null
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Aurora.PagePadding)
             .then(
-                if (ios.isDark) Modifier
+                // 深色下不要投影（黑色上投影只会糊掉边缘），靠卡片本身的亮度分层。
+                // 但用户显式设了 cardElevation 就照做 —— 拟物风就是要那个厚度。
+                if (ios.isDark && elevation <= 0f) Modifier
                 else Modifier.shadow(
-                    elevation = 16.dp,
+                    elevation = if (elevation > 0f) elevation.dp else 16.dp,
                     shape = shape,
                     ambientColor = Color.Black.copy(alpha = 0.07f),
                     spotColor = Color.Black.copy(alpha = 0.08f),
                 )
             )
             .clip(shape)
-            .background(ios.secondaryGroupedBackground.copy(alpha = if (ios.isDark) 0.62f else 0.74f))
-            .border(
-                0.8.dp,
-                if (ios.isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.72f),
-                shape,
-            ),
+            .then(
+                if (bg != null) Modifier.background(bg)
+                else Modifier.background(ios.secondaryGroupedBackground.copy(alpha = if (ios.isDark) 0.62f else 0.74f))
+            )
+            .border(borderWidth, borderColor, shape),
         content = content,
     )
 }

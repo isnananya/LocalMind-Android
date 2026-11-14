@@ -1,15 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  为什么 base-config 是 cleartextTrafficPermitted="true"：
+
+  本应用有两个合理需要明文 HTTP 的场景，而 Android 的网络安全配置**无法表达 IP 段**：
+
+    1. 用户把云端 provider 填成局域网里的 Ollama / vLLM / LM Studio
+       （http://192.168.1.20:11434），这是 README 明确支持的用法；
+    2. 开发时连模拟器宿主机（10.0.2.2）。
+
+  注意「本机 API 服务」（ApiServer）不受这份配置管辖 —— 它是 ServerSocket 在监听，
+  不是 OkHttp 发请求，所以这里放开明文并不会削弱它。
+
+  既然配置文件管不住「公网别用明文」，真正的护栏放在代码里：
+  RemoteApi.requireSafeUrl() 会拒绝任何发往**公网主机**的 http:// 请求，
+  也就是密钥绝不会以明文经过公网。改这一行之前请先看那个函数。
+
+  （旧注释写的是 "allow cleartext for localhost + private ranges only"，
+   与实际的 base-config 不符 —— 那个描述从未成立过。）
+-->
 <network-security-config>
-    <!-- The on-device API server is plain HTTP on the LAN; allow cleartext for
-         localhost + private ranges only, everything else stays TLS-only. -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain>
-    </domain-config>
 </network-security-config>

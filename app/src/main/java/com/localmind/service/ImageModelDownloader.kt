@@ -133,8 +133,8 @@ class ImageModelDownloader(
             }
             if (cancelled.contains(entry.id)) return
             if (!ok) continue
-            if (!looksLikeGguf(target)) {
-                lastError = "下载的内容不是 GGUF（可能拿到了错误页）"
+            if (!looksValid(target, entry)) {
+                lastError = "下载的内容不是有效的模型文件（可能拿到了错误页）"
                 target.delete()
                 continue
             }
@@ -235,10 +235,22 @@ class ImageModelDownloader(
         }
     }
 
-    private fun looksLikeGguf(file: File): Boolean = runCatching {
+    /**
+     * 只校验文件头，不校验 SHA：镜像仓库的文件会被重传，硬编码哈希会在某天
+     * 突然让所有人下载失败，而「长度 + 魔数」已经能挡住「下了一半」「下成了
+     * 错误页」这两类真实故障。
+     *
+     * checkpoint 是 GGUF；ESRGAN 是 `torch.save` 出来的 zip（PK\x03\x04），
+     * 两者魔数不同，必须按 [ImageModelEntry.kind] 分开校验 —— 否则超分模型
+     * 会永远显示「下载的内容不是 GGUF」，然后被删掉。
+     */
+    private fun looksValid(file: File, entry: ImageModelEntry): Boolean = runCatching {
         if (!file.isFile || file.length() < 1024) return false
         val magic = ByteArray(4)
         file.inputStream().use { it.read(magic) }
-        String(magic, Charsets.US_ASCII) == "GGUF"
+        when (entry.kind) {
+            ImageModelEntry.Kind.CHECKPOINT -> String(magic, Charsets.US_ASCII) == "GGUF"
+            ImageModelEntry.Kind.UPSCALER -> magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte()
+        }
     }.getOrDefault(false)
 }

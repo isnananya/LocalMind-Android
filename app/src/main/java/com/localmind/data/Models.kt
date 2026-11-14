@@ -730,7 +730,15 @@ data class ApiSettings(
     val allowImage: Boolean = true,
     val maxConcurrent: Int = 2,
     val requestLogSize: Int = 200,
-    val corsOrigin: String = "*",
+    /**
+     * 允许的跨域来源。**默认空 = 不发 `Access-Control-Allow-Origin`。**
+     *
+     * 以前默认是 `"*"`，含义是「任何网页都能读这个接口的响应」。对本机服务来说
+     * 这不是便利而是漏洞：浏览器里的任意页面都能 fetch `127.0.0.1:8080` 并拿到
+     * 模型的完整回复。需要浏览器直连时，请把它设成确切的来源（如
+     * `http://localhost:3000`），不要填 `*`。
+     */
+    val corsOrigin: String = "",
 )
 
 @Serializable
@@ -791,6 +799,14 @@ data class ImageSettings(
     val customModelPath: String? = null,
     val externalEndpoint: String = "",
     val externalApiKey: String = "",
+    /**
+     * 生图通道。**local = 默认**：走本地扩散后端（CPU 出图，慢但离线可用）。
+     * **cloud = 云端**：走 [com.localmind.service.CloudImage] ——
+     * 内置 Pollinations（免费、无需下模型、几秒出图），或你填的外部 OpenAI 兼容端点。
+     *
+     * 这才是「更方便速度更快的生图」：没有 1.6 GB 模型要下，点一下几秒就出图。
+     */
+    val provider: String = "local",
 )
 
 @Serializable

@@ -24,11 +24,37 @@ object VoiceCatalog {
     @Volatile
     private var entries: List<VoiceEntry> = BuiltinVoices.all
 
-    /** 当前所有音色（内置 + 所有已启用的语音插件）。 */
+    /**
+     * **在线**音色清单（从云端拉的）。
+     *
+     * 它的优先级在「内置」之上、「插件」之下：
+     *  * 内置是兜底，保证空装机也有几个能用的；
+     *  * 在线是"不用装任何东西就能看到的新音色"，新音色上架不用发版；
+     *  * 插件是用户自己装的，优先级最高 —— 用户装的东西不能被云端覆盖掉。
+     */
+    @Volatile
+    private var remote: List<VoiceEntry> = emptyList()
+
+    /** 插件层。拆出来是为了让 [rebuild] 能同时处理三层。 */
+    @Volatile
+    private var plugins: List<VoiceEntry> = emptyList()
+
+    /** 当前所有音色（内置 + 在线 + 所有已启用的语音插件）。 */
     val all: List<VoiceEntry> get() = entries
 
     /** 有音色可用吗。语音页据此决定显示列表还是空态。内置清单在就永远非空。 */
     val hasAny: Boolean get() = entries.isNotEmpty()
+
+    /**
+     * 设置在线清单并重算合并结果。
+     *
+     * 单独一个入口，是因为在线清单是**异步**拉到的：拿到之前先用「内置 + 插件」，
+     * 拿到之后再合一次。不用等网络。
+     */
+    fun setRemote(list: List<VoiceEntry>) {
+        remote = list
+        rebuild()
+    }
 
     /**
      * 用插件提供的清单整体替换（内置那一层永远保留）。
@@ -38,12 +64,33 @@ object VoiceCatalog {
      * 而且这个覆盖是"重装插件即生效"的，不需要发版。
      */
     fun setFromPlugins(list: List<VoiceEntry>) {
+        plugins = list
+        rebuild()
+    }
+
+    /**
+     * 合并三层清单。
+     *
+     * 合并规则：**同 id 时，后加入的层覆盖先加入的层**（插件 > 在线 > 内置）。
+     * 顺序保持「内置在前」，因为内置是默认推荐，用户不该在列表里找不到它。
+     */
+    private fun rebuild() {
         val builtin = BuiltinVoices.all
-        val pluginById = list.associateBy { it.id }
+        // 覆盖表：先放内置，再被在线覆盖，再被插件覆盖。
+        val byId = LinkedHashMap<String, VoiceEntry>()
+        builtin.forEach { byId[it.id] = it }
+        remote.forEach { byId[it.id] = it }
+        plugins.forEach { byId[it.id] = it }
+
         val merged = buildList {
-            builtin.forEach { add(pluginById[it.id] ?: it) }
+            // 内置按声明顺序在前（顺序是"推荐度"，不能乱）。
+            builtin.forEach { add(byId.getValue(it.id)) }
             val builtinIds = builtin.mapTo(HashSet()) { it.id }
-            list.forEach { if (it.id !in builtinIds) add(it) }
+            // 在线里额外的接在后面，保持清单里的顺序。
+            remote.forEach { if (it.id !in builtinIds) add(byId.getValue(it.id)) }
+            // 插件里额外的接在最后。
+            val seenIds = (builtinIds + remote.map { it.id }).toHashSet()
+            plugins.forEach { if (it.id !in seenIds) add(byId.getValue(it.id)) }
         }
         // 按 id 再去一次重：插件内部自己也可能重复。
         entries = merged.distinctBy { it.id }

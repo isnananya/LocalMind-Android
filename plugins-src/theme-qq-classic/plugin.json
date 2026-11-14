@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.qq-classic",
+  "name": "QQ经典蓝",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "QQ 经典风格：蓝白配色、直角矩形、方形头像、底部下划线标签栏。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

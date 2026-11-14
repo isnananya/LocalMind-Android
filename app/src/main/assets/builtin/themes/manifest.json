@@ -1,0 +1,49 @@
+{
+  "themes": [
+    {
+      "id": "dev.localmind.theme.sakura",
+      "name": "樱雪物语",
+      "author": "LocalMind",
+      "description": "二次元粉紫风格：带樱花壁纸、尾巴气泡、玻璃卡片、圆头像。",
+      "version": "1.0.0",
+      "builtinAsset": "builtin/themes/sakura.zip",
+      "sizeBytes": 1704821,
+      "tags": [
+        "二次元",
+        "浅色",
+        "壁纸"
+      ],
+      "previewAsset": "builtin/themes/previews/sakura.png"
+    },
+    {
+      "id": "dev.localmind.theme.aurora-night",
+      "name": "极光夜航",
+      "author": "LocalMind",
+      "description": "暗色极光风格：星空壁纸、霓虹青强调色、拟物卡片、方角头像。",
+      "version": "1.0.0",
+      "builtinAsset": "builtin/themes/aurora-night.zip",
+      "sizeBytes": 1998106,
+      "tags": [
+        "暗色",
+        "壁纸",
+        "极简"
+      ],
+      "previewAsset": "builtin/themes/previews/aurora-night.png"
+    },
+    {
+      "id": "dev.localmind.theme.qq-classic",
+      "name": "QQ经典蓝",
+      "author": "LocalMind",
+      "description": "复刻 QQ 经典版：蓝白配色、直角矩形、方形头像、下划线标签栏。",
+      "version": "1.0.0",
+      "builtinAsset": "builtin/themes/qq-classic.zip",
+      "sizeBytes": 5367,
+      "tags": [
+        "经典",
+        "浅色",
+        "直角"
+      ],
+      "previewAsset": "builtin/themes/previews/qq-classic.png"
+    }
+  ]
+}

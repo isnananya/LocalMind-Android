@@ -1795,7 +1795,7 @@
       "family": "LFM2-VL",
       "params": "450M",
       "quant": "Q4_K_M",
-      "description": "219 MB · Q4_K_M · 建议 2 GB 内存。需要配套 mmproj：LFM2-VL-450M.mmproj-Q8_0.gguf（100 MB）。当前版本还没接上视觉投影层，装了也看不见图，先用文字模型。绝对最小：319MB 就能看图。英文为主，但它能当「图里有没有文字/是不是截图」的极速预筛，把重活留给大模型。",
+      "description": "219 MB · Q4_K_M · 建议 2 GB 内存。配套视觉投影会一起下载。首次加载会自动带上视觉投影，可以直接发图问答。绝对最小：319MB 就能看图。英文为主，但它能当「图里有没有文字/是不是截图」的极速预筛，把重活留给大模型。",
       "tags": [
         "Liquid",
         "英文",
@@ -1807,7 +1807,13 @@
       "embedding": false,
       "decisionModel": false,
       "imported": false,
-      "packId": "localmind.official.models"
+      "packId": "localmind.official.models",
+      "mmprojFileName": "LFM2-VL-450M.mmproj-Q8_0.gguf",
+      "mmprojUrl": "https://hf-mirror.com/mradermacher/LFM2-VL-450M-GGUF/resolve/main/LFM2-VL-450M.mmproj-Q8_0.gguf",
+      "mmprojMirrors": [
+        "https://huggingface.co/mradermacher/LFM2-VL-450M-GGUF/resolve/main/LFM2-VL-450M.mmproj-Q8_0.gguf"
+      ],
+      "mmprojSizeBytes": 105069664
     },
     {
       "id": "smolvlm-500m-q8",
@@ -1824,7 +1830,7 @@
       "family": "SmolVLM",
       "params": "500M",
       "quant": "Q8_0",
-      "description": "417 MB · Q8_0 · 建议 3 GB 内存。需要配套 mmproj：mmproj-SmolVLM-500M-Instruct-Q8_0.gguf（104 MB）。当前版本还没接上视觉投影层，装了也看不见图，先用文字模型。基线只有 256M 版；500M 是明显更好的小档。ggml-org 官方，llama.cpp 支持最稳。",
+      "description": "417 MB · Q8_0 · 建议 3 GB 内存。配套视觉投影会一起下载。首次加载会自动带上视觉投影，可以直接发图问答。基线只有 256M 版；500M 是明显更好的小档。ggml-org 官方，llama.cpp 支持最稳。",
       "tags": [
         "Smol",
         "英文",
@@ -1835,7 +1841,13 @@
       "embedding": false,
       "decisionModel": false,
       "imported": false,
-      "packId": "localmind.official.models"
+      "packId": "localmind.official.models",
+      "mmprojFileName": "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf",
+      "mmprojUrl": "https://hf-mirror.com/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf",
+      "mmprojMirrors": [
+        "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+      ],
+      "mmprojSizeBytes": 108783360
     },
     {
       "id": "smolvlm2-500m-video-q8",
@@ -1852,7 +1864,7 @@
       "family": "SmolVLM2",
       "params": "500M",
       "quant": "Q8_0",
-      "description": "417 MB · Q8_0 · 建议 3 GB 内存。需要配套 mmproj：mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf（104 MB）。当前版本还没接上视觉投影层，装了也看不见图，先用文字模型。与上条同量级，额外支持短视频输入。二选一即可。",
+      "description": "417 MB · Q8_0 · 建议 3 GB 内存。配套视觉投影会一起下载。首次加载会自动带上视觉投影，可以直接发图问答。与上条同量级，额外支持短视频输入。二选一即可。",
       "tags": [
         "Smol",
         "英文",
@@ -1863,7 +1875,13 @@
       "embedding": false,
       "decisionModel": false,
       "imported": false,
-      "packId": "localmind.official.models"
+      "packId": "localmind.official.models",
+      "mmprojFileName": "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+      "mmprojUrl": "https://hf-mirror.com/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/main/mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+      "mmprojMirrors": [
+        "https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/main/mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+      ],
+      "mmprojSizeBytes": 108785184
     },
     {
       "id": "lfm2vl-16b-q4",
@@ -1880,7 +1898,7 @@
       "family": "LFM2-VL",
       "params": "1.6B",
       "quant": "Q4_0",
-      "description": "664 MB · Q4_0 · 建议 4 GB 内存。需要配套 mmproj：mmproj-LFM2-VL-1.6B-Q8_0.gguf（538 MB）。当前版本还没接上视觉投影层，装了也看不见图，先用文字模型。Liquid 官方仓库（比 mradermacher 更可信）；1.2GB 档。",
+      "description": "664 MB · Q4_0 · 建议 4 GB 内存。配套视觉投影会一起下载。首次加载会自动带上视觉投影，可以直接发图问答。Liquid 官方仓库（比 mradermacher 更可信）；1.2GB 档。",
       "tags": [
         "Liquid",
         "英文",
@@ -1891,7 +1909,13 @@
       "embedding": false,
       "decisionModel": false,
       "imported": false,
-      "packId": "localmind.official.models"
+      "packId": "localmind.official.models",
+      "mmprojFileName": "mmproj-LFM2-VL-1.6B-Q8_0.gguf",
+      "mmprojUrl": "https://hf-mirror.com/LiquidAI/LFM2-VL-1.6B-GGUF/resolve/main/mmproj-LFM2-VL-1.6B-Q8_0.gguf",
+      "mmprojMirrors": [
+        "https://huggingface.co/LiquidAI/LFM2-VL-1.6B-GGUF/resolve/main/mmproj-LFM2-VL-1.6B-Q8_0.gguf"
+      ],
+      "mmprojSizeBytes": 564115648
     },
     {
       "id": "internvl35-2b-q4km",
@@ -1908,7 +1932,7 @@
       "family": "InternVL",
       "params": "2B",
       "quant": "Q4_K_M",
-      "description": "1.2 GB · Q4_K_M · 建议 6 GB 内存。需要配套 mmproj：mmproj-model-f16.gguf（607 MB）。当前版本还没接上视觉投影层，装了也看不见图，先用文字模型。上海 AI Lab，中文 OCR/图表强。llama.cpp 明确支持 InternVL3.5。许可需人工确认。",
+      "description": "1.2 GB · Q4_K_M · 建议 6 GB 内存。配套视觉投影会一起下载。首次加载会自动带上视觉投影，可以直接发图问答。上海 AI Lab，中文 OCR/图表强。llama.cpp 明确支持 InternVL3.5。许可需人工确认。",
       "tags": [
         "InternVL",
         "中文",
@@ -1919,7 +1943,13 @@
       "embedding": false,
       "decisionModel": false,
       "imported": false,
-      "packId": "localmind.official.models"
+      "packId": "localmind.official.models",
+      "mmprojFileName": "mmproj-model-f16.gguf",
+      "mmprojUrl": "https://hf-mirror.com/lmstudio-community/InternVL3_5-2B-GGUF/resolve/main/mmproj-model-f16.gguf",
+      "mmprojMirrors": [
+        "https://huggingface.co/lmstudio-community/InternVL3_5-2B-GGUF/resolve/main/mmproj-model-f16.gguf"
+      ],
+      "mmprojSizeBytes": 636106144
     },
     {
       "id": "qwen3vl-2b-q8",
@@ -1936,7 +1966,7 @@
       "family": "Qwen3-VL",
       "params": "2B",
       "quant": "Q8_0",
-      "description": "1.7 GB · Q8_0 · 建议 6 GB 内存。需要配套 mmproj：mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf（424 MB）。当前版本还没接上视觉投影层，装了也看不见图，先用文字模型。保守推荐：Qwen3-VL（2025-10）比 Qwen3.5 老一代，但 ggml-org 官方仓库 + llama.cpp 支持已被大量验证。若 Qwen3.5 的 mmproj 在新 runtime 上出问题，退这一条。",
+      "description": "1.7 GB · Q8_0 · 建议 6 GB 内存。配套视觉投影会一起下载。首次加载会自动带上视觉投影，可以直接发图问答。保守推荐：Qwen3-VL（2025-10）比 Qwen3.5 老一代，但 ggml-org 官方仓库 + llama.cpp 支持已被大量验证。若 Qwen3.5 的 mmproj 在新 runtime 上出问题，退这一条。",
       "tags": [
         "Qwen",
         "中文",
@@ -1949,7 +1979,13 @@
       "decisionModel": false,
       "imported": false,
       "packId": "localmind.official.models",
-      "sourceUrl": "https://ollama.com/library/qwen3"
+      "sourceUrl": "https://ollama.com/library/qwen3",
+      "mmprojFileName": "mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+      "mmprojUrl": "https://hf-mirror.com/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+      "mmprojMirrors": [
+        "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf"
+      ],
+      "mmprojSizeBytes": 445053056
     },
     {
       "id": "sdxs-512-dreamshaper-q8",

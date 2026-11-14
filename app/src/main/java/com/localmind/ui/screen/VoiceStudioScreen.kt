@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -34,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +65,7 @@ import com.localmind.ui.design.AuroraNavBar
 import com.localmind.ui.icons.AppIcons
 import com.localmind.ui.theme.IosTheme
 import com.localmind.util.VoiceRecorder
+import com.localmind.data.SynthSubtitle
 import kotlinx.coroutines.delay
 import java.io.File
 import java.util.Locale
@@ -83,6 +87,9 @@ import java.util.Locale
  * 换的主题色都会自动跟上，页面不再自成一派。
  */
 enum class StudioTab(val label: String) { SYNTH("合成"), LIBRARY("音色库"), CLONE("克隆") }
+
+/** 合成区的三种产出形态：单条 / 批量（分文件）/ 有声书（合并 + 字幕）。 */
+enum class SynthMode(val label: String) { SINGLE("单条"), BATCH("批量"), AUDIOBOOK("有声书") }
 
 @Composable
 fun VoiceStudioScreen(
@@ -190,6 +197,9 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
     val takes by viewModel.takes.collectAsState()
     val batchBusy by viewModel.batchBusy.collectAsState()
     val batchProgress by viewModel.batchProgress.collectAsState()
+    val audiobookBusy by viewModel.audiobookBusy.collectAsState()
+    val audiobookProgress by viewModel.audiobookProgress.collectAsState()
+    val subs by viewModel.synthSubs.collectAsState()
 
     // 记录和预设不在 init 里读（磁盘 IO），进页面读一次就够。
     LaunchedEffect(Unit) { viewModel.refreshStudioLists() }
@@ -200,10 +210,11 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
     var showParams by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var presetName by remember { mutableStateOf("") }
-    var batchMode by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(SynthMode.SINGLE) }
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        flingBehavior = ScrollPhysics.fling(),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp, end = 16.dp, top = 4.dp,
             bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp,
@@ -316,18 +327,28 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
                     Icon(AppIcons.GraphicEq, null, Modifier.size(15.dp), tint = ios.secondaryLabel)
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (batchMode) "脚本（空行分隔每条）" else "脚本",
+                        if (mode == SynthMode.SINGLE) "脚本" else "脚本（空行分隔每段）",
                         color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     )
                     Spacer(Modifier.weight(1f))
-                    Text(
-                        if (batchMode) "单条" else "批量",
-                        color = ios.blue, fontSize = 12.sp,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { batchMode = !batchMode }
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SynthMode.entries.forEach { m ->
+                            val sel = m == mode
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (sel) ios.blue else ios.fillSecondary)
+                                    .clickable { mode = m }
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    m.label,
+                                    color = if (sel) ios.onAccent else ios.secondaryLabel,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                        }
+                    }
                     if (draft.isNotEmpty()) {
                         Spacer(Modifier.width(4.dp))
                         Text(
@@ -344,8 +365,11 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
                 Box(Modifier.fillMaxWidth().height(168.dp)) {
                     if (draft.isEmpty()) {
                         Text(
-                            if (batchMode) "每一条之间空一行。合成完一次性全部导出。"
-                            else "在这里写下要念的内容。中文、英文、中英混读都行。",
+                            when (mode) {
+                                SynthMode.SINGLE -> "在这里写下要念的内容。中文、英文、中英混读都行。"
+                                SynthMode.BATCH -> "每一条之间空一行。合成完每条单独导出一个文件。"
+                                SynthMode.AUDIOBOOK -> "每一段之间空一行。所有段落会连成一条长音频，并附字幕。"
+                            },
                             color = ios.tertiaryLabel, fontSize = 13.sp,
                         )
                     }
@@ -358,8 +382,8 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
                     )
                 }
                 Text(
-                    if (batchMode) "${batchCount(draft)} 条 · ${draft.length} 个字符"
-                    else "${draft.length} 个字符",
+                    if (mode == SynthMode.SINGLE) "${draft.length} 个字符"
+                    else "${batchCount(draft)} 段 · ${draft.length} 个字符",
                     color = ios.tertiaryLabel, fontSize = 11.sp,
                     modifier = Modifier.align(Alignment.End),
                 )
@@ -417,26 +441,37 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
 
         // ---- 合成 ----
         item {
-            if (batchMode) {
-                AuroraButton(
-                    text = if (batchBusy) "批量合成中…" else "批量合成并导出",
-                    onClick = { viewModel.synthesizeBatch(draft) },
-                    enabled = !batchBusy && !busy,
-                    loading = batchBusy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (batchProgress.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(batchProgress, color = ios.secondaryLabel, fontSize = 11.sp)
-                }
-            } else {
-                AuroraButton(
+            when (mode) {
+                SynthMode.SINGLE -> AuroraButton(
                     text = if (busy) "合成中…" else "合成语音",
                     onClick = { viewModel.synthesizeStudio(draft) },
-                    enabled = !busy && !batchBusy,
+                    enabled = !busy && !batchBusy && !audiobookBusy,
                     loading = busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                SynthMode.BATCH -> AuroraButton(
+                    text = if (batchBusy) "批量合成中…" else "批量合成并导出",
+                    onClick = { viewModel.synthesizeBatch(draft) },
+                    enabled = !batchBusy && !busy && !audiobookBusy,
+                    loading = batchBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                SynthMode.AUDIOBOOK -> AuroraButton(
+                    text = if (audiobookBusy) "生成有声书中…" else "生成有声书（合并 + 字幕）",
+                    onClick = { viewModel.synthesizeAudiobook(draft) },
+                    enabled = !audiobookBusy && !busy && !batchBusy,
+                    loading = audiobookBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            val prog = when (mode) {
+                SynthMode.BATCH -> batchProgress
+                SynthMode.AUDIOBOOK -> audiobookProgress
+                else -> ""
+            }
+            if (prog.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(prog, color = ios.secondaryLabel, fontSize = 11.sp)
             }
         }
 
@@ -457,9 +492,14 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
                 StudioPlayer(
                     file = f,
                     meta = meta,
+                    subs = subs,
                     onExport = {
                         val where = viewModel.exportSynthAudio()
                         viewModel.toast(if (where != null) "已导出到 $where" else "导出失败")
+                    },
+                    onExportSrt = {
+                        val where = viewModel.exportSrt()
+                        viewModel.toast(if (where != null) "字幕已导出到 $where" else "没有可导出的字幕")
                     },
                     onDelete = { viewModel.clearStudioAudio() },
                 )
@@ -1069,7 +1109,14 @@ private fun HintCard(text: String, action: String, onAction: () -> Unit) {
 }
 
 @Composable
-private fun StudioPlayer(file: File, meta: String, onExport: () -> Unit, onDelete: () -> Unit) {
+private fun StudioPlayer(
+    file: File,
+    meta: String,
+    subs: List<SynthSubtitle> = emptyList(),
+    onExport: () -> Unit,
+    onExportSrt: (() -> Unit)? = null,
+    onDelete: () -> Unit,
+) {
     val ios = IosTheme.palette
     var playing by remember(file) { mutableStateOf(false) }
     var position by remember(file) { mutableLongStateOf(0L) }
@@ -1095,6 +1142,9 @@ private fun StudioPlayer(file: File, meta: String, onExport: () -> Unit, onDelet
             delay(120)
         }
     }
+
+    // 当前念到哪一句：用来在字幕列表里高亮，播放进度条动它就跟着动。
+    val current = subs.indexOfFirst { position in it.startMs..it.endMs }
 
     StudioCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1158,9 +1208,39 @@ private fun StudioPlayer(file: File, meta: String, onExport: () -> Unit, onDelet
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (subs.isNotEmpty() && onExportSrt != null) {
+                SmallBtn("字幕") { onExportSrt() }
+                Spacer(Modifier.width(6.dp))
+            }
             SmallBtn("导出") { onExport() }
             Spacer(Modifier.width(6.dp))
             SmallBtn("清除", danger = true) { onDelete() }
+        }
+        if (subs.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text("字幕（${subs.size} 句）", color = ios.secondaryLabel, fontSize = 11.sp)
+            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ios.fill)
+                    .verticalScroll(rememberScrollState())
+                    .padding(10.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    subs.forEachIndexed { i, s ->
+                        val active = i == current
+                        Text(
+                            s.text,
+                            color = if (active) ios.blue else ios.label,
+                            fontSize = if (active) 13.sp else 12.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
         }
     }
 }

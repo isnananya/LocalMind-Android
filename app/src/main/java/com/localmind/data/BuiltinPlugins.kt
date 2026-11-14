@@ -51,14 +51,6 @@ object BuiltinPlugins {
             note = "83 个对话 / 识图 / 生图 / 决策模型 + 17 个离线音色",
         ),
         Item(
-            key = "sd-backend",
-            asset = "builtin/sd-backend.zip",
-            id = "dev.localmind.backend.sd",
-            name = "本地生图后端",
-            version = "1.1.1",
-            note = "stable-diffusion.cpp（MIT）· 约 37 MB / ABI，装完还要一个模型",
-        ),
-        Item(
             key = "breeze-tts",
             asset = "builtin/breeze-tts2.zip",
             id = "com.breezeblue.tts2",
@@ -68,11 +60,25 @@ object BuiltinPlugins {
         ),
     )
 
+    /**
+     * 曾经以插件形式分发、现在直接长在应用里的 id。
+     *
+     * `dev.localmind.backend.sd` 是本地生图后端：1.0.6 起 `liblocalmind-sd.so`
+     * 直接打进 `jniLibs/`，不再需要一个 31 MB 的 zip 在 assets 里陪着
+     * （两份加起来 APK 里白占 30 MB，运行时还可能被 linker 当成两个库，
+     * 见 [com.localmind.service.NativeLibraryInstaller.dropBundledDuplicate]）。
+     *
+     * 但**老用户手机里的插件记录还在**，如果 `isBuiltin` 不认它，插件页就会
+     * 冒出一条带「卸载」按钮的陌生条目。所以这里只把它从安装清单里摘掉，
+     * 仍然算「内置」。
+     */
+    private val LEGACY_IDS = setOf("dev.localmind.backend.sd")
+
     private const val PREFS = "localmind-builtin-plugins"
 
     fun itemForId(id: String): Item? = ALL.firstOrNull { it.id == id }
 
-    fun isBuiltin(id: String): Boolean = itemForId(id) != null
+    fun isBuiltin(id: String): Boolean = itemForId(id) != null || id in LEGACY_IDS
 
     /** 用户卸载过：不要再自动装回来。 */
     fun isRemoved(context: Context, id: String): Boolean =
@@ -134,14 +140,6 @@ object BuiltinPlugins {
             if (isRemoved(context, item.id)) continue
             val current = installedVersion(storage, item)
             if (current == item.version) continue
-            // ⚠️ 原生后端**不能热更新**。
-            //
-            // 旧版 .so 一旦被 System.load 映射进进程，就没有"卸载"这回事；
-            // 再用新文件覆盖同一路径，正在映射的页会变成 SIGBUS/SIGSEGV。
-            // 这不是理论风险：1.0.5 的模拟器回归里，旧版 1.1.0 已加载、
-            // 新版 1.1.1 自动覆盖，进程在 DefaultDispatcher 上直接段错误。
-            // 所以原生后端只在**没装过**时自动安装；升级请走"重启后再装"。
-            if (item.key == "sd-backend" && current != null) continue
             install(context, storage, item)?.let { out += it }
         }
         return out

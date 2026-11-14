@@ -22,9 +22,12 @@
 > 3. **`fontScale` / `bodySize` / `sheetCorner` / `tabStyle` / `showTabBarLabels` / `navTitleAlign` / `appName` 现在都真的生效了**。
 >    旧文档里说的"改了没反应"是当时的事实，现在是过时结论。
 >
-> 另外：主题**不再只靠 zip**。应用里「我的 → 主题」有 4 个内置预设
-> （暖橙 / 极光 / 纸张 / 深海）和一个微调面板，点一下就换风格。
-> 预设和插件写的是同一份覆盖表，所以两者可以叠加。
+> 另外：主题**不再只靠 zip**。应用里「外观 → 主题」有 6 个内置预设
+> （暖橙 / 极光 / 纸张 / 深海 / **二次元** / **QQ 经典**）和一个微调面板，
+> 点一下就换风格。预设和插件写的是同一份覆盖表，所以两者可以叠加。
+>
+> 主题商店里还有 3 个**内置主题包**（樱雪物语 / 极光夜航 / QQ经典蓝），
+> 不联网也能装 —— 商店不会因为没网就变成空白页。
 
 ---
 
@@ -224,54 +227,81 @@
 
 ## 4. 令牌总表
 
-### 4.1 全部 37 个令牌（白名单）—— **全部已接线**
+### 4.1 全部 64 个令牌（白名单）—— **全部已接线**
 
-这张表是**从源码 `UiTokens.ALL` 生成的**（不是手写的）。上一版是手抄的，
-很快就和白名单对不上了。
+> 本节由 `tools/gen_token_table.py` 从 `UiTheme.kt` 自动生成 —— 改了令牌记得重跑，
+> 免得文档和代码对不上（照着过时文档写主题是最容易踩的坑）。
 
 > **"已接线"的含义**：写了这个键，屏幕上**一定**有地方会变。
 > 上一版有 9 个键写着"已实现"但没有任何消费端 —— 那种"写了没反应"
 > 现在不允许再出现：加令牌的人必须同时加消费端，否则不加。
 
-| 键 | 类型 | 默认值 | 范围 | 语义 |
-| --- | --- | --- | --- | --- |
-| `accent` | 颜色 | `#0A84FF` | — | 主色：按钮、开关、选中态、链接、用户气泡。改这个是最有效的一下 |
-| `accentOn` | 颜色 | `#FFFFFF` | — | 主色上的文字色：主色按钮/气泡里的文字。选了浅色主色就必须把它改成深色，否则字看不见 |
-| `danger` | 颜色 | `#FF3B30` | — | 危险色：删除、清空、错误态 |
-| `success` | 颜色 | `#34C759` | — | 成功色：开关打开、已完成 |
-| `warning` | 颜色 | `#FF9500` | — | 提醒色：橙色警示、未完成状态 |
-| `groupedBackground` | 颜色 | `#F7F7F9` | — | 页面背景：整页底色。深色默认纯黑，OLED 友好 |
-| `cardBackground` | 颜色 | `#FFFFFF` | — | 卡片背景：列表分组、卡片、AI 气泡 |
-| `barBackground` | 颜色 | `#F7FFFFFF` | — | 导航栏/标签栏底色：前两位是透明度。要完全不透明就写 #FFFFFF |
-| `barBorder` | 颜色 | `#14000000` | — | 导航栏/标签栏描边 |
-| `separator` | 颜色 | `#14000000` | — | 分隔线：列表分隔线、卡片描边、气泡描边 |
-| `fill` | 颜色 | `#1A787880` | — | 填充底色：输入框、次级按钮、未选中的开关 |
-| `fillSecondary` | 颜色 | `#0F787880` | — | 次级填充色：更淡的一层填充：选中行、分段控件底 |
-| `label` | 颜色 | `#0B0B0F` | — | 主要文字 |
-| `secondaryLabel` | 颜色 | `#8A3C3C43` | — | 次要文字：前两位是透明度 |
-| `tertiaryLabel` | 颜色 | `#4D3C3C43` | — | 三级文字 |
-| `selection` | 颜色 | `#0A84FF` | — | 选中高亮：标签栏选中指示器。留空/不写就跟随主色 |
-| `overlay` | 颜色 | `#66000000` | — | 浮层遮罩：弹层背后的压暗层 |
-| `bubbleUser` | 颜色 | `#0A84FF` | — | 用户气泡：不写就跟随主色 |
-| `bubbleUserText` | 颜色 | `#FFFFFF` | — | 用户气泡文字：不写就跟随 accentOn |
-| `bubbleAi` | 颜色 | `#FFFFFF` | — | AI 气泡：不写就跟随 cardBackground |
-| `bubbleAiBorder` | 颜色 | `#14000000` | — | AI 气泡描边：不写就跟随 separator |
-| `composerBackground` | 颜色 | `#1A787880` | — | 输入框底色：不写就跟随 fill |
-| `codeBackground` | 颜色 | `#F2F2F7` | — | 代码块底色：浅色默认浅灰、深色默认近黑；文字自动取对比色 |
-| `cardCorner` | 数字 | `12` | 0.0 – 32.0 | 卡片圆角 |
-| `controlCorner` | 数字 | `10` | 0.0 – 32.0 | 控件圆角 |
-| `sheetCorner` | 数字 | `16` | 0.0 – 40.0 | 浮层圆角 |
-| `bubbleCorner` | 数字 | `18` | 0.0 – 32.0 | 气泡圆角 |
-| `pagePadding` | 数字 | `16` | 8.0 – 28.0 | 页面左右留白 |
-| `navBarHeight` | 数字 | `44` | 36.0 – 64.0 | 导航栏高度 |
-| `tabBarHeight` | 数字 | `62` | 44.0 – 80.0 | 标签栏高度 |
-| `barBorderWidth` | 数字 | `0.5` | 0.0 – 2.0 | 导航栏/标签栏描边粗细 |
-| `tabIconSize` | 数字 | `23` | 18.0 – 30.0 | 标签栏图标大小 |
-| `bodySize` | 数字 | `17` | 12.0 – 24.0 sp | 正文字号：只影响正文三档（body / callout / subheadline） |
-| `fontScale` | 数字 | `1.0` | 0.8 – 1.4 | 整体字号缩放 |
-| `tabStyle` | 枚举 | `glass` | glass / plain / hidden | 标签栏样式：glass（毛玻璃）/ plain（不透明）/ hidden（藏起来，但标签只剩一个时忽略） |
-| `showTabBarLabels` | 开关 | `true` | true / false | 标签栏显示文字 |
-| `navTitleAlign` | 枚举 | `center` | center / leading | 导航栏标题位置：center（居中，iOS 默认）/ leading（靠左） |
+| 键 | 中文 | 类型 | 默认值 | 范围 | 语义 |
+| --- | --- | --- | --- | --- | --- |
+| `accent` | 主色 | 颜色 | `#0A84FF` | 任意合法颜色 | 按钮、开关、选中态、链接、用户气泡。改这个是最有效的一下 |
+| `accentOn` | 主色上的文字色 | 颜色 | `#FFFFFF` | 任意合法颜色 | 主色按钮/气泡里的文字。选了浅色主色就必须把它改成深色，否则字看不见 |
+| `danger` | 危险色 | 颜色 | `#FF3B30` | 任意合法颜色 | 删除、清空、错误态 |
+| `success` | 成功色 | 颜色 | `#34C759` | 任意合法颜色 | 开关打开、已完成 |
+| `warning` | 提醒色 | 颜色 | `#FF9500` | 任意合法颜色 | 橙色警示、未完成状态 |
+| `groupedBackground` | 页面背景 | 颜色 | `#F7F7F9` | 任意合法颜色 | 整页底色。深色默认纯黑，OLED 友好 |
+| `cardBackground` | 卡片背景 | 颜色 | `#FFFFFF` | 任意合法颜色 | 列表分组、卡片、AI 气泡 |
+| `barBackground` | 导航栏/标签栏底色 | 颜色 | `#F7FFFFFF` | 任意合法颜色 | 前两位是透明度。要完全不透明就写 #FFFFFF |
+| `barBorder` | 导航栏/标签栏描边 | 颜色 | `#14000000` | 任意合法颜色 | 导航栏/标签栏描边 |
+| `separator` | 分隔线 | 颜色 | `#14000000` | 任意合法颜色 | 列表分隔线、卡片描边、气泡描边 |
+| `fill` | 填充底色 | 颜色 | `#1A787880` | 任意合法颜色 | 输入框、次级按钮、未选中的开关 |
+| `fillSecondary` | 次级填充色 | 颜色 | `#0F787880` | 任意合法颜色 | 更淡的一层填充：选中行、分段控件底 |
+| `label` | 主要文字 | 颜色 | `#0B0B0F` | 任意合法颜色 | 主要文字 |
+| `secondaryLabel` | 次要文字 | 颜色 | `#8A3C3C43` | 任意合法颜色 | 前两位是透明度 |
+| `tertiaryLabel` | 三级文字 | 颜色 | `#4D3C3C43` | 任意合法颜色 | 三级文字 |
+| `selection` | 选中高亮 | 颜色 | `#0A84FF` | 任意合法颜色 | 标签栏选中指示器。留空/不写就跟随主色 |
+| `overlay` | 浮层遮罩 | 颜色 | `#66000000` | 任意合法颜色 | 弹层背后的压暗层 |
+| `bubbleUser` | 用户气泡 | 颜色 | `#0A84FF` | 任意合法颜色 | 不写就跟随主色 |
+| `bubbleUserText` | 用户气泡文字 | 颜色 | `#FFFFFF` | 任意合法颜色 | 不写就跟随 accentOn |
+| `bubbleAi` | AI 气泡 | 颜色 | `#FFFFFF` | 任意合法颜色 | 不写就跟随 cardBackground |
+| `bubbleAiBorder` | AI 气泡描边 | 颜色 | `#14000000` | 任意合法颜色 | 不写就跟随 separator |
+| `composerBackground` | 输入框底色 | 颜色 | `#1A787880` | 任意合法颜色 | 不写就跟随 fill |
+| `codeBackground` | 代码块底色 | 颜色 | `#F2F2F7` | 任意合法颜色 | 浅色默认浅灰、深色默认近黑；文字自动取对比色 |
+| `cardCorner` | 卡片圆角 | 数字 | `12` | 0 – 32 | 卡片圆角 |
+| `controlCorner` | 控件圆角 | 数字 | `10` | 0 – 32 | 控件圆角 |
+| `sheetCorner` | 浮层圆角 | 数字 | `16` | 0 – 40 | 浮层圆角 |
+| `bubbleCorner` | 气泡圆角 | 数字 | `18` | 0 – 32 | 气泡圆角 |
+| `pagePadding` | 页面左右留白 | 数字 | `16` | 8 – 28 | 页面左右留白 |
+| `navBarHeight` | 导航栏高度 | 数字 | `44` | 36 – 64 | 导航栏高度 |
+| `tabBarHeight` | 标签栏高度 | 数字 | `60` | 44 – 80 | 标签栏高度 |
+| `barBorderWidth` | 导航栏/标签栏描边粗细 | 数字 | `0.5` | 0 – 2 | 导航栏/标签栏描边粗细 |
+| `tabIconSize` | 标签栏图标大小 | 数字 | `23` | 18 – 30 | 标签栏图标大小 |
+| `bodySize` | 正文字号 | 数字 | `17` | 12 – 24（单位 sp） | 只影响正文三档（body / callout / subheadline） |
+| `fontScale` | 整体字号缩放 | 数字 | `1.0` | 0.8 – 1.4 | 整体字号缩放 |
+| `tabStyle` | 标签栏样式 | 枚举 | `glass` | glass / plain / hidden | glass（毛玻璃）/ plain（不透明）/ hidden（藏起来，但标签只剩一个时忽略） |
+| `showTabBarLabels` | 标签栏显示文字 | 开关 | `true` | true / false | 标签栏显示文字 |
+| `navTitleAlign` | 导航栏标题位置 | 枚举 | `center` | center / leading | center（居中，iOS 默认）/ leading（靠左） |
+| `tabBarShape` | 标签栏形状 | 枚举 | `capsule` | capsule / rounded / square | capsule（胶囊）/ rounded（圆角矩形）/ square（直角） |
+| `tabBarMargin` | 标签栏左右留白 | 数字 | `18` | 0 – 48 | 标签栏左右留白 |
+| `tabBarLift` | 标签栏离底距离 | 数字 | `12` | 0 – 40 | 标签栏离底距离 |
+| `tabBarBlur` | 玻璃模糊半径 | 数字 | `10` | 0 – 16（单位 dp） | 10 = 默认磨砂（2 太轻，底下的字会透出来）；0 = 完全清晰（纯折射），16 = 重度磨砂 |
+| `tabBarTint` | 玻璃染色 | 颜色 | `#FFFFFF` | 任意合法颜色 | 深色主题用 darkTokens 覆盖成深色 |
+| `tabBarIndicator` | 选中指示器 | 枚举 | `capsule` | capsule / underline / dot / none | capsule（玻璃胶囊）/ underline（下划线）/ dot（圆点）/ none |
+| `tabBarWidth` | 标签栏宽度 | 枚举 | `compact` | compact / full | compact（悬浮紧凑胶囊）/ full（通栏） |
+| `uiKit` | 液态玻璃组件库 | 枚举 | `auto` | auto / library / compose | auto（硬件支持则用 AndroidLiquidGlassView）/ library（强制组件库）/ compose（用内置降级） |
+| `glassBarLiquid` | 液态玻璃效果 | 开关 | `true` | true / false | 开：边缘折射 + 色散 + 按压放大；关：只保留模糊与染色（LiquidTab 的默认行为） |
+| `glassBarOutline` | 底栏描边 | 开关 | `true` | true / false | 开启时画一圈 1dp 高光描边 |
+| `glassBarHighlight` | 高光强度 | 数字 | `0.5` | 0.5 – 1.7 | 描边与边缘高光的强度，随设备倾斜移动 |
+| `glassBarSlotWidth` | 单栏宽度 | 数字 | `76` | 56 – 112（单位 dp） | 悬浮胶囊的总宽 = 单栏宽度 × 标签数 |
+| `glassBarBottomBlur` | 底部渐变模糊 | 开关 | `false` | true / false | 底栏上方页面底部的渐隐模糊 |
+| `glassBarIconOnly` | 仅图标 | 开关 | `false` | true / false | 开启后不画文字（悬浮胶囊会自动更紧凑） |
+| `glassBarLabelSize` | 标签文字大小 | 数字 | `11` | 9 – 14（单位 sp） | 标签文字大小 |
+| `dynamicColor` | 动态配色 | 开关 | `false` | true / false | 从系统壁纸主色生成 accent；关掉回到主题包/预设的颜色 |
+| `dockImpl` | 底栏实现 | 枚举 | `liquidTabBar` | liquidTabBar / liquidDock | liquidTabBar（当前液态玻璃底栏）/ liquidDock（自定义液态底栏，更多可调项） |
+| `fontFamily` | 界面字体 | 枚举 | `system` | system / sans / serif / mono / cursive | system（系统默认）/ sans（无衬线）/ serif（衬线，像书）/ mono（等宽，像代码）/ cursive（手写体） |
+| `wallpaperFile` | 壁纸图片 | 文本 | `` | 文本（≤200 字符） | 主题包内的图片文件名（放在插件 assets/ 下）。留空 = 用内置极光背景 |
+| `wallpaperDim` | 壁纸压暗 | 数字 | `0.0` | 0 – 0.85 | 壁纸上的黑色遮罩浓度。压太深壁纸就白装了，太浅文字看不清 |
+| `wallpaperBlur` | 壁纸模糊 | 数字 | `0` | 0 – 24（单位 dp） | 壁纸背景虚化半径。深色主题常用 12~20 让文字浮起来 |
+| `wallpaperScale` | 壁纸缩放 | 数字 | `1.0` | 1 – 2 | 壁纸放大倍数。手机屏幕比例和壁纸图比例不一致时会露边，放大能盖住 |
+| `cardStyle` | 卡片风格 | 枚举 | `flat` | flat / glass / gradient / neu | flat（扁平）/ glass（毛玻璃，半透）/ gradient（渐变）/ neu（拟物，双层描边） |
+| `cardElevation` | 卡片厚度 | 数字 | `0` | 0 – 12（单位 dp） | 卡片投影高度。0 = 纯扁平，靠描边分层 |
+| `bubbleStyle` | 气泡形状 | 枚举 | `rounded` | rounded / square / tail | rounded（全圆角）/ square（直角）/ tail（带小尾巴，像 QQ） |
+| `avatarShape` | 头像形状 | 枚举 | `circle` | circle / rounded / square | circle（正圆）/ rounded（圆角方）/ square（直角） |
+| `bgStyle` | 页面背景 | 枚举 | `aurora` | aurora / flat / gradient / wallpaper | aurora（内置极光）/ flat（纯色）/ gradient（双色渐变）/ wallpaper（主题壁纸） |
 
 ### 4.2 关于三个已删除的键
 
@@ -1066,7 +1096,7 @@ Android 上要做到"真的隔离"需要独立 UID + 独立进程 + 完整的 IP
 ### 14.4 颜色白名单的扩大 —— **已实现（2026-10-15）**
 
 v1 只有 5 个颜色真正生效，这限制了"能不能做得好看"。这一节原本是提案，
-**现在已经实现**：白名单扩到 37 个令牌（其中 24 个是 COLOR），默认值 = 内置 iOS 值，
+**现在已经实现**：白名单扩到 64 个令牌（其中 24 个是 COLOR），默认值 = 内置 iOS 值，
 **全部接线**。实际实现比下面这张表还多几项（聊天区、输入框、代码块），
 完整清单以 §4.1 为准：
 

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -172,7 +173,25 @@ fun LiquidDock(
         // 两帧：一帧让选中色/布局落到 Row，一帧让 record 拿到新内容。
         withFrameNanos { }
         withFrameNanos { }
-        contentBitmap = runCatching { contentLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+        val previous = contentBitmap
+        val fresh = runCatching { contentLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+        contentBitmap = fresh
+        // 旧图必须显式回收。这张是**全屏尺寸**的 ARGB_8888（1080p 约 8 MB），
+        // 而 key 里带着 selectedIndex —— 每切一次底栏标签就会重截一张。
+        // 只靠 GC 的话，低端机上连点几下标签就可能 OOM。
+        //
+        // 回收放在下一帧之后：新位图已经接管绘制，此时再释放旧的，
+        // 不会让某个正在进行的 draw 读到已经回收的内存。
+        if (previous != null && previous !== fresh) {
+            withFrameNanos { }
+            runCatching { if (!previous.isRecycled) previous.recycle() }
+        }
+    }
+    // 离开组合时把最后一张也收掉，否则它会一直挂到 GC 想起来为止。
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching { contentBitmap?.takeIf { !it.isRecycled }?.recycle() }
+        }
     }
 
     // 按压态有两个来源：手指按在某个格子上（子级 clickable 的 press），

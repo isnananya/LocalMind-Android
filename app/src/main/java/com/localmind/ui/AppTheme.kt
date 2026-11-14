@@ -50,10 +50,22 @@ fun AppTheme(viewModel: AppViewModel, content: @Composable () -> Unit) {
     }
 
     LaunchedEffect(dark) { viewModel.refreshUiTheme(dark) }
+
+    // 主题包的 assets 目录：壁纸等"包内文件"要靠它定位磁盘路径。
+    // 没有插件 id = 没装界面插件 = 没有壁纸。
+    val themeAssetsDir = remember(themeState.pluginId) {
+        val id = themeState.pluginId
+        if (id.isBlank()) null
+        else java.io.File(java.io.File(context.filesDir, "plugins"), id).let {
+            java.io.File(it, "assets").takeIf { d -> d.isDirectory }
+        }
+    }
+
     LocalMindTheme(
         darkTheme = dark,
         tokens = tokens,
         themeState = themeState,
+        themeAssetsDir = themeAssetsDir,
         content = content,
     )
 }

@@ -109,6 +109,24 @@ class LocalMindApp : Application() {
         private set
 
     /**
+     * 在线主题商店。
+     *
+     * 和 [remoteData] 一样是 best-effort：拉不到就用本地缓存，再不济就只剩
+     * 已安装的主题包。商店挂了不影响其它功能。
+     */
+    lateinit var themeStore: com.localmind.service.ThemeStoreService
+        private set
+
+    /**
+     * 在线音色目录。
+     *
+     * 音色权重一直就是云端拉的（不在 APK 里），这里补的是**清单**那一层：
+     * 新音色上架不用发版，打开应用就能看到。
+     */
+    lateinit var voiceCatalogService: com.localmind.service.VoiceCatalogService
+        private set
+
+    /**
      * 后台学习结束时通知界面刷新「它现在的状态」。
      *
      * 为什么需要回调：学习从「等它跑完再画」改成了「扔后台就不管」，
@@ -213,6 +231,8 @@ class LocalMindApp : Application() {
         // 外部语音引擎（Breeze TTS 2 等）：只发 HTTP 请求，不加载本机模型。
         breeze = com.localmind.service.BreezeTts(this)
         remoteData = com.localmind.service.RemoteDataService(this)
+        themeStore = com.localmind.service.ThemeStoreService(this)
+        voiceCatalogService = com.localmind.service.VoiceCatalogService(this)
         apiServer = ApiServer(storage, engine, tts, modelStore)
         remoteEngine = com.localmind.service.RemoteChatEngine()
         remoteApi = com.localmind.service.RemoteApi()

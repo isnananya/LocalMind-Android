@@ -418,6 +418,28 @@ fun saveImageToGallery(context: Context, file: File): Boolean {
 }
 
 /**
+ * 一张「显示宽度只有 [widthDp]」的缩略图位图，**按显示尺寸采样解码**。
+ *
+ * 为什么值得单独抽一个：`BitmapFactory.decodeFile` 不传 `inSampleSize` 时
+ * 是按**原图**解的 —— 一张 4000×3000 的手机照片解出来是 48 MB 的 ARGB 位图，
+ * 而这个 Composable 只画 56 dp。聊天页里几张附件图一起进来，光是解码就能
+ * 把主线程卡住几百毫秒，然后再被 GC 收掉。
+ *
+ * 采样之后同一张图大约 200×150，解码是亚毫秒级的，所以这里保持同步解码
+ * （而不是 `produceState` + 后台线程）—— 后台解码会让缩略图先空一下再跳出来，
+ * 在头像和待发送条这种位置反而更难看。
+ */
+@Composable
+fun rememberThumbnail(path: String, widthDp: androidx.compose.ui.unit.Dp): Bitmap? {
+    val px = with(androidx.compose.ui.platform.LocalDensity.current) {
+        widthDp.roundToPx()
+    }
+    return remember(path, px) {
+        com.localmind.data.ChatImageStore.decodeScaled(path, px.coerceAtLeast(32))
+    }
+}
+
+/**
  * 分享一张图。
  *
  * 走 `FileProvider`：直接把 `file://` 传给别的应用在 API 24+ 会抛

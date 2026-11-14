@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -85,6 +87,7 @@ fun AboutScreen(
         )
 
         LazyColumn(
+            flingBehavior = ScrollPhysics.fling(),
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
         ) {
@@ -115,7 +118,7 @@ fun AboutScreen(
                             )
                         }
                     }
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Text(
                             "这是一个完全离线、不需要任何服务器就能在手机上跑大模型的项目。" +
@@ -172,7 +175,7 @@ fun AboutScreen(
             item {
                 IosSection(header = "版本") {
                     InfoLine("应用", "LocalMind")
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     // 只显示版本名。**不要把 versionCode 拼在后面** ——
                     //
                     // 那是给 Android 比大小的一个整数（每次出包 +1），用户看到
@@ -191,17 +194,18 @@ fun AboutScreen(
                             onOpenDebug()
                         }
                     }
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     InfoLine("推理内核", "llama.cpp v0.6.0")
                 }
             }
 
-            // -------------------------------------------------- 应用图标捐赠
+            // -------------------------------------------------- 旧版本图标捐赠者
             //
             // 和下面的「捐献感谢榜」分开：一个出钱、一个出画，是两件不同的事。
-            // 只有一行署名，不加任何说明文字 —— 她捐的是图标，记的是这件事本身。
+            // 只有一行署名，不加任何说明文字 —— 她捐的是「旧版本」的图标，
+            // 现在 App 已经换成新图标了，这里只保留对旧版图标捐赠者的致谢。
             item {
-                IosSection(header = "应用图标捐赠") {
+                IosSection(header = "旧版本图标捐赠者") {
                     ContributorRow(
                         name = "小柠",
                         role = "捐赠人",
@@ -232,7 +236,7 @@ fun AboutScreen(
                             color = ios.secondaryLabel,
                         )
                     }
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     // 优先用 GitHub 远程捐献榜（LocalMind-Data），拉不到就用内置兜底。
                     // 两套 Donor 类型不同，统一映射成 UI 行；排序规则与后台一致：金额降序。
                     val remoteBoard = viewModel?.remoteData?.donors?.collectAsState()?.value
@@ -242,7 +246,7 @@ fun AboutScreen(
                         else -> Donors.list().map { Triple(it.name, it.yuan, it.base64) }
                     }
                     donorRows.forEachIndexed { index, donor ->
-                        if (index > 0) Divider(ios.separator)
+                        if (index > 0) HorizontalDivider(color = ios.separator)
                         DonorRow(
                             name = donor.first,
                             amount = donor.second.toString() + " 元",
@@ -293,25 +297,25 @@ fun AboutScreen(
                         license = "MIT",
                         note = "本项目自身代码",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "llama.cpp",
                         license = "MIT",
                         note = "本地文本推理内核（ggml-org/llama.cpp）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "stable-diffusion.cpp",
                         license = "MIT",
                         note = "本地扩散生图后端（leejet/stable-diffusion.cpp）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "ggml",
                         license = "MIT",
                         note = "张量计算库（ggml-org/ggml）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     // 这一条是**随 arm64 构建一起进来的**：llama.cpp 的 ARM 微内核后端。
                     // 它的许可证与 MIT 不同（Apache-2.0 + BSD-3-Clause，署名 Arm），
                     // 所以必须单独点名，不能并进上面那条 ggml。
@@ -323,27 +327,27 @@ fun AboutScreen(
                             "Copyright 2024-2026 Arm Limited and/or its affiliates" +
                             " <open-source-office@arm.com>。完整文本见其仓库 LICENSES/ 目录",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "libc++（Android NDK）",
                         license = "Apache-2.0",
                         note = "随 NDK 发布的 C++ 运行库（libc++_shared.so），" +
                             "Copyright (c) 2015, The Android Open Source Project",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "sherpa-onnx",
                         license = "Apache-2.0",
                         note = "本地神经网络语音合成（k2-fsa/sherpa-onnx）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     // 语音引擎那 30 MB 里 onnxruntime 一家占 21–25 MB，是最该点名的一个。
                     LicenseRow(
                         name = "ONNX Runtime",
                         license = "MIT",
                         note = "语音引擎的推理运行时（microsoft/onnxruntime，随 sherpa-onnx 一起下载）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     // 状态页的 CPU/内存/电池采样与折线图**改编自**这个项目，
                     // 不是"参考了思路"：字段选择、/proc/stat 解析、绘制算法都来自它。
                     LicenseRow(
@@ -352,52 +356,52 @@ fun AboutScreen(
                         note = "状态页设备采样与折线图（TerminalDev-1/AndroidMonitor-Preview，" +
                             "Copyright (c) 2026 Android Monitor contributors）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "AndroidLiquidGlassView",
                         license = "MIT",
                         note = "液态玻璃导航 / 底栏的 RenderEffect 折射（QmDeve/AndroidLiquidGlassView，" +
                             "Copyright (c) 2025-2026 Donny Yale）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "AirLLM",
                         license = "Apache-2.0",
                         note = "「先算预算、再按层取权重」的内存规划思路参考" +
                             "（lyogavin/airllm）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "Jetpack Compose / AndroidX",
                         license = "Apache-2.0",
                         note = "界面框架",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "Material Icons",
                         license = "Apache-2.0",
                         note = "内置图标（只打包用到的子集）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "Liquid Glass 视觉参考",
                         license = "设计参考",
                         note = "iOS 26 Liquid Glass 与 liuran001/WeChat-LiquidGlass 的公开做法；" +
                             "底栏为独立 Kotlin 实现，未复制代码",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "OkHttp / Okio",
                         license = "Apache-2.0",
                         note = "HTTP 下载与本地 API 服务",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     LicenseRow(
                         name = "Kotlin / kotlinx",
                         license = "Apache-2.0",
                         note = "语言标准库、协程与序列化（coroutines / serialization）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     // ⚠️ 这一条不是"用到了人家的库"，而是**许可要求署名**：
                     // Open-Meteo 的免费接口按 CC BY 4.0 提供数据，署名是使用条件。
                     // 删掉这一行 = 违约，不是"少写一行"。
@@ -431,7 +435,7 @@ fun AboutScreen(
                             )
                         } else {
                             declared.forEachIndexed { index, plugin ->
-                                if (index > 0) Divider(ios.separator)
+                                if (index > 0) HorizontalDivider(color = ios.separator)
                                 LicenseRow(
                                     name = plugin.manifest.name,
                                     license = plugin.manifest.license.ifBlank { "未声明" },
@@ -466,21 +470,21 @@ fun AboutScreen(
                         to = "HuggingFace 镜像、GitHub",
                         when_ = "你点了下载才发生",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     NetRow(
                         what = "联网检索",
                         data = "你的查询词",
                         to = "Bing / DuckDuckGo 的公开结果页",
                         when_ = "默认关（「我的 → 能力开关」）",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     NetRow(
                         what = "所在地天气",
                         data = "经纬度（不含设备标识、不含对话内容）",
                         to = "Open-Meteo（天气服务）",
                         when_ = "默认关；且只在人设聊天打开「看天气」并聊到天气时读一次",
                     )
-                    Divider(ios.separator)
+                    HorizontalDivider(color = ios.separator)
                     NetRow(
                         what = "本机 API 服务",
                         data = "你发过去的对话内容",

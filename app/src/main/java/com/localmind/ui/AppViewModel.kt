@@ -28,6 +28,7 @@ import com.localmind.data.ClonedVoice
 import com.localmind.data.ClonedVoiceStore
 import com.localmind.data.SynthTake
 import com.localmind.data.SynthTakeStore
+import com.localmind.data.SynthSubtitle
 import com.localmind.data.VoicePreset
 import com.localmind.data.VoicePresetStore
 import com.localmind.data.VoiceSettings
@@ -173,6 +174,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val breezeTts get() = localApp.breeze
     /** 远程应用数据（捐献榜 / 公告 / 版本下发），见 [com.localmind.service.RemoteDataService]。 */
     val remoteData get() = localApp.remoteData
+    /** 在线主题商店，见 [com.localmind.service.ThemeStoreService]。 */
+    val themeStore get() = localApp.themeStore
     val emoji get() = localApp.emoji
     val voiceDownloader get() = localApp.voiceDownloader
     val stt get() = localApp.stt
@@ -295,7 +298,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *
      * ## 为什么需要它
      *
-     * 底栏显示与否是**根层**说了算，而那几页是 ProfileScreen 自己用局部状态
+     * 底栏显示与否是**根层**说了算，而那几页是自己用局部状态
      * early-return 出来的 —— 根层看不见，于是它们底部一直留着标签栏：
      * 一个"整页"看起来只换了一半，用户会以为点进去的是浮层。
      *
@@ -473,8 +476,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 界面该做的事：把结果同步进 StateFlow、把表情包装进解析器、刷新模型列表。
      */
     fun installPluginZip(file: java.io.File): String {
-        return when (val o = PluginInstall.install(storage, file)) {
+        return when (val o = installPluginZipOutcome(file)) {
             is PluginInstall.Outcome.Failed -> o.reason
+            is PluginInstall.Outcome.Ok -> o.result.message
+        }
+    }
+
+    /**
+     * 装插件并返回**完整结果**。
+     *
+     * 主题商店需要知道"装的是哪个插件 id"才能启用它 —— 商店清单里的 id
+     * 和包里的 `plugin.json` id 未必一致（包自己说了算）。
+     *
+     * 之前这里只能拿到一句消息，于是只能靠"版本号最大的那个"去猜，
+     * 装了旧主题或同版本主题就会启用错的那个。
+     */
+    fun installPluginZipOutcome(file: java.io.File): PluginInstall.Outcome {
+        return when (val o = PluginInstall.install(storage, file)) {
+            is PluginInstall.Outcome.Failed -> o
             is PluginInstall.Outcome.Ok -> {
                 _plugins.value = storage.loadPlugins()
                 _modelPacks.value = storage.loadModelPacks()
@@ -485,7 +504,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 refreshVoiceCatalog()
                 refreshModels()
                 localApp.bumpPluginRevision()
-                o.result.message
+                o
             }
         }
     }
@@ -507,14 +526,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         val item = com.localmind.data.BuiltinPlugins.ALL.firstOrNull { it.key == key }
         if (item == null) {
+            // 生图后端以前走这条（key = "sd-backend"），现在 `liblocalmind-sd.so`
+            // 是随 APK 打包的，不再有可重装的 zip —— 于是这里自然落到「没有」。
             toast("没有这个内置插件")
-            return
-        }
-        // 已加载的原生后端不能用新 .so 覆盖（旧映射会段错误）。见 BuiltinPlugins 的说明。
-        if (item.key == "sd-backend" &&
-            runCatching { com.localmind.native.image.ImageBridge.hasDiffusionBackend }.getOrDefault(false)
-        ) {
-            toast("生图后端已经加载，重装要等下次启动；现在可以继续用")
             return
         }
         _builtinInstalling.value = key
@@ -718,11 +732,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 用户存过的克隆音色列表（UI 展示用）。 */
     private val _clonedVoices = MutableStateFlow<List<ClonedVoice>>(emptyList())
-    val clonedVoices: StateFlow<List<ClonedVoice>> get() = _clonedVoices.asStateFlow()
+    val clonedVoices: StateFlow<List<ClonedVoice>> by lazy { _clonedVoices.asStateFlow() }
 
     /** 当前选中的克隆音色（元数据，UI 显示「使用中」用）。 */
     private val _activeClone = MutableStateFlow<ClonedVoice?>(null)
-    val activeClone: StateFlow<ClonedVoice?> get() = _activeClone.asStateFlow()
+    val activeClone: StateFlow<ClonedVoice?> by lazy { _activeClone.asStateFlow() }
 
     /** 已安装的界面主题包（key = 插件 id）。 */
     private val _installedUiThemes =
@@ -737,7 +751,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _chatActions = MutableStateFlow<List<com.localmind.data.ChatAction>>(emptyList())
 
     /** 插件提供的聊天快捷动作（输入框上方那一排）。 */
-    val chatActions: StateFlow<List<com.localmind.data.ChatAction>> get() = _chatActions.asStateFlow()
+    val chatActions: StateFlow<List<com.localmind.data.ChatAction>> by lazy { _chatActions.asStateFlow() }
 
     private val _uiLayout = MutableStateFlow<com.localmind.data.UiLayout?>(null)
 
@@ -827,12 +841,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // 放在这里而不是各自的"功能区"，就是为了让「声明必须早于 init」这件事
     // 一眼可见 —— 下面几个都被 init 里的 refresh* 碰到过，晚声明就是空指针。
     // 已经因为这个崩过两次（refreshVoiceCatalog、refreshUiTheme），别再挪。
-    val themeOverrides: StateFlow<Map<String, String>> get() = _themeOverrides.asStateFlow()
-    val installedUiThemes: StateFlow<Map<String, com.localmind.data.UiTheme>>
-        get() = _installedUiThemes.asStateFlow()
-    val pendingImage: StateFlow<String?> get() = _pendingImage.asStateFlow()
-    val diffusionModels: StateFlow<List<java.io.File>> get() = _diffusionModels.asStateFlow()
-    val diffusionBackendReady: StateFlow<Boolean> get() = _diffusionBackendReady.asStateFlow()
+    val themeOverrides: StateFlow<Map<String, String>> by lazy { _themeOverrides.asStateFlow() }
+    val installedUiThemes: StateFlow<Map<String, com.localmind.data.UiTheme>> by lazy { _installedUiThemes.asStateFlow() }
+    val pendingImage: StateFlow<String?> by lazy { _pendingImage.asStateFlow() }
+    val diffusionModels: StateFlow<List<java.io.File>> by lazy { _diffusionModels.asStateFlow() }
+    val diffusionBackendReady: StateFlow<Boolean> by lazy { _diffusionBackendReady.asStateFlow() }
 
     /**
      * 深色模式。
@@ -1077,7 +1090,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _plugins.value = storage.loadPlugins()
         _modelPacks.value = storage.loadModelPacks()
         _enabledPackIds.value = storage.enabledModelPackIds()
-        _conversations.value = ConversationList(storage.loadConversations())
+        // 对话历史是**一个 JSON 文件、全文解析**。历史越长启动越慢：100 条对话
+        // 就是几 MB 的反序列化，在 init 里同步做等于直接卡住首帧。
+        // 先发空列表，读完了再发一次 —— 代价是极短一帧空态，收益是启动不僵。
+        _conversations.value = ConversationList(emptyList())
+        viewModelScope.launch {
+            val stored = withContext(Dispatchers.IO) { storage.loadConversations() }
+            // 读取期间用户可能已经新建了对话：只有还空着才覆盖，别把新对话冲掉。
+            if (_conversations.value.isEmpty()) {
+                _conversations.value = ConversationList(stored)
+            }
+        }
         // 列表为空就让它空着。原来这里会**自动补一个空对话**，删最后一个之后
         // 立刻又冒出来一个，用户的感受是"删不掉" —— 他删了就是不想留着。
         // 空列表有专门的空态（「开始一段对话」+ 新建按钮）。
@@ -1091,6 +1114,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 公告只在「有新公告」时弹一次窗；版本只在 versionCode 更高时弹更新框。
         // 全部失败也无声无息 —— 这绝不能挡住启动。
         refreshRemoteData()
+
+        // ---- 在线目录：音色清单 + 主题清单 ----
+        //
+        // 两者都是"新东西上架不用发版"的通道。清单本身很轻（几 KB），
+        // 拉不到也不影响任何功能 —— 内置音色和已装主题照样在。
+        // 主题清单不在启动时拉：主题商店是用户主动去逛的地方，
+        // 启动时拉只是浪费流量（用户可能一辈子不换主题）。
+        refreshRemoteVoiceCatalog()
 
         // ---- 内置插件：模型库 / 液态玻璃底栏 / 生图后端 ----
         //
@@ -2252,7 +2283,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (engine.state.value.ready || engine.state.value.generating) return@launch
             android.util.Log.i("AppViewModel", "预热模型：${model.name}")
-            engine.load(model, _settings.value, null).onFailure {
+            // ⚠️ 必须把 mmproj 一起传进来。
+            // 这里以前写的是 `null`：手动点「加载」会带上视觉投影，但**重启后的预热
+            // 会把它丢掉** —— 表现是"第一次能发图，第二天打开就看不见图了"，
+            // 而且没有任何提示，因为模型本身加载是成功的。
+            engine.load(model, _settings.value, model.mmprojPathOn(storage.modelsDir)).onFailure {
                 android.util.Log.w("AppViewModel", "预热失败：${it.message}")
             }
         }
@@ -2529,9 +2564,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _chat.value = _chat.value.copy(streaming = false)
     }
 
-    fun send(text: String) {        val prompt = text.trim()
+    fun send(text: String) {
+        val prompt = text.trim()
         if (prompt.isEmpty()) return
         val conv = activeConversation() ?: return
+
+        // ---- 先把上一轮停掉 ----
+        //
+        // 界面上的「发送」按钮在 streaming 时是禁用的，所以正常操作不会撞上。
+        // 但 send() 还有两个绕过这条路线的入口：澄清卡片（answerClarification）
+        // 和插件动作栏（ChatScreen 直接调 viewModel.send）。这两处在
+        // streaming=false 时都是可点的，手快连点两下就会让两个 job 同时写
+        // **同一个 conv.messages 列表**：
+        //   · 各自 append 一条 user + 一条 assistant 占位 → 消息重影；
+        //   · burst 模式中途 `conv.messages += reply` 会让另一个 job 的
+        //     replyIndex 指向错误的消息 → 气泡内容串位。
+        // 所以这里先取消、再起新的。取消后 native 侧由 engine.cancel() 收尾，
+        // LlamaEngine 的互斥锁保证下一条不会和还没退出的生成并发。
+        generateJob?.cancel()
+        generateJob = null
+        runCatching { engine.cancel() }
+
 
         // ---------------------------------------------------- 这个对话用哪个模型
         //
@@ -2620,7 +2673,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // needSwitch 里已经包含了 wantedLocal != null，别再写一遍（编译器会报 always true）。
             if (needSwitch) {
                 withContext(Dispatchers.Main) { toast("正在切到 ${wantedLocal.name}…") }
-                engine.load(wantedLocal, _settings.value).onFailure { e ->
+                // 同上：切模型时也要带 mmproj，否则"在对话设置里换成能看图的模型"
+                // 之后发图仍然没反应，而直接去模型页点加载却是好的。
+                engine.load(wantedLocal, _settings.value, wantedLocal.mmprojPathOn(storage.modelsDir)).onFailure { e ->
                     withContext(Dispatchers.Main) {
                         toast("切换失败，改用当前模型：${e.message}")
                     }
@@ -2643,9 +2698,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // 串行做的话，首 token 要等三者相加；并行之后只等最慢的那一个。
             //
             // 它们都 happens-before「占用对话引擎」，所以不会和真正的回答抢锁。
+            //
+            // ⚠️ 三个 `async` 都必须显式给 `Dispatchers.IO`。
+            // `viewModelScope.launch` 默认调度器是 `Main.immediate`，而 `async {}`
+            // 不指定调度器时**继承父作用域** —— 也就是这三个分支以前全都跑在
+            // 主线程上。后果是"并行"名不副实（主线程一次只能跑一个），而且
+            // `readDeviceSense` 读定位（冷启动 2-4 秒）和 `WebSearch` 的网络
+            // 往返都是阻塞调用，直接把首帧卡住，表现为点发送后界面定住。
             val (recall, senseBlock, webBlock) = kotlinx.coroutines.coroutineScope {
                 // AI 对话不经过拟人层：不召回记忆、不读设备（那两项只属于人设聊天）。
-                val recallDeferred = async {
+                val recallDeferred = async(Dispatchers.IO) {
                     if (aiOnly) {
                         com.localmind.service.CompanionMind.Recall()
                     } else {
@@ -2655,7 +2717,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 // 设备感知：只有聊到才读（readDeviceSense 内部按关键词判断）。
-                val senseDeferred = async {
+                val senseDeferred = async(Dispatchers.IO) {
                     if (aiOnly) {
                         ""
                     } else {
@@ -2667,7 +2729,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // 联网检索：「允许 AI 上网」打开时每条消息先查一次 —— 开关是用户自己开的，
                 // 他就希望回答有网上的依据；查不到就什么都不注入（塞一段"检索失败"只会污染上下文）。
-                val webDeferred = async {
+                val webDeferred = async(Dispatchers.IO) {
                     if (_capabilities.value.webSearch) {
                         runCatching {
                             com.localmind.service.WebSearch.search(
@@ -3967,8 +4029,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 播放器下面那行说明：用哪个音色合成的、多少秒。 */
     val synthMeta: StateFlow<String> = _synthMeta.asStateFlow()
 
-    /** 工作室的产物目录（重合成会覆盖同一个文件，用户要留就导出）。 */
-    val studioDir: File get() = File(storage.appContext().filesDir, "studio").apply { mkdirs() }
+    private val _synthSubs = MutableStateFlow<List<SynthSubtitle>>(emptyList())
+
+    /** 当前合成结果的句级字幕时间轴；空 = 没有 / 不可导出字幕。 */
+    val synthSubs: StateFlow<List<SynthSubtitle>> = _synthSubs.asStateFlow()
+
+    private val _audiobookBusy = MutableStateFlow(false)
+    val audiobookBusy: StateFlow<Boolean> = _audiobookBusy.asStateFlow()
+
+    private val _audiobookProgress = MutableStateFlow("")
+    val audiobookProgress: StateFlow<String> = _audiobookProgress.asStateFlow()
+
+    /**
+     * 工作室的产物目录（重合成会覆盖同一个文件，用户要留就导出）。
+     *
+     * 用 `by lazy` 不是洁癖：这个属性在 Compose 里被读，而 getter 里带
+     * `mkdirs()` —— 每读一次就是一次 fsync 级别的系统调用，重组多少次就调多少次。
+     */
+    val studioDir: File by lazy { File(storage.appContext().filesDir, "studio").apply { mkdirs() } }
 
     // ---- 合成记录 / 参数预设（VoiceStudio 的 Recent takes + Voice Design） ----
 
@@ -4069,7 +4147,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             items.forEachIndexed { index, body ->
                 _batchProgress.value = "第 ${index + 1}/${items.size} 条…"
                 val f = File(studioDir, "batch-%03d.wav".format(index))
-                val ok = runCatching { synthToFile(body, f) }.getOrDefault(false)
+                val (ok, _) = runCatching { synthToWavWithTimeline(body, f, false) }
+                    .getOrDefault(false to emptyList())
                 // 合成完立刻导出：批量合成不出现在「音乐」里就等于白跑一趟。
                 if (ok && exportWavAs(f) != null) done++
             }
@@ -4103,10 +4182,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val target = File(studioDir, "last.wav")
             val label = _activeClone.value?.name
                 ?: com.localmind.data.VoiceCatalog.byId(_activeNeuralVoice.value)?.label ?: "音色"
-            val ok = runCatching { synthToFile(body, target) }.getOrDefault(false)
+            val (ok, subs) = runCatching { synthToWavWithTimeline(body, target, true) }
+                .getOrDefault(false to emptyList())
             _synthBusy.value = false
             if (ok && target.isFile && target.length() > 44L) {
                 _synthFile.value = target
+                _synthSubs.value = subs
                 _synthMeta.value = label + " · " + body.take(24).replace("\n", " ") +
                     (if (body.length > 24) "…" else "")
                 // 落一条历史：复制一份，免得下一次合成就把它覆盖了。
@@ -4132,6 +4213,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (t != null) _takes.value = SynthTakeStore.add(storage, t)
             } else {
                 _synthFile.value = null
+                _synthSubs.value = emptyList()
                 _synthError.value = "合成失败：音色没加载起来，或参考音频有问题"
                 toast("合成失败")
             }
@@ -4144,8 +4226,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 切成句之后每句从干净状态起步，长文本不会越念越平、吞字；句间补一段静音
      * 当作换气。代价是句间韵律不如整段连贯，所以这由 [VoiceSettings.splitSentences]
      * 控制，默认开。
+     *
+     * 返回 `Pair(成功?, 句级时间轴)`。[timeline] 为 true 时顺手量出每句的起止毫秒
+     * （句间停顿也折进去），供字幕(SRT)导出和播放器高亮用；批量导出不需要，关掉省点开销。
      */
-    private suspend fun synthToFile(body: String, target: File): Boolean {
+    private suspend fun synthToWavWithTimeline(
+        body: String,
+        target: File,
+        timeline: Boolean,
+    ): Pair<Boolean, List<SynthSubtitle>> {
         val v = _voice.value
         val clone = _activeClone.value
         val neuralId = _activeNeuralVoice.value
@@ -4154,21 +4243,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         tmp.listFiles()?.forEach { runCatching { it.delete() } }
 
         val parts = ArrayList<File>()
-        for ((i, chunk) in chunks.withIndex()) {
-            val f = File(tmp, "p%03d.wav".format(i))
-            val ok = synthChunk(chunk, f, v, clone, neuralId)
-            if (!ok) return false
-            parts.add(f)
-        }
-        if (parts.isEmpty()) return false
-        if (parts.size == 1) {
-            target.delete()
-            return parts.first().renameTo(target) || AudioUtil.concatWavs(parts, 0, target)
-        }
+        val subs = ArrayList<SynthSubtitle>()
         // 句间停顿：克隆链路自己也会插静音（silenceScale），这里只补一点点，
         // 否则两个静音叠起来会显得拖沓。
         val gap = if (clone != null) 80 else (80 + v.silenceScale * 320).toInt()
-        return AudioUtil.concatWavs(parts, gap, target)
+        var cursorMs = 0L
+        for ((i, chunk) in chunks.withIndex()) {
+            val f = File(tmp, "p%03d.wav".format(i))
+            val ok = synthChunk(chunk, f, v, clone, neuralId)
+            if (!ok) return false to emptyList()
+            parts.add(f)
+            if (timeline) {
+                val d = AudioUtil.durationMs(f) ?: 0L
+                subs.add(SynthSubtitle(chunk, cursorMs, cursorMs + d))
+                cursorMs += d
+            }
+            if (i < chunks.lastIndex) cursorMs += gap
+        }
+        if (parts.isEmpty()) return false to emptyList()
+        val ok = if (parts.size == 1) {
+            target.delete()
+            parts.first().renameTo(target) || AudioUtil.concatWavs(parts, 0, target)
+        } else {
+            AudioUtil.concatWavs(parts, gap, target)
+        }
+        if (!ok) return false to emptyList()
+        return ok to (if (timeline) subs.toList() else emptyList())
     }
 
     private suspend fun synthChunk(
@@ -4235,8 +4335,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         buf.toString().trim().takeIf { it.isNotEmpty() }?.let { parts.add(it) }
         if (parts.isEmpty()) return listOf(text)
 
-        val out = ArrayList<String>(parts.size)
+        // ---- 短句合并 ----
+        //
+        // 「好。」「嗯。」这种两三个字的句子，如果每句单独跑一次模型，
+        // 有两笔账：每个 chunk 都有一次固定的起音/收尾开销（长文合成里
+        // 这部分能耗掉一半时间），而且每句都重新起调，听起来像逐句蹦字。
+        // 所以把 24 字以下的段和下一段并起来 —— 上限压到 100 字，
+        // 保证并完仍然落在单 chunk 的合理区间里。
+        val merged = ArrayList<String>(parts.size)
         for (p in parts) {
+            val last = merged.lastOrNull()
+            if (last != null && last.length < 24 && last.length + p.length <= 100) {
+                // 中英混排时两段之间要留个空格，否则 "Hello" + "world" 会粘成一个词。
+                val glue = if (last.last().isAsciiWordChar() && p.first().isAsciiWordChar()) " " else ""
+                merged[merged.size - 1] = last + glue + p
+            } else {
+                merged.add(p)
+            }
+        }
+
+        val out = ArrayList<String>(merged.size)
+        for (p in merged) {
             if (p.length <= 110) {
                 out.add(p)
                 continue
@@ -4256,9 +4375,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return out.ifEmpty { listOf(text) }
     }
 
+    /** 英文/数字才算「并起来会粘连」的字符；中文句末直接接下一句反而更顺。 */
+    private fun Char.isAsciiWordChar(): Boolean =
+        this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
+
     fun clearStudioAudio() {
         _synthFile.value = null
         _synthMeta.value = ""
+        _synthSubs.value = emptyList()
         _synthError.value = null
         runCatching { File(studioDir, "last.wav").delete() }
     }
@@ -4339,6 +4463,143 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 dst.absolutePath
             }
         }.getOrNull()
+    }
+
+    /**
+     * 把当前合成的句级字幕导出成 SRT 文件。
+     *
+     * SRT 不是音频，不能塞进 MediaStore 的「音乐」库，所以走「文档/LocalMind」。
+     * API 29+ 用 [android.provider.MediaStore.Files]，更低版本退回 App 外部目录。
+     *
+     * @return 用户可读的落盘位置；没有字幕或导出失败返回 null。
+     */
+    fun exportSrt(): String? {
+        val subs = _synthSubs.value
+        if (subs.isEmpty()) return null
+        val srt = buildSrt(subs)
+        val name = "LocalMind-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+            .format(java.util.Date()) + ".srt"
+        return runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val resolver = storage.appContext().contentResolver
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Files.FileColumns.MIME_TYPE, "application/x-subrip")
+                    put(
+                        android.provider.MediaStore.Files.FileColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOCUMENTS + "/LocalMind",
+                    )
+                    put(android.provider.MediaStore.Files.FileColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(
+                    android.provider.MediaStore.Files.getContentUri("external"), values,
+                ) ?: return null
+                resolver.openOutputStream(uri)?.use { out ->
+                    out.write(srt.toByteArray())
+                }
+                values.clear()
+                values.put(android.provider.MediaStore.Files.FileColumns.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                "文档/LocalMind/$name"
+            } else {
+                val dir = File(
+                    storage.appContext()
+                        .getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS),
+                    "LocalMind",
+                ).apply { mkdirs() }
+                val dst = File(dir, name)
+                dst.writeText(srt)
+                dst.absolutePath
+            }
+        }.getOrNull()
+    }
+
+    /** 把时间轴拼成标准 SRT 文本：序号 / 起止时间 / 文本，块间空行。 */
+    private fun buildSrt(subs: List<SynthSubtitle>): String {
+        val sb = StringBuilder()
+        subs.forEachIndexed { i, s ->
+            sb.append(i + 1).append('\n')
+            sb.append(srtTime(s.startMs)).append(" --> ").append(srtTime(s.endMs)).append('\n')
+            sb.append(s.text).append('\n').append('\n')
+        }
+        return sb.toString()
+    }
+
+    /** 毫秒 → `HH:MM:SS,mmm`（SRT 用逗号分隔毫秒）。 */
+    private fun srtTime(ms: Long): String {
+        val t = ms.coerceAtLeast(0L)
+        val h = t / 3_600_000
+        val m = (t % 3_600_000) / 60_000
+        val s = (t % 60_000) / 1000
+        val millis = t % 1000
+        return "%02d:%02d:%02d,%03d".format(java.util.Locale.US, h, m, s, millis)
+    }
+
+    /**
+     * 有声书模式：把「空行分隔的若干段」逐段合成，再连成**一条**连续长音频，
+     * 并附一份全本字幕(SRT)。
+     *
+     * 和 [synthesizeBatch] 的区别：批量是「一段一个文件」，有声书是「全本一条音频」
+     * —— 听长文不用手动切歌。段落之间补 600ms 停顿当翻篇。
+     */
+    fun synthesizeAudiobook(text: String) {
+        if (_audiobookBusy.value || _synthBusy.value || _batchBusy.value) return
+        val paras = text.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (paras.isEmpty()) {
+            toast("先写点内容，空行分隔每一段")
+            return
+        }
+        if (_activeClone.value == null && _activeNeuralVoice.value.isBlank()) {
+            toast("先在上面选一个音色")
+            return
+        }
+        _audiobookBusy.value = true
+        _synthError.value = null
+        viewModelScope.launch {
+            val bookFile = File(studioDir, "audiobook.wav")
+            val paraGap = 600
+            val paraFiles = ArrayList<File>()
+            val allSubs = ArrayList<SynthSubtitle>()
+            var cursor = 0L
+            var okAll = true
+            paras.forEachIndexed { index, p ->
+                _audiobookProgress.value = "有声书 第 ${index + 1}/${paras.size} 段…"
+                val pf = File(studioDir, "ab-p%03d.wav".format(index))
+                val (ok, subs) = runCatching { synthToWavWithTimeline(p, pf, true) }
+                    .getOrDefault(false to emptyList())
+                if (!ok) {
+                    okAll = false
+                    return@forEachIndexed
+                }
+                paraFiles.add(pf)
+                for (s in subs) allSubs.add(SynthSubtitle(s.text, s.startMs + cursor, s.endMs + cursor))
+                cursor += (AudioUtil.durationMs(pf) ?: 0L) + paraGap
+            }
+            if (okAll && paraFiles.isNotEmpty()) {
+                val ok = AudioUtil.concatWavs(paraFiles, paraGap, bookFile)
+                if (ok) {
+                    _synthFile.value = bookFile
+                    _synthSubs.value = allSubs
+                    _synthMeta.value = "有声书 · ${paras.size} 段 · ${allSubs.size} 句"
+                    // 顺手导出：音频进「音乐」，字幕进「文档」。
+                    val wavPath = exportWavAs(bookFile)
+                    val srtPath = exportSrt()
+                    _audiobookProgress.value = buildString {
+                        append("完成：${paras.size} 段已合并")
+                        if (wavPath != null) append(" · 音频已导出")
+                        if (srtPath != null) append(" · 字幕已导出")
+                    }
+                    toast("有声书生成完成")
+                } else {
+                    okAll = false
+                }
+            }
+            if (!okAll) {
+                _synthError.value = "有声书合成失败：某一段音色没加载起来，或参考音频有问题"
+                _audiobookProgress.value = ""
+            }
+            _audiobookBusy.value = false
+        }
     }
 
     /**
@@ -4696,7 +4957,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // 字段声明见文件顶部「插件驱动的状态」那一段 —— `init` 会调
     // [refreshVoiceCatalog]，所以这些 StateFlow **必须在 init 之前**声明，
     // 否则就是 "setValue on a null object reference"。踩过一次，别挪回去。
-    val voiceCatalog: StateFlow<List<com.localmind.data.VoiceEntry>> get() = _voiceCatalog.asStateFlow()
+    val voiceCatalog: StateFlow<List<com.localmind.data.VoiceEntry>> by lazy { _voiceCatalog.asStateFlow() }
 
     /** 从已启用的语音插件重建音色注册表。装/卸/开关插件后都要调。 */
     fun refreshVoiceCatalog() {
@@ -4708,6 +4969,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 音色清单变了，模型页的「语音」分类也要跟着变 —— 它是从同一份注册表
         // 映射出来的（见 refreshModels）。不刷新的话装了语音插件模型页看不到音色。
         refreshModels()
+    }
+
+    /**
+     * 拉取**在线音色清单**并合进注册表。
+     *
+     * 三层清单的优先级：内置 < 在线 < 插件（见 [com.localmind.data.VoiceCatalog]）。
+     * 新音色上架不用发版 —— 往云端仓库提交一个 JSON 就行。
+     *
+     * 拉不到不影响任何东西：内置那 4 个照样在。
+     */
+    fun refreshRemoteVoiceCatalog() {
+        viewModelScope.launch {
+            runCatching { localApp.voiceCatalogService.refresh() }
+                .onFailure { Log.w("AppViewModel", "在线音色清单拉取失败", it) }
+            val remote = localApp.voiceCatalogService.remoteVoices.value
+            if (remote.isNotEmpty()) {
+                com.localmind.data.VoiceCatalog.setRemote(remote)
+                _voiceCatalog.value = com.localmind.data.VoiceCatalog.all
+                refreshModels()
+            }
+        }
     }
 
     /** 写出语音插件骨架，用户改完压 zip 就能装自己的音色。 */
@@ -4785,6 +5067,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             com.localmind.data.TokenType.NUMBER -> "数字"
                             com.localmind.data.TokenType.ENUM -> "枚举"
                             com.localmind.data.TokenType.BOOL -> "开关"
+                            com.localmind.data.TokenType.TEXT -> "文本"
                         }
                     )
                     .append(" ----\n")
@@ -4796,6 +5079,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     "（${com.localmind.data.UiTokens.enumValues[t.key].orEmpty().joinToString(" / ")}）"
                 com.localmind.data.TokenType.BOOL -> "（true / false）"
                 com.localmind.data.TokenType.COLOR -> ""
+                com.localmind.data.TokenType.TEXT -> ""
             }
             sb.append(t.key.padEnd(20))
                 .append(t.label.padEnd(18))
@@ -4821,17 +5105,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 取值顺序（后者覆盖前者）：**内置 iOS 原色 → 界面插件 → 用户手动覆盖**。
      * 用户永远有最终话语权 —— 插件不该能钉死一个用户不喜欢的颜色。
      */
-    val uiTokens: StateFlow<Map<String, String>> get() = _uiTokens.asStateFlow()
+    val uiTokens: StateFlow<Map<String, String>> by lazy { _uiTokens.asStateFlow() }
 
     /** 当前生效的界面主题包（最后一个启用的赢），用于界面说明现在用的是什么。 */
-    val activeUiTheme: StateFlow<com.localmind.data.UiTheme?> get() = _activeUiTheme.asStateFlow()
+    val activeUiTheme: StateFlow<com.localmind.data.UiTheme?> by lazy { _activeUiTheme.asStateFlow() }
 
     /** 标签栏显示哪几个。空 = 默认三个。 */
-    val visibleTabs: StateFlow<List<String>> get() = _visibleTabs.asStateFlow()
+    val visibleTabs: StateFlow<List<String>> by lazy { _visibleTabs.asStateFlow() }
 
     /** 覆盖应用标题。空 = 用默认。 */
-    val appTitleOverride: StateFlow<String> get() = _appTitleOverride.asStateFlow()
-    val startTab: StateFlow<String> get() = _startTab.asStateFlow()
+    val appTitleOverride: StateFlow<String> by lazy { _appTitleOverride.asStateFlow() }
+    val startTab: StateFlow<String> by lazy { _startTab.asStateFlow() }
 
     /**
      * 整个应用生效的界面主题。**界面唯一该收集的东西。**
@@ -4839,14 +5123,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 收集它就会在装/卸/开关主题、改覆盖、切深浅色之后自动重组 ——
      * 这正是以前缺的那一环（见 `_uiThemeState` 的说明）。
      */
-    val uiThemeState: StateFlow<com.localmind.ui.theme.ThemeState> get() = _uiThemeState.asStateFlow()
+    val uiThemeState: StateFlow<com.localmind.ui.theme.ThemeState> by lazy { _uiThemeState.asStateFlow() }
 
     /** 当前生效的界面布局（`ui_layout` 插件）。null = 默认布局。 */
-    val uiLayout: StateFlow<com.localmind.data.UiLayout?> get() = _uiLayout.asStateFlow()
+    val uiLayout: StateFlow<com.localmind.data.UiLayout?> by lazy { _uiLayout.asStateFlow() }
 
     /** 装了哪些布局包，供「主题 → 界面布局」列出。 */
-    val installedLayouts: StateFlow<Map<String, com.localmind.data.UiLayout>>
-        get() = _installedLayouts.asStateFlow()
+    val installedLayouts: StateFlow<Map<String, com.localmind.data.UiLayout>> by lazy { _installedLayouts.asStateFlow() }
 
     /**
      * 切换生效的布局包。空串 = 切回主程序默认布局。
@@ -4980,6 +5263,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             startTab = _startTab.value,
             appName = _appTitleOverride.value,
             themeName = theme?.packName.orEmpty(),
+            // 主题包的插件 id。壁纸这类"包内文件"要靠它定位磁盘目录。
+            pluginId = enabled.lastOrNull()?.manifest?.id.orEmpty(),
         )
     }
 
@@ -5069,6 +5354,89 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         localApp.bumpPluginRevision()
         refreshUiTheme()
         toast("已回到内置外观")
+    }
+
+    // ---------------------------------------------------- 在线主题商店
+
+    /** 正在下载的主题 id；空 = 空闲。 */
+    private val _themeDownloading = MutableStateFlow("")
+    val themeDownloading: StateFlow<String> by lazy { _themeDownloading.asStateFlow() }
+
+    /** 下载/安装的进度提示。 */
+    private val _themeDownloadStatus = MutableStateFlow("")
+    val themeDownloadStatus: StateFlow<String> by lazy { _themeDownloadStatus.asStateFlow() }
+
+    /** 刷新在线主题清单。 */
+    fun refreshThemeStore() {
+        viewModelScope.launch {
+            _themeDownloadStatus.value = "正在获取主题列表…"
+            runCatching { themeStore.refresh() }
+                .onFailure { _themeDownloadStatus.value = "获取失败：${it.message?.take(60)}" }
+            if (themeStore.lastError.value.isNotBlank()) {
+                _themeDownloadStatus.value = themeStore.lastError.value
+            } else if (_themeDownloadStatus.value.startsWith("正在")) {
+                _themeDownloadStatus.value = ""
+            }
+        }
+    }
+
+    /**
+     * 下载并安装一个在线主题包。
+     *
+     * 走的是**和本地 zip 完全一样的安装流程**（[PluginInstall.install]）——
+     * 所以网上来的主题享受同一套校验：路径白名单、zip-slip 防护、
+     * 含代码的插件要用户确认。没有任何"特权路径"。
+     *
+     * 装完自动启用它，因为用户点"下载"就是想用。
+     */
+    fun downloadAndInstallTheme(entry: com.localmind.service.ThemeStoreService.ThemeEntry) {
+        if (_themeDownloading.value.isNotBlank()) {
+            toast("正在下载另一个主题，稍等")
+            return
+        }
+        viewModelScope.launch {
+            _themeDownloading.value = entry.id
+            val verb = if (entry.isBuiltin) "安装" else "下载"
+            _themeDownloadStatus.value = "正在$verb「${entry.name}」…"
+            try {
+                val file = themeStore.download(entry) { done, total ->
+                    if (total > 0 && !entry.isBuiltin) {
+                        _themeDownloadStatus.value =
+                            "正在下载「${entry.name}」 ${done / 1024 / 1024} / ${total / 1024 / 1024} MB"
+                    }
+                }
+                if (file == null) {
+                    _themeDownloadStatus.value = if (entry.isBuiltin) "安装失败" else "下载失败，换个网络再试"
+                    toast("主题${verb}失败")
+                    return@launch
+                }
+
+                _themeDownloadStatus.value = "正在应用「${entry.name}」…"
+                // 用安装结果里的 manifest —— 商店清单里的 id 只是索引，
+                // 真正装了哪个插件以包里的 plugin.json 为准。
+                val outcome = installPluginZipOutcome(file)
+                if (outcome is PluginInstall.Outcome.Failed) {
+                    _themeDownloadStatus.value = "安装失败：${outcome.reason}"
+                    toast("主题安装失败")
+                    file.delete()
+                    return@launch
+                }
+                val manifestId = (outcome as PluginInstall.Outcome.Ok).result.manifest.id
+
+                // 装完启用它。
+                setPluginEnabled(manifestId, true)
+                storage.loadUiThemes()[manifestId]?.let { theme -> useUiTheme(theme) }
+
+                file.delete()
+                _themeDownloadStatus.value = ""
+                toast("「${entry.name}」已装好并启用")
+            } catch (t: Throwable) {
+                Log.w("AppViewModel", "主题安装失败", t)
+                _themeDownloadStatus.value = "出错：${t.message?.take(60)}"
+            } finally {
+                _themeDownloading.value = ""
+            }
+        }
     }
     fun startListening() = stt.start(_voice.value.language)
 
@@ -5227,9 +5595,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 全屏预览中的图；null = 没打开。 */
     val imgPreview: StateFlow<File?> = _imgPreview.asStateFlow()
 
-    @Volatile
-    private var imgCancelFlag = false
-
+    // 关于「取消生图」：
+    //
+    // 这里以前有一个 `@Volatile private var imgCancelFlag`，声明了、在 generateImage
+    // 里重置了，但**从来没有读取点** —— 也就是说界面上没有任何东西能中断一次扩散推理。
+    // 删掉而不是补上，因为补不了：`sd_jni.cpp` 的进度回调是单向通知
+    // （`sd_set_progress_callback`，无返回值），native 层没有任何 stop/abort 入口，
+    // 而 `ImageBridge.StepSink` 又把 `onStep` 包在 `runCatching` 里 —— 在回调中抛异常
+    // 既传不出去、也不会让 sd.cpp 停下来。
+    //
+    // 真要做取消，得改 C++：让进度回调返回 false 时 sd.cpp 提前退出采样循环，
+    // 再加一个 `nativeSdCancel()` 置标志位。那是一次需要重编 .so（约 20 分钟）的改动，
+    // 不塞进这批 Kotlin 修复里。
     fun openImagePreview(file: File) { _imgPreview.value = file }
     fun closeImagePreview() { _imgPreview.value = null }
 
@@ -5249,6 +5626,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun exportImage(file: File): Boolean =
         runCatching { com.localmind.ui.components.saveImageToGallery(getApplication(), file) }
             .getOrDefault(false)
+
+    /** 后端支不支持「以图生图」。老 .so 或 32 位机上会是 false，界面据此隐藏入口。 */
+    val hasImg2Img: Boolean get() = com.localmind.native.image.ImageBridge.hasImg2Img
+
+    /** 后端支不支持 ESRGAN 超分。 */
+    val hasUpscaler: Boolean get() = com.localmind.native.image.ImageBridge.hasUpscaler
+
+    /** 本机有没有下载过超分权重。 */
+    fun upscalerInstalled(): Boolean =
+        com.localmind.data.ImageModels.upscalerFile(storage.modelsDir) != null
+
+    /**
+     * 把当前结果图用 RealESRGAN 放大 2×，另存为新文件并替换结果。
+     *
+     * 单独一个按钮而不是"生成时自动做"：超分是额外几十秒，用户应该能选；
+     * 而生成时的「快速放大」是另一条路径（小图采样 + 放大），两者不冲突。
+     */
+    fun upscaleResult() {
+        val src = _imgResult.value?.takeIf { it.isFile } ?: run {
+            toast("先生成一张图")
+            return
+        }
+        if (_imgBusy.value) return
+        val weight = com.localmind.data.ImageModels.upscalerFile(storage.modelsDir)
+        if (weight == null) {
+            toast("还没下载超分模型（模型页 · 18 MB）")
+            return
+        }
+        _imgBusy.value = true
+        _imgError.value = null
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val out = runCatching {
+                val bmp = android.graphics.BitmapFactory.decodeFile(src.absolutePath)
+                    ?: error("读不出这张图")
+                val up = com.localmind.native.image.ImageBridge.upscale(weight.absolutePath, bmp, factor = 2)
+                    ?: error("超分失败：模型格式不对或内存不足")
+                val file = java.io.File(
+                    storage.imagesDir,
+                    "upscaled-" + System.currentTimeMillis() + ".png",
+                )
+                java.io.FileOutputStream(file).use { up.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                up.recycle()
+                bmp.recycle()
+                file
+            }
+            _imgBusy.value = false
+            out.onSuccess { f ->
+                _imgResult.value = f
+                _imgNote.value = "AI 放大 2× · RealESRGAN"
+                refreshImageGallery()
+                toast("放大完成，已存到图库")
+            }.onFailure { t ->
+                _imgError.value = t.message ?: "超分失败"
+            }
+        }
+    }
 
     /** 把某张图的种子填回设置 —— 想"同一张再变一点"的唯一入口。 */
     fun reuseSeedOf(file: File) {
@@ -5271,7 +5704,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 定尺寸与步数（[com.localmind.service.ImageEngine.autoStepsFor]），
      * 让默认值就是"能用的默认值"。
      */
-    fun generateImage(prompt: String) {
+    fun generateImage(
+        prompt: String,
+        /** 参考图：给了就走图生图。null = 普通文生图（老调用点行为不变）。 */
+        init: android.graphics.Bitmap? = null,
+        /** 重绘强度 0..1。 */
+        strength: Float = 0.6f,
+    ) {
         val body = prompt.trim()
         if (body.isEmpty()) {
             toast("先写点想要什么")
@@ -5280,7 +5719,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (_imgBusy.value) return
         val settings = _image.value
         val modelPath = DiffusionModels_refreshAndPick(settings.customModelPath)
-        imgCancelFlag = false
         _imgBusy.value = true
         _imgError.value = null
         _imgStep.value = 0
@@ -5311,6 +5749,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         _imgStep.value = step
                         _imgTotal.value = total
                     },
+                    init = init,
+                    strength = strength,
+                    esrganPath = com.localmind.data.ImageModels.upscalerFile(storage.modelsDir)?.absolutePath,
                 )
             }
             ticker.cancel()
@@ -5327,15 +5768,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             _imgResult.value = g.file
             _imgProcedural.value = g.via == ImageEngine.Via.PROCEDURAL
-            _imgNote.value = buildString {
-                if (g.via == ImageEngine.Via.DIFFUSION) {
+            _imgNote.value = when (g.via) {
+                ImageEngine.Via.DIFFUSION -> buildString {
                     if (g.steps > 0) append("${g.steps} 步 · ")
                     if (g.renderSize > 0) append("${g.renderSize}² 渲染 · ")
                     append(String.format(java.util.Locale.US, "%.1fs", g.elapsedMs / 1000f))
-                } else {
-                    append("内置渲染器 · 没走模型")
                 }
-                if (g.note.isNotBlank()) append("\n").append(g.note)
+                ImageEngine.Via.CLOUD -> "云端生成 · ${g.note}"
+                else -> "内置渲染器 · 没走模型"
+            }.let { base ->
+                buildString {
+                    append(base)
+                    if (g.note.isNotBlank() && g.via != ImageEngine.Via.CLOUD) append("\n").append(g.note)
+                }
             }
             refreshImageGallery()
         }

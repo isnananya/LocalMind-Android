@@ -1,6 +1,7 @@
 package com.localmind.service
 
 import android.content.Context
+import android.util.Log
 import com.localmind.data.EqCurve
 import com.localmind.data.Emotion
 import com.localmind.data.ImageSettings
@@ -87,7 +88,7 @@ object ImageEngine {
      * 程序化渲染，用户看到的是一张渐变图，于是结论是"这功能是坏的"。
      * 静默兜底在这里是错的：它把"缺东西"伪装成了"能用"。
      */
-    enum class Via { DIFFUSION, PROCEDURAL }
+    enum class Via { DIFFUSION, PROCEDURAL, CLOUD }
 
     data class Generated(
         val file: File,
@@ -152,15 +153,22 @@ object ImageEngine {
      *（见 sd_sample_params_init）—— 对 SDXS 这种一步模型等于白跑 19 步。
      * 现在按族给：
      *
-     *  * SDXS / 一步蒸馏 → **2 步**（它就是 1 步出图的，2 步留一点余量）
-     *  * Turbo / LCM / Hyper / Lightning / DMD → **4 步**
-     *  * 普通 SD 1.5 / 2.1 / SDXL → **12 步**（这本来就超过多数模型的收益拐点）
+     *  * SDXS / 一步蒸馏 → **1 步**（模型卡就是这么训的；给 2 步是纯浪费）
+     *  * SD-Turbo / SDXL-Turbo / Lightning / DMD → **2 步**（1 步出图，留一步收细节）
+     *  * LCM / Hyper / TCD → **6 步**（LCM 在 2–4 步会明显欠采样，6 是甜点）
+     *  * 普通 SD 1.5 / 2.1 / SDXL → **24 步**
+     *
+     * 原来把「turbo」和「lcm」合并成"4 步"，两头都不讨好：Turbo 白跑 3 步
+     *（1 步就够了，还强制 cfg=1，等于 4 倍时间），LCM 又不够（会糊）。
+     * SD-Turbo GGUF 进到下载清单之后这条差异直接从「一点慢」变成「几十秒」，
+     * 所以按族拆开。
      */
     fun autoStepsFor(modelPath: String?): Int {
         if (modelPath.isNullOrBlank()) return 24
         val name = File(modelPath).name.lowercase(Locale.US)
-        if (ONESTEP_HINTS.any { name.contains(it) }) return 2
-        if (TURBO_HINTS.any { name.contains(it) }) return 4
+        if (ONESTEP_HINTS.any { name.contains(it) }) return 1
+        if (LCM_HINTS.any { name.contains(it) }) return 6
+        if (FEW_STEP_HINTS.any { name.contains(it) }) return 2
         // 12 步是"能看"，24 步才是"好看"：SD1.5 在 20–30 步之间细节才真正出来，
         // 而 CPU 上 24 步 512² 仍然在可接受范围（真机 8 Gen 3 约 30–50 秒）。
         return if (isSdxlName(name)) 25 else 24
@@ -236,8 +244,50 @@ object ImageEngine {
         modelPath: String? = null,
         /** 逐帧进度（现在第几步 / 共几步）。插件太旧时不会被调用 —— 调用方要能接受。 */
         onStep: ((Int, Int) -> Unit)? = null,
+        /** 初始图：给了就走图生图，尺寸由引擎缩放到渲染边长。 */
+        init: android.graphics.Bitmap? = null,
+        /** 局部重绘蒙版（255 = 重绘），长度必须覆盖渲染尺寸。 */
+        mask: IntArray? = null,
+        /** 重绘强度 0..1，越小越贴近原图。 */
+        strength: Float = 0.6f,
+        /** 已下载的 ESRGAN 权重；给定时「快速放大」会用 AI 超分而不是双线性。 */
+        esrganPath: String? = null,
     ): Result<Generated> = withContext(Dispatchers.Default) {
         runCatching {
+            // ---- 云端通道：几秒出图、不用下模型，对应「更方便速度更快的生图」 ----
+            if (settings.provider == CloudImage.PROVIDER_CLOUD) {
+                val cloud = CloudImage.generate(
+                    prompt = prompt,
+                    width = settings.width.coerceIn(64, 1024),
+                    height = settings.height.coerceIn(64, 1024),
+                    seed = if (settings.seed > 0) settings.seed else randomSeed(),
+                    endpoint = settings.externalEndpoint,
+                    apiKey = settings.externalApiKey,
+                ).getOrElse { t ->
+                    Log.w("ImageEngine", "云端生图失败，${t.message}，退回程序化渲染")
+                    val f = generate(storage, prompt, settings.width, settings.height, seed, settings.style.nativeId)
+                        .getOrThrow()
+                    return@runCatching Generated(
+                        f, Via.PROCEDURAL,
+                        "云端生图失败（${t.message?.take(40)}），当前用的是内置渲染器",
+                    )
+                }
+                // 解码成 Bitmap 再压成 PNG：画廊按 *.png 收，且统一格式避免后续读图踩扩展名。
+                val bmp = android.graphics.BitmapFactory
+                    .decodeByteArray(cloud.bytes, 0, cloud.bytes.size)
+                    ?: error("云端返回的文件不是图片")
+                val file = File(
+                    storage.imagesDir,
+                    fileName(prompt, seed, settings.style.nativeId, settings.width, settings.height),
+                )
+                java.io.FileOutputStream(file).use { out ->
+                    bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                }
+                bmp.recycle()
+                Log.i("ImageEngine", "云端生图成功（${cloud.source}）：${cloud.bytes.size} 字节")
+                return@runCatching Generated(file, Via.CLOUD, "云端生成（${cloud.source}）")
+            }
+
             val explicit = modelPath?.takeIf { it.isNotBlank() && File(it).isFile }
             val resolved = explicit ?: resolveDiffusionModel(storage, settings)
 
@@ -315,16 +365,34 @@ object ImageEngine {
                     sampler = samplerName,
                     scheduler = schedulerName,
                     onStep = onStep,
+                    init = init?.let { src ->
+                        if (src.width == renderW && src.height == renderH) src
+                        else android.graphics.Bitmap.createScaledBitmap(src, renderW, renderH, true)
+                    },
+                    mask = mask,
+                    strength = strength,
                 )
                 if (bitmap != null) {
                     val elapsed = System.currentTimeMillis() - startedAt
-                    // 放大到用户要的尺寸（双线性；想最清楚就把「快速放大」关掉）。
-                    val outBitmap = if (bitmap.width != wantW || bitmap.height != wantH) {
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, wantW, wantH, true)
-                        if (scaled !== bitmap) bitmap.recycle()
-                        scaled
-                    } else {
-                        bitmap
+                    // 放大到用户要的尺寸。有 ESRGAN 就走 AI 超分（4× 后再缩到目标），
+                    // 没有才退双线性 —— 后者只是把像素插值大，细节不会变多。
+                    val needsScale = bitmap.width != wantW || bitmap.height != wantH
+                    val aiScaled = if (needsScale && !esrganPath.isNullOrBlank()) {
+                        val up = ImageBridge.upscale(esrganPath, bitmap, factor = 2, threads = threads)
+                        if (up != null) {
+                            val fitted = android.graphics.Bitmap.createScaledBitmap(up, wantW, wantH, true)
+                            if (fitted !== up) up.recycle()
+                            fitted
+                        } else null
+                    } else null
+                    val outBitmap = when {
+                        aiScaled != null -> { bitmap.recycle(); aiScaled }
+                        needsScale -> {
+                            val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, wantW, wantH, true)
+                            if (scaled !== bitmap) bitmap.recycle()
+                            scaled
+                        }
+                        else -> bitmap
                     }
                     val file = File(
                         storage.imagesDir,
@@ -350,7 +418,7 @@ object ImageEngine {
                         elapsedMs = elapsed,
                     )
                 }
-                android.util.Log.w("ImageEngine", "扩散后端没出图，退回程序化渲染")
+                android.util.Log.w("ImageEngine", "扩散后端没出图（可能是图生图入口不可用或模型加载失败），退回程序化渲染")
                 val file = generate(storage, prompt, settings.width, settings.height, seed, settings.style.nativeId).getOrThrow()
                 return@runCatching Generated(
                     file, Via.PROCEDURAL,
@@ -360,7 +428,7 @@ object ImageEngine {
 
             val why = when {
                 !ImageBridge.hasDiffusionBackend ->
-                    "没有安装生图后端插件（约 14 MB），当前用的是内置渲染器"
+                    "这个 ABI 没有打包生图后端，当前用的是内置渲染器"
                 !modelPath.isNullOrBlank() ->
                     "选定的生图模型文件不在了（可能被删了），当前用的是内置渲染器"
                 else ->

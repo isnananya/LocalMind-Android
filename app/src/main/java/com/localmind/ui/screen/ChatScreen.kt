@@ -35,9 +35,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -240,9 +242,8 @@ internal fun AbilityRow(
 @Composable
 private fun StickerImage(file: java.io.File) {
     if (!file.isFile) return
-    val bitmap = remember(file.path, file.lastModified()) {
-        runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
-    } ?: return
+    // 只画 88 dp，没必要把整张梗图解成位图（见 rememberThumbnail 的说明）。
+    val bitmap = com.localmind.ui.components.rememberThumbnail(file.path, 88.dp) ?: return
     androidx.compose.foundation.Image(
         bitmap = bitmap.asImageBitmap(),
         contentDescription = null,
@@ -286,7 +287,7 @@ internal fun SamplingSection(viewModel: AppViewModel, conversation: Conversation
             },
         )
 
-        Divider(ios.separator)
+        HorizontalDivider(color = ios.separator)
         OverrideSlider(
             label = "top-p",
             hint = "候选词累计概率上限",
@@ -297,7 +298,7 @@ internal fun SamplingSection(viewModel: AppViewModel, conversation: Conversation
             onChange = { v -> viewModel.updateConversationSampling(conversation.id) { it.copy(topP = v) } },
         )
 
-        Divider(ios.separator)
+        HorizontalDivider(color = ios.separator)
         OverrideSlider(
             label = "重复惩罚",
             hint = "1.0 = 不惩罚",
@@ -310,7 +311,7 @@ internal fun SamplingSection(viewModel: AppViewModel, conversation: Conversation
             },
         )
 
-        Divider(ios.separator)
+        HorizontalDivider(color = ios.separator)
         OverrideSlider(
             label = "最大生成长度",
             hint = "一次回复的 token 上限",
@@ -323,7 +324,7 @@ internal fun SamplingSection(viewModel: AppViewModel, conversation: Conversation
             },
         )
 
-        Divider(ios.separator)
+        HorizontalDivider(color = ios.separator)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -570,6 +571,7 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
             }
         } else {
             LazyColumn(
+                flingBehavior = ScrollPhysics.fling(),
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
@@ -685,9 +687,9 @@ private fun ChatThread(viewModel: AppViewModel, sharedText: String?) {
 private fun PendingImageStrip(path: String, canSee: Boolean, onRemove: () -> Unit) {
     val ios = IosTheme.palette
     val file = remember(path) { java.io.File(path) }
-    val bitmap = remember(path) {
-        runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
-    }
+    // 这是一条 52 dp 的缩略图。原来直接 decodeFile 解原图 ——
+    // 用户从相册挑一张 4000×3000 的照片，光这一步就是 48 MB 分配。
+    val bitmap = com.localmind.ui.components.rememberThumbnail(path, 52.dp)
     Column(
         Modifier
             .fillMaxWidth()
@@ -865,7 +867,34 @@ private fun MessageRow(
     val ios = IosTheme.palette
     val clipboard = LocalClipboardManager.current
     val entrance = if (animateIn) Modifier.appearIn(offsetY = 14) else Modifier
-    val bubbleShape = RoundedCornerShape(20.dp)
+
+    // 气泡形状走令牌。三种：
+    //  rounded 全圆角（iOS 默认）
+    //  square  直角
+    //  tail    带小尾巴（QQ 味）—— 用户气泡右下角、AI 气泡左下角
+    val bubbleTokens = com.localmind.ui.theme.LocalUiTokens.current
+    val corner = bubbleTokens["bubbleCorner"]?.toFloatOrNull()?.coerceIn(0f, 32f) ?: 20f
+    val bubbleStyle = bubbleTokens["bubbleStyle"] ?: "rounded"
+    val userBubbleShape = when (bubbleStyle) {
+        "square" -> RoundedCornerShape(0.dp)
+        "tail" -> RoundedCornerShape(
+            topStart = corner.dp,
+            topEnd = corner.dp,
+            bottomEnd = 4.dp,
+            bottomStart = corner.dp,
+        )
+        else -> RoundedCornerShape(corner.dp)
+    }
+    val aiBubbleShape = when (bubbleStyle) {
+        "square" -> RoundedCornerShape(0.dp)
+        "tail" -> RoundedCornerShape(
+            topStart = 4.dp,
+            topEnd = corner.dp,
+            bottomEnd = corner.dp,
+            bottomStart = corner.dp,
+        )
+        else -> RoundedCornerShape(corner.dp)
+    }
 
     when (message.role) {
         Role.USER -> Row(
@@ -886,7 +915,7 @@ private fun MessageRow(
                 if (message.content.isNotBlank()) {
                     Box(
                         modifier = Modifier
-                            .clip(bubbleShape)
+                            .clip(userBubbleShape)
                             .background(ios.bubbleUser)
                             .combinedClickable(
                                 interactionSource = remember { MutableInteractionSource() },
@@ -921,9 +950,9 @@ private fun MessageRow(
                 if (message.content.isNotBlank() || streaming) {
                     Box(
                         modifier = Modifier
-                            .clip(bubbleShape)
+                            .clip(aiBubbleShape)
                             .background(ios.bubbleAi)
-                            .border(0.5.dp, ios.bubbleAiBorder, bubbleShape)
+                            .border(0.5.dp, ios.bubbleAiBorder, aiBubbleShape)
                             .combinedClickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,

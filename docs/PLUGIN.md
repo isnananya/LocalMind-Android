@@ -666,28 +666,79 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 `tokens` / `darkTokens` / `tabs` / `appName` **四个都空**会被拒绝：
 `ui.json 什么都没改（tokens / darkTokens / tabs / appName 都是空的）`。
 
-### 8.3 全部可用令牌（16 个，白名单）
+### 8.3 全部可用令牌（64 个，白名单）
+
+> 本节由 `tools/gen_token_table.py` 从 `UiTheme.kt` 自动生成 —— 改了令牌记得重跑，
+> 免得文档和代码对不上（照着过时文档写主题是最容易踩的坑）。
 
 **值统一写成字符串。** 名单之外的键不会被应用，但会被**报出来**（见 8.5）。
 
-| 令牌键 | 中文 | 类型 | 默认 | 范围 / 允许值 | 当前是否已接线 |
+| 令牌键 | 中文 | 类型 | 默认 | 范围 / 允许值 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `accent` | 主色 | COLOR | `#0A84FF` | 任意合法颜色 | ✅ 已生效 |
-| `accentDark` | 主色（深色） | COLOR | `#0A84FF` | 同上 | ⚠️ 未接线（深色请用 `darkTokens.accent`） |
-| `danger` | 危险色 | COLOR | `#FF3B30` | 同上 | ✅ 已生效 |
-| `success` | 成功色 | COLOR | `#34C759` | 同上 | ✅ 已生效 |
-| `groupedBackground` | 页面背景 | COLOR | `#F7F7F9` | 同上 | ✅ 已生效 |
-| `groupedBackgroundDark` | 页面背景（深色） | COLOR | `#000000` | 同上 | ⚠️ 未接线（深色请用 `darkTokens.groupedBackground`） |
-| `cardBackground` | 卡片背景 | COLOR | `#FFFFFF` | 同上 | ✅ 已生效 |
-| `cardBackgroundDark` | 卡片背景（深色） | COLOR | `#1C1C1E` | 同上 | ⚠️ 未接线（深色请用 `darkTokens.cardBackground`） |
-| `cardCorner` | 卡片圆角 | NUMBER | `12` | 0 – 32 | ✅ 已生效 |
-| `controlCorner` | 控件圆角 | NUMBER | `10` | 0 – 32 | ✅ 已生效 |
-| `sheetCorner` | 浮层圆角 | NUMBER | `16` | 0 – 40 | ✅ 已生效 |
-| `bodySize` | 正文字号 | NUMBER | `17` | 12 – 24 | ⚠️ 未接线（字号请用 `fontScale`） |
-| `fontScale` | 整体字号缩放 | NUMBER | `1.0` | 0.8 – 1.4 | ✅ 已生效 |
-| `tabStyle` | 标签栏样式 | ENUM | `glass` | `glass` / `plain` / `hidden` | ⚠️ 未接线 |
-| `showTabBarLabels` | 标签栏显示文字 | BOOL | `true` | true / false | ⚠️ 未接线 |
-| `navTitleAlign` | 导航栏标题位置 | ENUM | `center` | `center` / `leading` | ⚠️ 未接线 |
+| `accent` | 主色 | COLOR | `#0A84FF` | 任意合法颜色 | 按钮、开关、选中态、链接、用户气泡。改这个是最有效的一下 |
+| `accentOn` | 主色上的文字色 | COLOR | `#FFFFFF` | 任意合法颜色 | 主色按钮/气泡里的文字。选了浅色主色就必须把它改成深色，否则字看不见 |
+| `danger` | 危险色 | COLOR | `#FF3B30` | 任意合法颜色 | 删除、清空、错误态 |
+| `success` | 成功色 | COLOR | `#34C759` | 任意合法颜色 | 开关打开、已完成 |
+| `warning` | 提醒色 | COLOR | `#FF9500` | 任意合法颜色 | 橙色警示、未完成状态 |
+| `groupedBackground` | 页面背景 | COLOR | `#F7F7F9` | 任意合法颜色 | 整页底色。深色默认纯黑，OLED 友好 |
+| `cardBackground` | 卡片背景 | COLOR | `#FFFFFF` | 任意合法颜色 | 列表分组、卡片、AI 气泡 |
+| `barBackground` | 导航栏/标签栏底色 | COLOR | `#F7FFFFFF` | 任意合法颜色 | 前两位是透明度。要完全不透明就写 #FFFFFF |
+| `barBorder` | 导航栏/标签栏描边 | COLOR | `#14000000` | 任意合法颜色 |  |
+| `separator` | 分隔线 | COLOR | `#14000000` | 任意合法颜色 | 列表分隔线、卡片描边、气泡描边 |
+| `fill` | 填充底色 | COLOR | `#1A787880` | 任意合法颜色 | 输入框、次级按钮、未选中的开关 |
+| `fillSecondary` | 次级填充色 | COLOR | `#0F787880` | 任意合法颜色 | 更淡的一层填充：选中行、分段控件底 |
+| `label` | 主要文字 | COLOR | `#0B0B0F` | 任意合法颜色 |  |
+| `secondaryLabel` | 次要文字 | COLOR | `#8A3C3C43` | 任意合法颜色 | 前两位是透明度 |
+| `tertiaryLabel` | 三级文字 | COLOR | `#4D3C3C43` | 任意合法颜色 |  |
+| `selection` | 选中高亮 | COLOR | `#0A84FF` | 任意合法颜色 | 标签栏选中指示器。留空/不写就跟随主色 |
+| `overlay` | 浮层遮罩 | COLOR | `#66000000` | 任意合法颜色 | 弹层背后的压暗层 |
+| `bubbleUser` | 用户气泡 | COLOR | `#0A84FF` | 任意合法颜色 | 不写就跟随主色 |
+| `bubbleUserText` | 用户气泡文字 | COLOR | `#FFFFFF` | 任意合法颜色 | 不写就跟随 accentOn |
+| `bubbleAi` | AI 气泡 | COLOR | `#FFFFFF` | 任意合法颜色 | 不写就跟随 cardBackground |
+| `bubbleAiBorder` | AI 气泡描边 | COLOR | `#14000000` | 任意合法颜色 | 不写就跟随 separator |
+| `composerBackground` | 输入框底色 | COLOR | `#1A787880` | 任意合法颜色 | 不写就跟随 fill |
+| `codeBackground` | 代码块底色 | COLOR | `#F2F2F7` | 任意合法颜色 | 浅色默认浅灰、深色默认近黑；文字自动取对比色 |
+| `cardCorner` | 卡片圆角 | NUMBER | `12` | 0 – 32 |  |
+| `controlCorner` | 控件圆角 | NUMBER | `10` | 0 – 32 |  |
+| `sheetCorner` | 浮层圆角 | NUMBER | `16` | 0 – 40 |  |
+| `bubbleCorner` | 气泡圆角 | NUMBER | `18` | 0 – 32 |  |
+| `pagePadding` | 页面左右留白 | NUMBER | `16` | 8 – 28 |  |
+| `navBarHeight` | 导航栏高度 | NUMBER | `44` | 36 – 64 |  |
+| `tabBarHeight` | 标签栏高度 | NUMBER | `60` | 44 – 80 |  |
+| `barBorderWidth` | 导航栏/标签栏描边粗细 | NUMBER | `0.5` | 0 – 2 |  |
+| `tabIconSize` | 标签栏图标大小 | NUMBER | `23` | 18 – 30 |  |
+| `bodySize` | 正文字号 | NUMBER | `17` | 12 – 24（单位 sp） | 只影响正文三档（body / callout / subheadline） |
+| `fontScale` | 整体字号缩放 | NUMBER | `1.0` | 0.8 – 1.4 |  |
+| `tabStyle` | 标签栏样式 | ENUM | `glass` | glass / plain / hidden | glass（毛玻璃）/ plain（不透明）/ hidden（藏起来，但标签只剩一个时忽略） |
+| `showTabBarLabels` | 标签栏显示文字 | BOOL | `true` | true / false |  |
+| `navTitleAlign` | 导航栏标题位置 | ENUM | `center` | center / leading | center（居中，iOS 默认）/ leading（靠左） |
+| `tabBarShape` | 标签栏形状 | ENUM | `capsule` | capsule / rounded / square | capsule（胶囊）/ rounded（圆角矩形）/ square（直角） |
+| `tabBarMargin` | 标签栏左右留白 | NUMBER | `18` | 0 – 48 |  |
+| `tabBarLift` | 标签栏离底距离 | NUMBER | `12` | 0 – 40 |  |
+| `tabBarBlur` | 玻璃模糊半径 | NUMBER | `10` | 0 – 16（单位 dp） | 10 = 默认磨砂（2 太轻，底下的字会透出来）；0 = 完全清晰（纯折射），16 = 重度磨砂 |
+| `tabBarTint` | 玻璃染色 | COLOR | `#FFFFFF` | 任意合法颜色 | 深色主题用 darkTokens 覆盖成深色 |
+| `tabBarIndicator` | 选中指示器 | ENUM | `capsule` | capsule / underline / dot / none | capsule（玻璃胶囊）/ underline（下划线）/ dot（圆点）/ none |
+| `tabBarWidth` | 标签栏宽度 | ENUM | `compact` | compact / full | compact（悬浮紧凑胶囊）/ full（通栏） |
+| `uiKit` | 液态玻璃组件库 | ENUM | `auto` | auto / library / compose | auto（硬件支持则用 AndroidLiquidGlassView）/ library（强制组件库）/ compose（用内置降级） |
+| `glassBarLiquid` | 液态玻璃效果 | BOOL | `true` | true / false | 开：边缘折射 + 色散 + 按压放大；关：只保留模糊与染色（LiquidTab 的默认行为） |
+| `glassBarOutline` | 底栏描边 | BOOL | `true` | true / false | 开启时画一圈 1dp 高光描边 |
+| `glassBarHighlight` | 高光强度 | NUMBER | `0.5` | 0.5 – 1.7 | 描边与边缘高光的强度，随设备倾斜移动 |
+| `glassBarSlotWidth` | 单栏宽度 | NUMBER | `76` | 56 – 112（单位 dp） | 悬浮胶囊的总宽 = 单栏宽度 × 标签数 |
+| `glassBarBottomBlur` | 底部渐变模糊 | BOOL | `false` | true / false | 底栏上方页面底部的渐隐模糊 |
+| `glassBarIconOnly` | 仅图标 | BOOL | `false` | true / false | 开启后不画文字（悬浮胶囊会自动更紧凑） |
+| `glassBarLabelSize` | 标签文字大小 | NUMBER | `11` | 9 – 14（单位 sp） |  |
+| `dynamicColor` | 动态配色 | BOOL | `false` | true / false | 从系统壁纸主色生成 accent；关掉回到主题包/预设的颜色 |
+| `dockImpl` | 底栏实现 | ENUM | `liquidTabBar` | liquidTabBar / liquidDock | liquidTabBar（当前液态玻璃底栏）/ liquidDock（自定义液态底栏，更多可调项） |
+| `fontFamily` | 界面字体 | ENUM | `system` | system / sans / serif / mono / cursive | system（系统默认）/ sans（无衬线）/ serif（衬线，像书）/ mono（等宽，像代码）/ cursive（手写体） |
+| `wallpaperFile` | 壁纸图片 | TEXT | `` | 文本（≤200 字符） | 主题包内的图片文件名（放在插件 assets/ 下）。留空 = 用内置极光背景 |
+| `wallpaperDim` | 壁纸压暗 | NUMBER | `0.0` | 0 – 0.85 | 壁纸上的黑色遮罩浓度。压太深壁纸就白装了，太浅文字看不清 |
+| `wallpaperBlur` | 壁纸模糊 | NUMBER | `0` | 0 – 24（单位 dp） | 壁纸背景虚化半径。深色主题常用 12~20 让文字浮起来 |
+| `wallpaperScale` | 壁纸缩放 | NUMBER | `1.0` | 1 – 2 | 壁纸放大倍数。手机屏幕比例和壁纸图比例不一致时会露边，放大能盖住 |
+| `cardStyle` | 卡片风格 | ENUM | `flat` | flat / glass / gradient / neu | flat（扁平）/ glass（毛玻璃，半透）/ gradient（渐变）/ neu（拟物，双层描边） |
+| `cardElevation` | 卡片厚度 | NUMBER | `0` | 0 – 12（单位 dp） | 卡片投影高度。0 = 纯扁平，靠描边分层 |
+| `bubbleStyle` | 气泡形状 | ENUM | `rounded` | rounded / square / tail | rounded（全圆角）/ square（直角）/ tail（带小尾巴，像 QQ） |
+| `avatarShape` | 头像形状 | ENUM | `circle` | circle / rounded / square | circle（正圆）/ rounded（圆角方）/ square（直角） |
+| `bgStyle` | 页面背景 | ENUM | `aurora` | aurora / flat / gradient / wallpaper | aurora（内置极光）/ flat（纯色）/ gradient（双色渐变）/ wallpaper（主题壁纸） |
 
 **深色模式怎么写**：不要用 `xxxDark` 这些键，而是把深色值写进 `darkTokens`，
 键名用**浅色那个键**：
@@ -706,6 +757,7 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 | COLOR | 支持 `#RGB` / `#RRGGBB` / `#AARRGGBB`（大小写都行，会被统一成大写）。不合法 → **回退默认**（不报错） |
 | NUMBER | 先按数字解析；失败的 → 回退默认。太小的夹到 `min`，太大的夹到 `max` |
 | BOOL | `true` / `1` / `yes` / `on` → `true`；`false` / `0` / `no` / `off` → `false`；其它 → 回退默认 |
+| TEXT | 自由文本：只 trim 并限制 200 字符。用于文件名这类不做格式校验的字段 |
 | ENUM | 值必须在允许列表里（忽略大小写）；否则 → 回退默认 |
 
 举例：`cardCorner` 写 `"999"` → 实际生效 `32`；`accent` 写 `"红色"` → 实际用默认
@@ -743,7 +795,66 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 `tabs` / `startTab` / `appName` 已经会被解析、校验并保存下来，但当前版本的
 界面外壳还没有读取它们（见 §15）。
 
-### 8.7 完整示例
+### 8.7 壁纸：主题包自带一张图
+
+主题包里可以放图片，放在 `assets/` 目录下：
+
+```
+mytheme.zip
+├── plugin.json
+├── ui.json
+└── assets/
+    └── wallpaper.png     ← 这张
+```
+
+`ui.json` 里这样引用：
+
+```json
+{
+  "tokens": {
+    "bgStyle": "wallpaper",
+    "wallpaperFile": "wallpaper.png",
+    "wallpaperDim": "0.35",
+    "wallpaperBlur": "0",
+    "wallpaperScale": "1.1"
+  }
+}
+```
+
+**关键：`wallpaperFile` 只写文件名，不带目录。** 插件资源落盘时按文件名存
+（`assets/wallpaper.png` → `plugins/<id>/assets/wallpaper.png`），写
+`assets/wallpaper.png` 会找不到。
+
+四个壁纸令牌：
+
+| 令牌 | 作用 | 建议值 |
+| --- | --- | --- |
+| `bgStyle` | 必须是 `wallpaper` 才启用背景图 | `wallpaper` |
+| `wallpaperFile` | 包内图片文件名 | `wallpaper.png` |
+| `wallpaperDim` | 黑色遮罩浓度 0~0.85。**不压暗文字会看不清** | 浅色主题 0.2~0.4，深色 0.4~0.6 |
+| `wallpaperBlur` | 虚化半径 0~24dp（Android 12+ 生效） | 深色主题 12~20 |
+| `wallpaperScale` | 放大倍数 1~2。壁纸比例和屏幕不一致时会露边 | 1.1~1.2 |
+
+壁纸会被**按屏幕宽度采样解码**（不会把 4K 原图整个读进内存），并做 LRU 缓存，
+所以大图也不会卡。文件名在读取时还会过一次路径校验：含 `/`、`\`、`..`
+的一律拒绝，防止插件用壁纸令牌去读应用目录里的别的文件。
+
+### 8.8 字体：换字体族，不打包字体
+
+`fontFamily` 令牌换的是**系统自带字体族**，不打包字体文件：
+
+| 值 | 效果 |
+| --- | --- |
+| `system` | 系统默认（不换） |
+| `sans` | 无衬线（现代 UI 感） |
+| `serif` | 衬线（像书、像阅读器） |
+| `mono` | 等宽（像代码） |
+| `cursive` | 手写体 |
+
+想用**自己的字体文件**，当前还不支持 —— 那涉及字体授权与子集化，
+不是令牌能表达的。
+
+### 8.9 完整示例
 
 `ui.json`：
 
@@ -757,6 +868,7 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
   "license": "你的授权",
   "tokens": {
     "accent": "#FF6B35",
+    "accentOn": "#FFFFFF",
     "danger": "#E5484D",
     "success": "#30A46C",
     "groupedBackground": "#FDF9F6",
@@ -764,12 +876,22 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
     "cardCorner": "18",
     "controlCorner": "12",
     "sheetCorner": "22",
-    "fontScale": "1.0"
+    "bubbleCorner": "16",
+    "fontScale": "1.0",
+    "fontFamily": "sans",
+    "cardStyle": "glass",
+    "cardElevation": "2",
+    "bubbleStyle": "tail",
+    "avatarShape": "circle",
+    "bgStyle": "wallpaper",
+    "wallpaperFile": "wallpaper.png",
+    "wallpaperDim": "0.3"
   },
   "darkTokens": {
     "accent": "#FF8A5C",
     "groupedBackground": "#0A0A0C",
-    "cardBackground": "#16161A"
+    "cardBackground": "#16161A",
+    "wallpaperDim": "0.55"
   },
   "tabs": ["chat", "models", "me"],
   "startTab": "chat",
@@ -777,7 +899,7 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 }
 ```
 
-### 8.8 校验
+### 8.10 校验
 
 | 情况 | 报错原文 |
 | --- | --- |
@@ -790,6 +912,48 @@ https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2
 | 什么都没改 | `ui.json 什么都没改（tokens / darkTokens / tabs / appName 都是空的）` |
 
 安装结果里的前缀是 `界面主题：<原因>`。
+
+### 8.11 在线主题商店
+
+应用里的「外观 → 主题商店」可以从云端拉主题列表、一键下载安装。
+商店里分两类，界面上会明确标注：
+
+| 类别 | 来源 | 按钮 | 联网要求 |
+| --- | --- | --- | --- |
+| **内置主题** | 随 APK 附带（`assets/builtin/themes/`） | 「安装」 | 不需要 |
+| **在线主题** | 云端仓库 `LocalMind-Data/data/themes.json` | 「下载」 | 需要 |
+
+内置主题的存在意义：**商店不能因为网络问题变成空白页**。用户打开这一页
+立刻能看到能换上的主题，而不是一个转圈。
+
+商店清单格式（放在数据仓库的 `data/themes.json`）：
+
+```json
+{
+  "themes": [
+    {
+      "id": "com.example.mytheme",
+      "name": "我的主题",
+      "author": "作者",
+      "description": "一句话说明",
+      "version": "1.0.0",
+      "downloadUrl": "https://example.com/mytheme.zip",
+      "previewUrl": "https://example.com/mytheme.png",
+      "sizeBytes": 1589291,
+      "tags": ["二次元", "浅色"]
+    }
+  ]
+}
+```
+
+清单里的字段全走白名单：`id` 必须匹配 `^[A-Za-z0-9._-]+$`（后面要拼成目录名），
+`downloadUrl` 只允许 http/https。
+
+**下载的主题包走的是和本地导入 zip 完全一样的安装流程** —— 同样的路径白名单、
+同样的 zip-slip 防护、同样的令牌校验。从网上来的主题享受不到任何特权。
+
+想在应用里上架自己的主题，把包传到这个仓库的 `data/theme-packs/`，
+然后在 `data/themes.json` 里加一条记录即可。
 
 ---
 

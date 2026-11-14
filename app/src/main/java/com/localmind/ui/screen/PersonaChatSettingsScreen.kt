@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -157,7 +158,7 @@ fun PersonaChatSettingsScreen(
                     valueRange = 0f..1f,
                 )
             }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             ToggleLine(
                 title = "短话连发",
                 subtitle = "像发微信一样一条一条发过来，而不是一次吐一大段",
@@ -165,7 +166,7 @@ fun PersonaChatSettingsScreen(
             ) { on ->
                 viewModel.updateConversationSettings(conversation.id) { it.copy(burstReplies = on) }
             }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             ToggleLine(
                 title = "多重思考",
                 subtitle = "回答前先自己过一遍你的意思，再决定怎么接。更准，但明显更慢",
@@ -214,21 +215,21 @@ fun PersonaChatSettingsScreen(
                 "它们让聊天不那么干巴，但也要你主动打开。",
         ) {
             AbilityRow("文字回复", "基础能力，始终开启", checked = true, locked = true) { }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "发语音",
                 subtitle = if (voiceOk) "回复用 TTS 念出来" else "还缺语音引擎 —— 去「我的 → TTS 测试」下载（约 36 MB）",
                 checked = conversation.abilities.voice,
                 ready = voiceOk,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(voice = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "发图片",
                 subtitle = if (hasImageModel) "它可以画图并发给你" else "还没有生图模型 —— 去「模型 → 生图」下载一个",
                 checked = conversation.abilities.imageGeneration,
                 ready = hasImageModel,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(imageGeneration = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "看懂你发的图",
                 subtitle = visionSubtitle(hasVisionModel, viewModel.canSeeImages),
@@ -238,20 +239,20 @@ fun PersonaChatSettingsScreen(
                 // 得到一句没看见图的回复 —— 那是我们在骗他。
                 ready = hasVisionModel && viewModel.canSeeImages,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(imageRecognition = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "发表情包",
                 subtitle = "让文字聊天不那么干巴",
                 checked = conversation.abilities.emoji,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(emoji = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "主动来找你说话",
                 subtitle = if (engineState.ready) "不必等你先开口" else "需要先加载一个模型，它才有东西可想",
                 checked = conversation.abilities.proactive,
                 ready = engineState.ready,
             ) { on -> viewModel.updateConversationAbilities(conversation.id) { it.copy(proactive = on) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -301,7 +302,7 @@ fun PersonaChatSettingsScreen(
                 senseResult = null
                 viewModel.updateConversationAbilities(conversation.id) { it.copy(battery = on) }
             }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "知道你在哪",
                 subtitle = when {
@@ -324,7 +325,7 @@ fun PersonaChatSettingsScreen(
                 }
                 viewModel.updateConversationAbilities(conversation.id) { it.copy(location = on) }
             }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             AbilityRow(
                 title = "看你那边的天气",
                 subtitle = when {
@@ -345,7 +346,7 @@ fun PersonaChatSettingsScreen(
                 }
                 viewModel.updateConversationAbilities(conversation.id) { it.copy(weather = on) }
             }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             // 「现在读一次」：和聊天走同一套读取函数，所以它显示的就是模型会看到的东西。
             // 定位/天气这种"读不到"的情况太多（权限、开关、信号、网络），
             // 没有这个按钮，用户只能靠"它怎么没反应"来猜。
@@ -392,7 +393,7 @@ fun PersonaChatSettingsScreen(
                 allowCustomApi = true,
                 conversationId = conversation.id,
             ) { id -> viewModel.selectConversationChatModel(conversation.id, id) }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             ConversationModelRow(
                 viewModel = viewModel,
                 label = "识图模型",
@@ -404,7 +405,7 @@ fun PersonaChatSettingsScreen(
                 defaultLabel = "不指定",
                 defaultHint = "没人看图时就不加载，省内存",
             ) { id -> viewModel.updateConversationModels(conversation.id) { it.copy(visionModelId = id) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             ConversationModelRow(
                 viewModel = viewModel,
                 label = "生图模型",
@@ -416,7 +417,7 @@ fun PersonaChatSettingsScreen(
                 defaultLabel = "不指定",
                 defaultHint = "没人画图时就不加载，省内存",
             ) { id -> viewModel.updateConversationModels(conversation.id) { it.copy(imageModelId = id) } }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             ConversationModelRow(
                 viewModel = viewModel,
                 label = "决策模型",
@@ -464,7 +465,7 @@ fun PersonaChatSettingsScreen(
                 subtitle = "保留它的人设、记忆和设置",
                 icon = AppIcons.Refresh,
             ) { viewModel.clearConversationMessages(conversation.id) }
-            Divider(ios.separator)
+            HorizontalDivider(color = ios.separator)
             DangerRow(
                 title = "删除这个对话",
                 subtitle = "连同记忆一起删掉，不可恢复",

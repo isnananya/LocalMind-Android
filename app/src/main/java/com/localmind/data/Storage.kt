@@ -1,6 +1,7 @@
 package com.localmind.data
 
 import android.content.Context
+import android.util.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import java.io.File
@@ -299,11 +300,8 @@ class Storage(private val context: Context) {
     /** Built-in presets plus anything the user created or edited. */
     fun loadPersonas(): MutableList<Persona> {
         val f = personasFile
-        val stored = if (f.exists()) {
-            runCatching { json.decodeFromString<MutableList<Persona>>(f.readText()) }
-                .getOrDefault(mutableListOf())
-        } else {
-            mutableListOf()
+        val stored: MutableList<Persona> = readJsonFile(f, mutableListOf()) {
+            json.decodeFromString<MutableList<Persona>>(it)
         }
         // Merge: built-ins always available, user edits by id win.
         val merged = PersonaPresets.all.toMutableList()
@@ -320,7 +318,7 @@ class Storage(private val context: Context) {
             val preset = PersonaPresets.all.firstOrNull { it.id == p.id }
             preset == null || preset != p
         }
-        runCatching { personasFile.writeText(json.encodeToString(serializer<List<Persona>>(), custom)) }
+        writeAtomically(personasFile, json.encodeToString(serializer<List<Persona>>(), custom))
     }
 
     fun activePersonaId(): String = prefs.getString("active_persona", PersonaPresets.default.id)
@@ -385,31 +383,25 @@ class Storage(private val context: Context) {
      * persona definition is small and rarely written.
      */
     fun loadCompanionStates(): MutableMap<String, CompanionState> {
-        val f = companionFile
-        if (!f.exists()) return mutableMapOf()
-        return runCatching {
-            json.decodeFromString<MutableMap<String, CompanionState>>(f.readText())
-        }.getOrDefault(mutableMapOf())
-    }
-
-    fun saveCompanionStates(map: Map<String, CompanionState>) {
-        runCatching {
-            val ordered = linkedMapOf<String, CompanionState>()
-            map.entries.sortedByDescending { it.value.lastTalkedAt }.forEach { ordered[it.key] = it.value }
-            companionFile.writeText(json.encodeToString(serializer<Map<String, CompanionState>>(), ordered))
+        return readJsonFile(companionFile, mutableMapOf()) {
+            json.decodeFromString<MutableMap<String, CompanionState>>(it)
         }
     }
 
+    fun saveCompanionStates(map: Map<String, CompanionState>) {
+        val ordered = linkedMapOf<String, CompanionState>()
+        map.entries.sortedByDescending { it.value.lastTalkedAt }.forEach { ordered[it.key] = it.value }
+        writeAtomically(companionFile, json.encodeToString(serializer<Map<String, CompanionState>>(), ordered))
+    }
+
     fun loadRemoteProviders(): MutableList<RemoteProvider> {
-        val f = providersFile
-        if (!f.exists()) return mutableListOf()
-        return runCatching {
-            json.decodeFromString<MutableList<RemoteProvider>>(f.readText())
-        }.getOrDefault(mutableListOf())
+        return readJsonFile(providersFile, mutableListOf()) {
+            json.decodeFromString<MutableList<RemoteProvider>>(it)
+        }
     }
 
     fun saveRemoteProviders(list: List<RemoteProvider>) {
-        runCatching { providersFile.writeText(json.encodeToString(serializer<List<RemoteProvider>>(), list)) }
+        writeAtomically(providersFile, json.encodeToString(serializer<List<RemoteProvider>>(), list))
     }
 
     /** Which engine answers chat: "local" or a [RemoteProvider] id. */
@@ -467,42 +459,95 @@ class Storage(private val context: Context) {
         prefs.edit().putString(key, json.encodeToString(serializer<T>(), value)).apply()
     }
 
+    // --------------------------------------------------- 原子写与损坏备份
+    //
+    // 这里以前是直接 `file.writeText(...)`，有两个叠加的坑：
+    //
+    //  1. **非原子**。`writeText` 是"截断 → 写"。进程在写到一半被系统杀掉
+    //     （低内存、用户强杀、崩溃）就留下半截 JSON，下次启动解析失败，
+    //     而调用方 `getOrDefault(emptyList())` 会**静默返回空列表** ——
+    //     用户看到的是一夜之间所有聊天记录消失，且没有任何提示。
+    //  2. **没有互斥**。`AppViewModel.persistConversations` 用
+    //     `persistJob?.cancel()` 来合并写盘，但 `writeText` 是阻塞同步 IO、
+    //     不是挂起点，cancel 根本打断不了它。于是旧任务和新任务可能同时写在
+    //     同一个文件上，字节交错 → JSON 必然损坏。这比崩溃更难查，因为
+    //     它不需要任何异常就能发生。
+    //
+    // 对策：所有落盘走 `writeAtomically`（写 .tmp 再 rename，rename 在同一
+    // 文件系统上是原子的），读失败时把坏文件另存一份再降级，并打一条日志。
+
+    /** 单写者锁。存储层的方法都很短，锁竞争可以忽略。 */
+    private val fileLock = Any()
+
+    private fun writeAtomically(target: File, text: String) {
+        synchronized(fileLock) {
+            runCatching {
+                target.parentFile?.mkdirs()
+                val tmp = File(target.parentFile, target.name + ".tmp")
+                tmp.writeText(text)
+                if (!tmp.renameTo(target)) {
+                    // 部分文件系统上 rename 到"已存在的目标"会失败：先删再试一次。
+                    target.delete()
+                    if (!tmp.renameTo(target)) {
+                        // 最后退路：直接覆盖，至少这次的数据别丢；删掉残留的 .tmp。
+                        target.writeText(text)
+                        tmp.delete()
+                    }
+                }
+            }.onFailure {
+                Log.e("Storage", "写入 ${target.name} 失败", it)
+            }
+        }
+    }
+
+    /**
+     * 读一个 JSON 文件。**解析失败时不静默返回默认值** —— 会把坏文件另存为
+     * `<名字>.corrupt-<时间戳>`，让用户至少有东西可以捞，也方便我们看日志定位。
+     */
+    private inline fun <T> readJsonFile(file: File, default: T, decode: (String) -> T): T {
+        if (!file.isFile) return default
+        val raw = runCatching { file.readText() }.getOrNull() ?: return default
+        if (raw.isBlank()) return default
+        return runCatching { decode(raw) }.getOrElse { err ->
+            Log.e("Storage", "${file.name} 解析失败（${err.javaClass.simpleName}），已另存备份", err)
+            runCatching {
+                val backup = File(file.parentFile, file.name + ".corrupt-" + System.currentTimeMillis())
+                file.copyTo(backup, overwrite = true)
+            }
+            default
+        }
+    }
+
     // ------------------------------------------------------- conversations
 
     fun loadConversations(): MutableList<Conversation> {
-        val f = conversationsFile
-        if (!f.exists()) return mutableListOf()
-        return runCatching {
-            json.decodeFromString<MutableList<Conversation>>(f.readText())
-        }.getOrDefault(mutableListOf())
+        return readJsonFile(conversationsFile, mutableListOf()) {
+            json.decodeFromString<MutableList<Conversation>>(it)
+        }
     }
 
     fun saveConversations(list: List<Conversation>) {
-        runCatching { conversationsFile.writeText(json.encodeToString(serializer<List<Conversation>>(), list)) }
+        writeAtomically(conversationsFile, json.encodeToString(serializer<List<Conversation>>(), list))
     }
 
     fun loadImportedModels(): MutableList<LocalModel> {
-        val f = importedModelsFile
-        if (!f.exists()) return mutableListOf()
-        return runCatching {
-            json.decodeFromString<MutableList<LocalModel>>(f.readText())
-        }.getOrDefault(mutableListOf())
+        return readJsonFile(importedModelsFile, mutableListOf()) {
+            json.decodeFromString<MutableList<LocalModel>>(it)
+        }
     }
 
     fun saveImportedModels(list: List<LocalModel>) {
-        runCatching { importedModelsFile.writeText(json.encodeToString(serializer<List<LocalModel>>(), list)) }
+        writeAtomically(importedModelsFile, json.encodeToString(serializer<List<LocalModel>>(), list))
     }
 
     fun saveApiLog(list: List<ApiLogEntry>) {
-        runCatching { apiLogFile.writeText(json.encodeToString(serializer<List<ApiLogEntry>>(), list)) }
+        writeAtomically(apiLogFile, json.encodeToString(serializer<List<ApiLogEntry>>(), list))
     }
 
     fun loadApiLog(): MutableList<ApiLogEntry> {
-        val f = apiLogFile
-        if (!f.exists()) return mutableListOf()
-        return runCatching {
-            json.decodeFromString<MutableList<ApiLogEntry>>(f.readText())
-        }.getOrDefault(mutableListOf())
+        return readJsonFile(apiLogFile, mutableListOf()) {
+            json.decodeFromString<MutableList<ApiLogEntry>>(it)
+        }
     }
 
     /** Total bytes used by downloaded models + generated images. */

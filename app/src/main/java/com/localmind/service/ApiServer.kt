@@ -48,6 +48,19 @@ import kotlin.concurrent.thread
 
 private const val TAG = "ApiServer"
 
+/**
+ * 会**执行代码**的调试端点：`plugin` 装 dex 走 DexClassLoader，`backend` 走 System.load。
+ * release 构建里这两个必须不可达（见 [ApiServer.debugGuard]）。
+ *
+ * 其余的 `/v1/debug/` 下的端点（tokens / prompt / avatars / theme / provider / remote /
+ * accel / download / vision）只改数据，不执行代码，所以仅要求"必须设了 API Key"。
+ */
+private val CODE_LOADING_DEBUG_ENDPOINTS = setOf(
+    "/v1/debug/plugin",
+    "/v1/debug/backend",
+)
+
+
 /** Non-suspend lock helper for the HTTP worker threads. */
 private inline fun <T> java.util.concurrent.locks.ReentrantLock.withLockBlocking(block: () -> T): T {
     lock()
@@ -126,6 +139,23 @@ class ApiServer(
     fun start(newSettings: ApiSettings): Result<ApiServerState> {
         settings = newSettings
         if (isRunning) return Result.success(_state.value)
+
+        // ---- 局域网 + 空 Key 的组合直接拒绝启动 ----
+        //
+        // `authorized()` 里的 "空 key 放行" 在只听回环时是合理的（同机的 App 才有机会连），
+        // 但一旦 bindLan 打开，含义就完全变了：同网段的任何设备都能匿名调用
+        // `/v1/debug/plugin`（装 dex 插件）、`/v1/debug/backend`（System.load 任意 .so）、
+        // `/v1/debug/provider`（改写 baseUrl 做 SSRF）。这三件事合起来是远程代码执行。
+        //
+        // 与其在授权函数里加一堆特判，不如让这种配置根本起不来 —— 用户会立刻看到
+        // 一条能读懂的错误，而不是在不知情的情况下把设备暴露在局域网里。
+        if (newSettings.bindLan && newSettings.apiKey.isBlank()) {
+            val msg = "局域网访问需要先设置 API Key：否则同网段的任何设备都能调用本机接口"
+            _state.value = _state.value.copy(running = false, lastError = msg)
+            Log.w(TAG, "拒绝启动：bindLan=true 但 apiKey 为空")
+            return Result.failure(IllegalStateException(msg))
+        }
+
         return runCatching {
             val socket = ServerSocket()
             socket.reuseAddress = true
@@ -261,6 +291,17 @@ class ApiServer(
                     writeJson(s.getOutputStream(), 401, errorJson("invalid_request_error", "invalid api key", "invalid_api_key"))
                     record(method, path, 401, started, remote, "", "invalid key")
                     return
+                }
+
+                // 调试面比普通接口多一道门：见 debugGuard 的注释。
+                if (path.startsWith("/v1/debug/")) {
+                    val blocked = debugGuard(path)
+                    if (blocked != null) {
+                        val (code, msg) = blocked
+                        writeJson(s.getOutputStream(), code, errorJson("invalid_request_error", msg, msg.replace(' ', '_')))
+                        record(method, path, code, started, remote, "", msg)
+                        return
+                    }
                 }
 
                 when {
@@ -992,6 +1033,8 @@ class ApiServer(
 
     private fun authorized(headers: Map<String, String>, query: Map<String, String>): Boolean {
         val expected = settings.apiKey
+        // 空 key 只代表"本机回环不校验"。局域网监听时 start() 已经拒绝这种组合，
+        // 所以这里能走到 blank 分支的一定是 127.0.0.1 —— 不要再往 LAN 上放行。
         if (expected.isBlank()) return true
         val bearer = headers["authorization"].orEmpty().removePrefix("Bearer ").trim()
         return bearer == expected ||
@@ -999,11 +1042,48 @@ class ApiServer(
             query["api_key"].orEmpty() == expected
     }
 
-    private fun corsHeaders(): Map<String, String> = mapOf(
-        "Access-Control-Allow-Origin" to settings.corsOrigin,
-        "Access-Control-Allow-Headers" to "Authorization, Content-Type, x-api-key",
-        "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
-    )
+    /**
+     * `/v1/debug/` 下的端点 的额外闸门。
+     *
+     * 这些端点不是"读诊断"，它们**写**：装插件（dex 可执行）、加载原生库、
+     * 改写云端 provider 的 baseUrl 与 key、触发模型下载。放在与
+     * `/v1/chat/completions` 同一套鉴权里是不够的，所以再叠两道：
+     *
+     *  1. 必须设置了 API Key —— 空 key 那种"图省事"的配置不允许碰调试面；
+     *  2. 会执行代码的两个端点（plugin / backend）只在 debug 构建里存在，
+     *     release 包直接 404。
+     *
+     * 返回 null = 放行；否则返回要回给调用方的 (状态码, 消息)。
+     */
+    private fun debugGuard(path: String): Pair<Int, String>? {
+        if (settings.apiKey.isBlank()) {
+            return 403 to "debug endpoints require an api key"
+        }
+        if (!BuildConfig.DEBUG && path in CODE_LOADING_DEBUG_ENDPOINTS) {
+            return 404 to "not found"
+        }
+        return null
+    }
+
+    /**
+     * CORS 头。
+     *
+     * 默认 **不发** `Access-Control-Allow-Origin`：这个服务默认只听 127.0.0.1，
+     * 而浏览器里任何网页都能向 127.0.0.1 发请求 —— 一旦回 `*`，恶意页面就能**读到**
+     * 本机模型的响应（`*` + 不带 credentials 正好是最容易被读取的组合），
+     * 顺手还能匿名打 `/v1/debug/` 下的端点。只有在用户显式填了 origin 时才回显它。
+     *
+     * 空串与历史遗留的 "null" 都按"不启用"处理（旧版本关开关时写的就是 "null"）。
+     */
+    private fun corsHeaders(): Map<String, String> {
+        val origin = settings.corsOrigin.trim()
+        val base = mapOf(
+            "Access-Control-Allow-Headers" to "Authorization, Content-Type, x-api-key",
+            "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
+        )
+        if (origin.isEmpty() || origin == "null") return base
+        return base + ("Access-Control-Allow-Origin" to origin)
+    }
 
     private fun reason(code: Int) = when (code) {
         200 -> "OK"; 204 -> "No Content"; 400 -> "Bad Request"; 401 -> "Unauthorized"

@@ -380,10 +380,19 @@ fun PersonaAvatar(
         }
     }
 
+    // 头像形状走令牌：circle（正圆）/ rounded（圆角方）/ square（直角）。
+    // 二次元主题常用 circle，但 QQ 经典那套是 rounded。
+    val avatarShape = com.localmind.ui.theme.LocalUiTokens.current["avatarShape"] ?: "circle"
+    val shape = when (avatarShape) {
+        "rounded" -> RoundedCornerShape((size * 0.28f).dp)
+        "square" -> RoundedCornerShape(0.dp)
+        else -> RoundedCornerShape(999.dp)
+    }
+
     Box(
         modifier = modifier
             .size(size.dp)
-            .clip(RoundedCornerShape(999.dp))
+            .clip(shape)
             .background(ios.accents[colorIndex % ios.accents.size].copy(alpha = 0.22f)),
         contentAlignment = Alignment.Center,
     ) {

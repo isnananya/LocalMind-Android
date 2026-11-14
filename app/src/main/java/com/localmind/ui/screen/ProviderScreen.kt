@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,7 +91,7 @@ fun ProviderScreen(viewModel: AppViewModel, onClose: () -> Unit) {
             },
         )
 
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), flingBehavior = ScrollPhysics.fling()) {
             item { IosLargeTitle("云端接口") }
 
             // ---------------------------------------------------- 默认后端

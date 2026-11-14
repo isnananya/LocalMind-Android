@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -117,6 +118,7 @@ fun ApiScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
         )
 
         LazyColumn(
+            flingBehavior = ScrollPhysics.fling(),
             modifier = Modifier.fillMaxSize(),
             // 顶栏下面直接贴卡片会显得挤；留 12dp，和外观页的节奏一致。
             contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 12.dp, bottom = 28.dp),
@@ -336,10 +338,11 @@ fun ApiScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
                     ) { on -> viewModel.updateApi { it.copy(allowImage = on) } }
 
                     SwitchRow(
-                        "跟随系统 CORS",
-                        "浏览器页面直连时使用（Allow-Origin: ${settings.corsOrigin}）",
-                        settings.corsOrigin == "*",
-                    ) { on -> viewModel.updateApi { it.copy(corsOrigin = if (on) "*" else "null") } }
+                        "允许浏览器跨域读取",
+                        if (settings.corsOrigin.isBlank()) "关（推荐）。浏览器页面直连时才需要打开"
+                        else "开：Allow-Origin: ${settings.corsOrigin}",
+                        settings.corsOrigin.isNotBlank() && settings.corsOrigin != "null",
+                    ) { on -> viewModel.updateApi { it.copy(corsOrigin = if (on) "*" else "") } }
                 }
             }
 

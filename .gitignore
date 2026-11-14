@@ -53,3 +53,9 @@ node_modules/
 dist/
 .env
 .env.local
+
+# --- 生成脚本的中间产物 ---
+.tmp-wallpaper/
+
+# --- 图标扣图中间产物 ---
+.tmp-icon/

@@ -96,6 +96,15 @@ object PluginInstall {
             ?: probe.files["models.json"]?.let { extractPackId(it) }
             ?: file.nameWithoutExtension
 
+        // probeId 会被拼成目录名 `pluginsDir/<id>/…`，所以必须先验一遍。
+        // 这里**拒绝安装**而不是回退到文件名：回退会让一个恶意包"看起来装成功了"，
+        // 却写到了意料之外的目录。
+        if (!SAFE_PACK_ID.matches(probeId)) {
+            return Outcome.Failed(
+                "插件 id 不合法：「${probeId.take(40)}」。只允许字母、数字和 . - _，且不能包含 /"
+            )
+        }
+
         // ---- 第二步：带资源目录 + **原生库目录**正式读一遍 ----
         //
         // libDir 必须给。不给的话 zip 里的 lib/*.so 会被**静默跳过**，于是
@@ -415,4 +424,15 @@ object PluginInstall {
     /** 从内容文件的 JSON 里抠出 packId，用来定资源目录名。 */
     private fun extractPackId(text: String): String? =
         Regex("\"packId\"\\s*:\\s*\"([^\"]+)\"").find(text)?.groupValues?.get(1)
+
+    /**
+     * 合法的包 id：字母、数字、点、横线、下划线。
+     *
+     * 为什么必须校验：这个 id 会被直接拼成目录名 `pluginsDir/<id>/assets`。
+     * `plugin.json` 里的 `id` 有 [PluginManifests.parse] 把关，但**没有清单**的包
+     * 走的是从 `emoji.json` / `models.json` 里正则抓 `packId` 的分支 —— 那条路
+     * 之前完全没有校验。一个 `packId = "../../../shared_prefs/x"` 的 zip
+     * 就能把资源写到 `pluginsDir` 之外。
+     */
+    private val SAFE_PACK_ID = Regex("^[A-Za-z0-9._-]+$")
 }

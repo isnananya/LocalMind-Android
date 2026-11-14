@@ -16,14 +16,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import com.localmind.ui.motion.appearIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -59,7 +61,11 @@ import java.time.format.DateTimeFormatter
  * 行上不放"删除"按钮：长按才出现，平时不该让一屏都是红色文字。
  */
 @Composable
-fun ChatListPage(viewModel: AppViewModel) {
+fun ChatListPage(
+    viewModel: AppViewModel,
+    scrollStates: com.localmind.ui.motion.ScrollStateHolder = com.localmind.ui.motion.rememberScrollStateHolder(),
+) {
+    val listState = scrollStates.state("chat-list")
     val ios = IosTheme.palette
     val conversations by viewModel.conversations.collectAsState()
     val personas by viewModel.personas.collectAsState()
@@ -126,6 +132,8 @@ fun ChatListPage(viewModel: AppViewModel) {
             }
         } else {
             LazyColumn(
+                state = listState,
+                flingBehavior = ScrollPhysics.fling(),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = Aurora.PagePadding,
@@ -135,10 +143,13 @@ fun ChatListPage(viewModel: AppViewModel) {
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(filtered, key = { it.id }) { conv ->
+                itemsIndexed(filtered, key = { _, it -> it.id }) { index, conv ->
                     ConversationCard(
                         conversation = conv,
                         fallback = fallbackPersona,
+                        // 错峰入场：列表一次性出现时，逐条轻微上浮比整块硬跳自然得多。
+                        // index 在 appearIn 内部被 coerceAtMost(8)，长列表不会越拖越慢。
+                        modifier = Modifier.appearIn(index = index),
                         onClick = { viewModel.openConversation(conv.id) },
                         onLongClick = { pendingDelete = conv },
                     )
@@ -172,6 +183,7 @@ private fun ConversationCard(
     fallback: com.localmind.data.Persona,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val ios = IosTheme.palette
     val interaction = remember { MutableInteractionSource() }
@@ -183,7 +195,7 @@ private fun ConversationCard(
     }.replace('\n', ' ').trim().ifBlank { "…" }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .pressScale(interaction)
             .clip(RoundedCornerShape(18.dp))

@@ -24,6 +24,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
@@ -71,6 +72,54 @@ class RemoteApi {
         explicit?.takeIf { it.isNotBlank() } ?: fallback
 
     private fun base(url: String): String = url.trimEnd('/')
+
+    // ------------------------------------------------------------ 传输安全
+
+    /**
+     * 这个主机属于"本机 / 局域网"吗。
+     *
+     * 判断依据是**字面地址**而不是 DNS 解析结果 —— 解析会引入一次网络往返，
+     * 而且解析结果可以在两次请求之间变化（DNS rebinding）。所以这里只放行
+     * 明确写成本机/私有网段的字面量，域名一律按公网对待。
+     */
+    private fun isPrivateHost(rawHost: String): Boolean {
+        val h = rawHost.trim().lowercase().removeSurrounding("[", "]")
+        if (h.isEmpty()) return false
+        if (h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1") return true
+        if (h == "10.0.2.2") return true   // Android 模拟器里的宿主机
+        val parts = h.split('.')
+        if (parts.size != 4) return false
+        val nums = parts.map { it.toIntOrNull() ?: return false }
+        if (nums.any { it !in 0..255 }) return false
+        val (a, b) = nums[0] to nums[1]
+        return a == 127 || a == 10 || a == 0 ||
+            (a == 192 && b == 168) ||
+            (a == 172 && b in 16..31) ||
+            (a == 169 && b == 254)
+    }
+
+    /**
+     * 明文 HTTP 只允许打到本机 / 局域网。
+     *
+     * 原因是 `network_security_config.xml` 里 `cleartextTrafficPermitted` 必须是
+     * 全局 true —— 用户会把 baseUrl 填成 `http://192.168.1.20:11434`（局域网 Ollama，
+     * Android 的安全配置无法表达"IP 段白名单"，只能整体放开）。既然配置文件管不了，
+     * 就在这一层管住最要命的那件事：**绝不把 API Key 用一个明文连接发到公网**。
+     *
+     * 公网地址必须 https；填错直接报一句能看懂的话，而不是静默降级。
+     */
+    private fun requireSafeUrl(url: String) {
+        val uri = runCatching { URI(url) }.getOrNull()
+            ?: error("接口地址格式不对：$url")
+        val scheme = uri.scheme?.lowercase()
+            ?: error("接口地址缺少协议（要写 http:// 或 https://）：$url")
+        if (scheme != "http" && scheme != "https") {
+            error("只支持 http / https，当前是 $scheme：$url")
+        }
+        if (scheme == "http" && !isPrivateHost(uri.host.orEmpty())) {
+            error("拒绝用明文 HTTP 访问公网地址 ${uri.host}：密钥会以明文经过网络，请改用 https://")
+        }
+    }
 
     // ------------------------------------------------------------------ 对话
 
@@ -231,6 +280,7 @@ class RemoteApi {
     // ================================================================== 内部
 
     private fun authed(provider: RemoteProvider, url: String): Request.Builder {
+        requireSafeUrl(url)
         val builder = Request.Builder().url(url).header("Content-Type", "application/json");
         when (provider.kind) {
             // Anthropic 用 x-api-key + 版本头，不认 Bearer。
@@ -271,7 +321,23 @@ class RemoteApi {
     }
 
     private fun fetchBytes(provider: RemoteProvider, url: String): ByteArray {
-        val request = authed(provider, url).get().build();
+        // 这个 URL 来自**上游响应**（{"url": "..."}），不是用户填的 baseUrl。
+        // 所以只在同源时才带认证头：一个被劫持或本身恶意的上游，只要回一个
+        // `{"url":"https://evil.example/x"}`，原本会把用户的真实云端密钥一起送过去。
+        val sameOrigin = runCatching {
+            val target = URI(url)
+            val origin = URI(base(provider.baseUrl))
+            target.scheme.equals(origin.scheme, ignoreCase = true) &&
+                target.host.equals(origin.host, ignoreCase = true)
+        }.getOrDefault(false)
+
+        val request = if (sameOrigin) {
+            authed(provider, url).get().build()
+        } else {
+            requireSafeUrl(url)
+            Request.Builder().url(url).get().build()
+        }
+
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("取图失败 HTTP " + response.code);
             return response.body?.bytes() ?: ByteArray(0);

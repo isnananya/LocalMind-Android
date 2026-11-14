@@ -1,6 +1,10 @@
 package com.localmind.ui.screen
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -201,11 +206,45 @@ private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
     var prompt by remember { mutableStateOf("") }
     var negativeShow by remember { mutableStateOf(false) }
     var paramsShow by remember { mutableStateOf(false) }
+    var initBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var strength by remember { mutableStateOf(0.55f) }
+    var upscalerReady by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         viewModel.refreshDiffusionBackend()
         viewModel.refreshDiffusionModels()
         viewModel.refreshImageGallery()
+        upscalerReady = viewModel.upscalerInstalled()
+    }
+
+    // 相册选参考图。必须按显示/推理的尺寸采样解码：一张 4000×3000 的照片
+    // 直接 decodeStream 就是 48 MB 位图，进 JNI 还要再复制一份。
+    val pickInit = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val bmp = runCatching {
+            // 先只读边界（不分配像素），算出 inSampleSize 再解一次。
+            // 同一个 content uri 可以反复 open，流不会被消耗。
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+            val sample = if (maxSide > 1024) (maxSide + 1023) / 1024 else 1
+            val opt = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opt)
+            }
+        }.getOrNull()
+        if (bmp != null) {
+            // 不主动 recycle：Compose 那一帧可能还拿着旧 bitmap 的 ImageBitmap，
+            // 立刻回收会画到一张已回收的位图。丢引用交给 GC 就行。
+            initBitmap = bmp
+        } else {
+            viewModel.toast("这张图读不出来，换一张试试")
+        }
     }
 
     val current = remember(models, settings.customModelPath) {
@@ -214,7 +253,8 @@ private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
     }
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        flingBehavior = ScrollPhysics.fling(),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp, end = 16.dp, top = 4.dp,
             bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp,
@@ -245,6 +285,53 @@ private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
                         )
                     }
                     SmallBtn2("换") { onNeedModel() }
+                }
+            }
+        }
+
+        // ---- 生图通道 ----
+        item {
+            StudioCard2 {
+                Text("生图通道", color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ios.fillSecondary)
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    listOf(
+                        "local" to "本地（慢·离线）",
+                        "cloud" to "云端（快·免模型）",
+                    ).forEach { (p, label) ->
+                        val sel = settings.provider == p
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (sel) ios.secondaryGroupedBackground else Color.Transparent)
+                                .clickable { viewModel.updateImage { it.copy(provider = p) } }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                color = if (sel) ios.label else ios.secondaryLabel,
+                                fontSize = 12.sp,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+                if (settings.provider == "cloud") {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "云端用 Pollinations 免费生成，几秒出图、不用下模型。" +
+                            "网络到国外偶尔偏慢，失败会自动退回内置渲染。",
+                        color = ios.tertiaryLabel, fontSize = 11.sp, lineHeight = 16.sp,
+                    )
                 }
             }
         }
@@ -301,6 +388,83 @@ private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
                             modifier = Modifier.fillMaxWidth().height(52.dp),
                             textStyle = TextStyle(color = ios.label, fontSize = 12.sp, lineHeight = 17.sp),
                             cursorBrush = SolidColor(ios.blue),
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---- 参考图（图生图）----
+        if (viewModel.hasImg2Img) {
+            item {
+                StudioCard2 {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Brush, null, Modifier.size(15.dp), tint = ios.secondaryLabel)
+                        Spacer(Modifier.width(6.dp))
+                        Text("参考图（图生图）", color = ios.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            if (initBitmap == null) "选一张" else "换一张",
+                            color = ios.blue, fontSize = 12.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    pickInit.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                        )
+                        if (initBitmap != null) {
+                            Spacer(Modifier.width(2.dp))
+                            Text(
+                                "清除",
+                                color = ios.secondaryLabel, fontSize = 12.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { initBitmap = null }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                    val b = initBitmap
+                    if (b == null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "不传就是纯文生图。传了就以这张图的构图/色彩为起点重画，" +
+                                "适合「把照片变成插画」「换个背景」。",
+                            color = ios.tertiaryLabel, fontSize = 11.sp, lineHeight = 15.sp,
+                        )
+                    } else {
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                bitmap = b.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("${b.width}×${b.height}", color = ios.label, fontSize = 12.sp)
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    "会缩放到出图边长（8 的倍数）",
+                                    color = ios.tertiaryLabel, fontSize = 10.sp,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        SliderRow("重绘", strength, 0.1f..1f) { strength = (it * 10).toInt() / 10f }
+                        Text(
+                            when {
+                                strength < 0.35f -> "很贴近原图：只改画风、微调细节"
+                                strength < 0.7f -> "保留构图，内容可以明显变化"
+                                else -> "几乎完全重画，只留一点色彩和轮廓"
+                            },
+                            color = ios.tertiaryLabel, fontSize = 10.sp,
                         )
                     }
                 }
@@ -404,9 +568,9 @@ private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
                 text = when {
                     busy && total > 0 -> "第 $step/$total 步 · ${"%.0f".format(Locale.US, elapsed / 1000f)}s"
                     busy -> "正在加载模型…"
-                    else -> "生成图片"
+                    else -> if (initBitmap != null) "以图生图" else "生成图片"
                 },
-                onClick = { viewModel.generateImage(prompt) },
+                onClick = { viewModel.generateImage(prompt, initBitmap, strength) },
                 enabled = !busy && backendReady,
                 loading = busy,
                 modifier = Modifier.fillMaxWidth(),
@@ -479,7 +643,10 @@ private fun GenSection(viewModel: AppViewModel, onNeedModel: () -> Unit) {
                             viewModel.toast(if (viewModel.exportImage(f)) "已保存到相册" else "保存失败")
                         }
                         SmallBtn2("用回种子") { viewModel.reuseSeedOf(f) }
-                        SmallBtn2("再来一张") { viewModel.generateImage(prompt) }
+                        SmallBtn2("再来一张") { viewModel.generateImage(prompt, initBitmap, strength) }
+                        if (viewModel.hasUpscaler && upscalerReady) {
+                            SmallBtn2("AI 放大 2×") { viewModel.upscaleResult() }
+                        }
                         Spacer(Modifier.weight(1f))
                         SmallBtn2("删除", danger = true) { viewModel.deleteImage(f) }
                     }
@@ -610,10 +777,27 @@ private fun ModelSection(viewModel: AppViewModel) {
         }
 
         item {
-            Text("可下载", color = ios.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            Text("可下载 · 主模型", color = ios.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         }
 
-        items(ImageModels.all) { entry ->
+        items(ImageModels.checkpoints, key = { it.id }) { entry ->
+            DownloadRow(entry, viewModel, dlStates[entry.id])
+        }
+
+        item {
+            Text(
+                "可下载 · AI 放大（18 MB）",
+                color = ios.secondaryLabel, fontSize = 12.sp,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+        }
+        item {
+            Text(
+                "结果图右上角「AI 放大 2×」会用它；开启「快速放大」时生成阶段也会自动用。",
+                color = ios.tertiaryLabel, fontSize = 10.sp, lineHeight = 14.sp,
+            )
+        }
+        items(ImageModels.upscalers, key = { it.id }) { entry ->
             DownloadRow(entry, viewModel, dlStates[entry.id])
         }
     }
@@ -730,11 +914,37 @@ private fun GallerySection(viewModel: AppViewModel) {
 
 /* ------------------------------------------------------------------ 组件 */
 
-@Composable
-private fun rememberImage(file: File, target: Int) = remember(file, file.lastModified()) {
-    runCatching {
+/**
+ * 缩略图位图的**进程内缓存**。
+ *
+ * 原来 `remember(file)` 里同步解图，作用域跟着 item 的组合走：滚出屏幕再滚回来
+ * 就重新解码一次，而解码发生在主线程 —— 图库有几十张 512² PNG 时，
+ * 快速滑动会明显掉帧。缓存 + 后台解码把这两件事一起解决。
+ *
+ * 预算取最大堆的 1/8（4–24 MB），按 byteCount 计；全屏预览（1440）不进缓存，
+ * 否则一张大图就能把几十张缩略图全挤出去。
+ */
+private object ImageThumbCache {
+    private val budgetKb = (Runtime.getRuntime().maxMemory() / 1024 / 8)
+        .coerceIn(4 * 1024L, 24 * 1024L).toInt()
+
+    private val lru = object : android.util.LruCache<String, Bitmap>(budgetKb) {
+        override fun sizeOf(key: String, value: Bitmap): Int =
+            (value.byteCount / 1024).coerceAtLeast(1)
+    }
+
+    @Synchronized
+    fun get(key: String): Bitmap? = lru.get(key)?.takeIf { !it.isRecycled }
+
+    @Synchronized
+    fun put(key: String, bmp: Bitmap) {
+        if (lru.get(key) == null) lru.put(key, bmp)
+    }
+
+    fun decode(file: File, target: Int): Bitmap? = runCatching {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
         var sample = 1
         while (opts.outWidth / (sample * 2) >= target || opts.outHeight / (sample * 2) >= target) sample *= 2
         BitmapFactory.decodeFile(
@@ -742,6 +952,26 @@ private fun rememberImage(file: File, target: Int) = remember(file, file.lastMod
             BitmapFactory.Options().apply { inSampleSize = sample },
         )
     }.getOrNull()
+}
+
+@Composable
+private fun rememberImage(file: File, target: Int): Bitmap? {
+    val key = "${file.absolutePath}|${file.lastModified()}|$target"
+    return androidx.compose.runtime.produceState<Bitmap?>(
+        initialValue = ImageThumbCache.get(key),
+        key1 = key,
+    ) {
+        val hit = ImageThumbCache.get(key)
+        if (hit != null) {
+            value = hit
+            return@produceState
+        }
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ImageThumbCache.decode(file, target)?.also { bmp ->
+                if (target <= 720) ImageThumbCache.put(key, bmp)
+            }
+        }
+    }.value
 }
 
 @Composable

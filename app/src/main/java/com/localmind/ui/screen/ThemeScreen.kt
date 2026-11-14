@@ -1,5 +1,6 @@
 package com.localmind.ui.screen
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,13 +18,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.localmind.ui.motion.ScrollPhysics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.localmind.ui.AppViewModel
@@ -57,6 +65,17 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val plugins by viewModel.plugins.collectAsState()
     val tokens = com.localmind.ui.theme.LocalUiTokens.current
     val themeMode by viewModel.themeMode.collectAsState()
+    // 预览卡要画当前模式下这套主题长什么样，所以要知道现在是深色还是浅色。
+    val isDark = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> androidx.compose.foundation.isSystemInDarkTheme()
+    }
+
+    // 主题商店的大图预览。点列表里的缩略图打开，装之前先看清楚长什么样。
+    var previewEntry by remember {
+        mutableStateOf<com.localmind.service.ThemeStoreService.ThemeEntry?>(null)
+    }
 
     val barModule = plugins.values.firstOrNull {
         it.manifest.abilities.contains("glass_bar") && it.isActive
@@ -67,6 +86,7 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         AuroraNavBar(title = "外观", onBack = onBack)
 
         LazyColumn(
+            flingBehavior = ScrollPhysics.fling(),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 130.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -335,6 +355,8 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                                         Color(android.graphics.Color.parseColor(preset.tokens["accent"] ?: "#2E6BE6"))
                                     }.getOrDefault(ios.blue),
                                     selected = activePreset?.id == preset.id,
+                                    // 深浅色各自的令牌：跟着当前模式走。
+                                    tokens = if (isDark) preset.darkTokens.ifEmpty { preset.tokens } else preset.tokens,
                                     modifier = Modifier.weight(1f),
                                     onClick = { viewModel.applyUiPreset(preset) },
                                 )
@@ -368,6 +390,109 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             }
 
             item {
+                // ---- 主题商店（内置 + 在线）----
+                //
+                // 主题包是**第三方内容**，所以这里显示的东西必须来自网络时如实标注
+                // 作者与大小；下载走和本地 zip 完全一样的安装流程。
+                //
+                // 内置主题不联网也能装，所以它排在前面：用户刚打开这一页
+                // 就能看到三个能立刻换上的主题，而不是一个空列表 + 转圈。
+                val storeThemes by viewModel.themeStore.themes.collectAsState()
+                val storeLoading by viewModel.themeStore.loading.collectAsState()
+                val storeError by viewModel.themeStore.lastError.collectAsState()
+                val downloading by viewModel.themeDownloading.collectAsState()
+                val downloadStatus by viewModel.themeDownloadStatus.collectAsState()
+
+                val builtinThemes = storeThemes.filter { it.isBuiltin }
+                val onlineThemes = storeThemes.filter { !it.isBuiltin }
+
+                AuroraSectionLabel("主题商店")
+                AuroraGroup {
+                    AuroraRow(
+                        title = "获取主题列表",
+                        subtitle = when {
+                            downloadStatus.isNotBlank() -> downloadStatus
+                            storeLoading -> "正在获取…"
+                            storeError.isNotBlank() -> storeError
+                            onlineThemes.isNotEmpty() -> "已获取 ${onlineThemes.size} 个在线主题"
+                            else -> "从云端拉取更多可安装的主题包"
+                        },
+                        trailing = {
+                            if (storeLoading) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = ios.blue,
+                                )
+                            } else {
+                                CheckMark(false)
+                            }
+                        },
+                        onClick = { viewModel.refreshThemeStore() },
+                    )
+                }
+
+                if (builtinThemes.isNotEmpty()) {
+                    Text(
+                        "内置主题",
+                        style = IosTheme.typography.footnote,
+                        color = ios.secondaryLabel,
+                        modifier = Modifier.padding(
+                            start = Aurora.PagePadding + 2.dp,
+                            top = 12.dp,
+                            bottom = 4.dp,
+                        ),
+                    )
+                    AuroraGroup {
+                        builtinThemes.forEach { entry ->
+                            ThemeStoreRow(
+                                entry = entry,
+                                busy = downloading == entry.id,
+                                accent = ios.blue,
+                                onPreview = { previewEntry = entry },
+                                onClick = { viewModel.downloadAndInstallTheme(entry) },
+                            )
+                        }
+                    }
+                }
+
+                if (onlineThemes.isNotEmpty()) {
+                    Text(
+                        "在线主题",
+                        style = IosTheme.typography.footnote,
+                        color = ios.secondaryLabel,
+                        modifier = Modifier.padding(
+                            start = Aurora.PagePadding + 2.dp,
+                            top = 12.dp,
+                            bottom = 4.dp,
+                        ),
+                    )
+                    AuroraGroup {
+                        onlineThemes.forEach { entry ->
+                            ThemeStoreRow(
+                                entry = entry,
+                                busy = downloading == entry.id,
+                                accent = ios.blue,
+                                onPreview = { previewEntry = entry },
+                                onClick = { viewModel.downloadAndInstallTheme(entry) },
+                            )
+                        }
+                    }
+                }
+
+                if (storeThemes.isEmpty() && !storeLoading && storeError.isBlank()) {
+                    AuroraGroup {
+                        AuroraRow(
+                            title = "还没有拉到主题",
+                            subtitle = "点上面那一行重试。主题包存在云端仓库，联网才有",
+                            showChevron = false,
+                            onClick = {},
+                        )
+                    }
+                }
+            }
+
+            item {
                 Spacer(Modifier.height(10.dp))
                 AuroraCircleButton(
                     icon = AppIcons.Refresh,
@@ -384,13 +509,136 @@ fun ThemeScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             }
         }
     }
+
+    // 装之前先看大图。放在 Column 外面，避免被 LazyColumn 的裁剪影响。
+    previewEntry?.let { entry ->
+        ThemePreviewDialog(
+            entry = entry,
+            onDismiss = { previewEntry = null },
+            onInstall = {
+                previewEntry = null
+                viewModel.downloadAndInstallTheme(entry)
+            },
+        )
+    }
 }
 
+/**
+ * 主题大图预览。
+ *
+ * 预览图来自主题包本身（内置）或 GitHub 数据仓库（在线），不是现画的
+ * 示意图 —— 所以下载失败时这里会如实显示占位，而不是假装有一张图。
+ */
+@Composable
+private fun ThemePreviewDialog(
+    entry: com.localmind.service.ThemeStoreService.ThemeEntry,
+    onDismiss: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    val ios = IosTheme.palette
+    val big by com.localmind.ui.theme.rememberThemePreview(entry, 320.dp)
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.78f))
+                .clickable { onDismiss() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .padding(24.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(ios.secondaryGroupedBackground)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    )
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 216.dp, height = 384.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ios.fillSecondary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (big != null) {
+                        Image(
+                            bitmap = big!!,
+                            contentDescription = entry.name + " 主题预览",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Text("预览图加载中…", color = ios.secondaryLabel, style = IosTheme.typography.footnote)
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text(entry.name, color = ios.label, style = IosTheme.typography.headline)
+                if (entry.author.isNotBlank()) {
+                    Text(
+                        "by " + entry.author + if (entry.version.isNotBlank()) " · v" + entry.version else "",
+                        color = ios.secondaryLabel,
+                        style = IosTheme.typography.footnote,
+                    )
+                }
+                if (entry.description.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        entry.description,
+                        color = ios.secondaryLabel,
+                        style = IosTheme.typography.footnote,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(ios.fillSecondary)
+                            .clickable { onDismiss() }
+                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                    ) { Text("关闭", color = ios.label, style = IosTheme.typography.callout) }
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(ios.blue)
+                            .clickable { onInstall() }
+                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                    ) {
+                        Text(
+                            if (entry.isBuiltin) "安装" else "下载并安装",
+                            color = ios.onAccent,
+                            style = IosTheme.typography.callout,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 预设预览卡。
+ *
+ * 用 [com.localmind.ui.theme.ThemeThumbnail] 画一个**迷你界面**，
+ * 而不是只涂一个主色块 —— 用户得能看出这个主题是方的还是圆的、
+ * 气泡有没有尾巴、背景是不是渐变。不然挑主题就是瞎猜。
+ */
 @Composable
 private fun PresetPreviewCard(
     name: String,
     accent: Color,
     selected: Boolean,
+    /** 这个预设的令牌表，用来画缩略图。 */
+    tokens: Map<String, String>,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -402,26 +650,15 @@ private fun PresetPreviewCard(
             .clickable(onClick = onClick)
             .padding(10.dp),
     ) {
-        Row(
+        Box(
             Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(accent.copy(alpha = 0.16f))
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .height(96.dp),
         ) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(accent)
+            com.localmind.ui.theme.ThemeThumbnail(
+                tokens = tokens,
+                modifier = Modifier.fillMaxSize(),
             )
-            Spacer(Modifier.size(8.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Box(Modifier.width(46.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(accent.copy(alpha = 0.55f)))
-                Box(Modifier.width(30.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(ios.label.copy(alpha = 0.16f)))
-            }
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -429,6 +666,102 @@ private fun PresetPreviewCard(
             if (selected) Text("✓", style = IosTheme.typography.footnote, color = ios.blue)
         }
     }
+}
+
+/**
+ * 主题商店里的一行。
+ *
+ * 内置主题和在线主题**长得不一样**，因为它们的来源不同：
+ *  - 内置：随 APK 附带，不用联网，"下载"按钮其实是"安装"（秒完成）
+ *  - 在线：从云端仓库拉，"下载"要走网络，可能失败
+ *
+ * 把这个差别明说在界面上，而不是让用户点了才发现"怎么这么快就好了"。
+ */
+@Composable
+private fun ThemeStoreRow(
+    entry: com.localmind.service.ThemeStoreService.ThemeEntry,
+    busy: Boolean,
+    accent: Color,
+    onPreview: () -> Unit,
+    onClick: () -> Unit,
+) {
+    val ios = IosTheme.palette
+    // 缩略图走 ThemePreviewLoader：内置主题读 APK assets，在线主题按
+    // GitHub 主地址 → 镜像依次拉，结果进内存 + 磁盘缓存。
+    val thumb by com.localmind.ui.theme.rememberThemePreview(entry, 84.dp)
+    AuroraRow(
+        title = entry.name + if (busy) "（处理中）" else "",
+        subtitle = buildString {
+            if (entry.isBuiltin) {
+                append("内置 · ")
+            } else {
+                if (entry.author.isNotBlank()) append(entry.author).append(" · ")
+            }
+            if (entry.sizeBytes > 0) {
+                val kb = entry.sizeBytes / 1024
+                if (kb >= 1024) {
+                    append(kb / 1024).append(".").append((kb % 1024) * 10 / 1024).append(" MB · ")
+                } else {
+                    append(kb).append(" KB · ")
+                }
+            }
+            if (entry.tags.isNotEmpty()) {
+                append(entry.tags.take(3).joinToString(" / "))
+            } else {
+                append(entry.description.ifBlank { "主题包" })
+            }
+        },
+        leading = {
+            Box(
+                Modifier
+                    .size(width = 54.dp, height = 96.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ios.fillSecondary)
+                    .clickable { onPreview() },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (thumb != null) {
+                    Image(
+                        bitmap = thumb!!,
+                        contentDescription = "查看「${entry.name}」预览图",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    // 图还没到 / 拉不到：画一个和主题主色相近的占位，
+                    // 不阻塞下载，也不让列表里出现一块突兀的空白。
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(accent.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("预览", color = accent, style = IosTheme.typography.caption2)
+                    }
+                }
+            }
+        },
+        trailing = {
+            when {
+                busy -> androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = accent,
+                )
+                entry.isBuiltin -> Text(
+                    "安装",
+                    style = IosTheme.typography.callout,
+                    color = accent,
+                )
+                else -> Text(
+                    "下载",
+                    style = IosTheme.typography.callout,
+                    color = accent,
+                )
+            }
+        },
+        onClick = { if (!busy) onClick() },
+    )
 }
 
 @Composable

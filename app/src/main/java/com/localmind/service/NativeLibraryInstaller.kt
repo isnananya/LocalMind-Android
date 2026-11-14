@@ -64,9 +64,36 @@ object NativeLibraryInstaller {
     /** 尝试加载。**失败不抛异常** —— 调用方拿到 false 就退回程序化渲染器。 */
     fun ensureLoaded(storage: Storage): Boolean {
         if (loaded) return true
+        // 后端随 APK 打包时（ImageBridge 启动时已经 loadLibrary 过），**绝不能**
+        // 再从插件目录 load 一份。理由见 dropBundledDuplicate：linker 按路径判重。
+        if (com.localmind.native.image.ImageBridge.backendBundled) {
+            loaded = true
+            return true
+        }
         val f = installedFile(storage)
         if (!f.isFile) return false
         return load(f)
+    }
+
+    /**
+     * 生图后端已经随 APK 打包时，删掉用户存储里那份旧副本。
+     *
+     * 这两份文件的**内容完全一样**，差别只有路径：APK 里的在 `nativeLibraryDir`，
+     * 插件装下来的在 `filesDir/native/<abi>/`。而 Android 的 linker 是**按路径**
+     * 判断「这个库加载过没有」，改名或换目录就会被当成另一个库重新映射 ——
+     * 于是进程里出现两套 36 MB 代码段、两套静态全局（`sd_jni.cpp` 的 `g_ctx`），
+     * 最坏情况同一个 1.6 GB 的 checkpoint 被加载两遍，直接被 LMK 杀掉。
+     *
+     * 从老版本升级上来的用户手上一定有这份文件，所以启动时顺手删掉，
+     * 顺带把 36 MB 存储还回去。
+     */
+    fun dropBundledDuplicate(storage: Storage): Boolean {
+        if (!com.localmind.native.image.ImageBridge.backendBundled) return false
+        val f = installedFile(storage)
+        if (!f.isFile) return false
+        val ok = runCatching { f.delete() }.getOrDefault(false)
+        if (ok) Log.i(TAG, "已删除与 APK 内置重复的生图后端：" + f.absolutePath)
+        return ok
     }
 
     /**
@@ -110,8 +137,12 @@ object NativeLibraryInstaller {
      */
     fun activateInstalled(storage: Storage): List<String> {
         val out = mutableListOf<String>()
+        // 内置副本已经够用了，先把旧的重复文件清掉再判状态。
+        dropBundledDuplicate(storage)
         if (isInstalled(storage)) {
             out += if (ensureLoaded(storage)) "生图后端已启用" else "生图后端加载失败"
+        } else if (com.localmind.native.image.ImageBridge.backendBundled) {
+            out += "生图后端已启用（内置）"
         }
         // 语音引擎同一套路：它落的是另外四个 .so，由 SherpaNativeLoader 认。
         val dir = File(storage.nativeDir, currentAbi())
