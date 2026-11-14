@@ -322,7 +322,89 @@ object UiTokens {
     )
     val bubbleStyle = UiToken(
         "bubbleStyle", "气泡形状", TokenType.ENUM, "rounded",
-        note = "rounded（全圆角）/ square（直角）/ tail（带小尾巴，像 QQ）",
+        note = "rounded 全圆角 / square 直角 / tail 小尾巴 / bubble 长尾巴 / capsule 胶囊 / " +
+            "cut 切角 / note 便签折角 / pixel 像素台阶 / blob 果冻 / comic 邮票齿",
+    )
+
+    // ---------------------------------------------------------------- 动效
+    //
+    // 主题不只改颜色：同一套配色配"硬切"和配"弹簧回弹"，观感是两个 App。
+    // 这几项由 [com.localmind.ui.motion.Motion.configure] 在令牌变化时读取，
+    // 全局动画（出现、按下、页面切换、Sheet 升起）都跟着变。
+    val animStyle = UiToken(
+        "animStyle", "动效风格", TokenType.ENUM, "ios",
+        note = "ios 标准 / crisp 干脆（更快更硬）/ gentle 绵软（更慢）/ none 关闭动画",
+    )
+    val animSpeed = UiToken(
+        "animSpeed", "动效速度", TokenType.NUMBER, "1.0", 0.4, 2.5,
+        note = "时长倍率。0.6 比默认快 40%，1.6 慢 60%",
+    )
+    val pageTransition = UiToken(
+        "pageTransition", "页面切换", TokenType.ENUM, "slide",
+        note = "slide 横向推入 / fade 淡入 / scale 缩放 / none 硬切",
+    )
+
+    // ---------------------------------------------------------------- 控件形状
+    //
+    // 按钮、标签、输入框这一层。和 cardCorner（卡片）分开是因为它们的心智不同：
+    // 卡片是"内容容器"，控件是"可点的东西"，很多主题希望卡片是圆的、
+    // 但按钮是胶囊（或者反过来）。
+    val controlStyle = UiToken(
+        "controlStyle", "控件形状", TokenType.ENUM, "rounded",
+        note = "rounded 跟随 controlCorner / capsule 胶囊 / square 直角 / pill 全圆",
+    )
+
+    // 气泡的"材质"参数。纯改颜色只能做出一种气泡；QQ 那种一堆样式靠的是
+    // **形状 + 描边 + 投影 + 渐变**的组合，所以每一样都得能单独调。
+    val bubbleTailSize = UiToken(
+        "bubbleTailSize", "气泡尾巴大小", TokenType.NUMBER, "9", 4.0, 20.0,
+        unitLabel = "dp", note = "只对 tail / bubble / blob 生效",
+    )
+    val bubbleBorderWidth = UiToken(
+        "bubbleBorderWidth", "气泡描边粗细", TokenType.NUMBER, "0.5", 0.0, 4.0,
+        unitLabel = "dp", note = "0 = 不描边；1.5~2 是贴纸风",
+    )
+    val bubbleShadow = UiToken(
+        "bubbleShadow", "气泡投影", TokenType.NUMBER, "0", 0.0, 12.0,
+        unitLabel = "dp", note = "0 = 纯扁平；3~6 有浮起来的贴纸感",
+    )
+    val bubbleUserAlt = UiToken(
+        "bubbleUserAlt", "用户气泡渐变第二色", TokenType.TEXT, "",
+        note = "留空 = 纯色；填 #RRGGBB 后与 bubbleUser 组成斜向渐变",
+    )
+    val bubbleAiAlt = UiToken(
+        "bubbleAiAlt", "AI 气泡渐变第二色", TokenType.TEXT, "",
+        note = "留空 = 纯色；浅色主题常用比 bubbleAi 稍深一档的颜色",
+    )
+    val bubbleUserBorder = UiToken(
+        "bubbleUserBorder", "用户气泡描边色", TokenType.TEXT, "",
+        note = "留空 = 不描边；深色气泡配浅色描边、浅色气泡配深色描边",
+    )
+
+    /**
+     * 气泡材质（表面，而不是轮廓）。
+     *
+     * 用户明确要求"不要只限于换色"：磨砂玻璃和液体折射玻璃靠的是
+     * 半透明 + 高光 + 反光，不是另一个色号。
+     */
+    val bubbleMaterial = UiToken(
+        "bubbleMaterial", "气泡材质", TokenType.ENUM, "solid",
+        note = "solid 纯色 / gradient 渐变 / frost 磨砂玻璃 / liquid 液体折射玻璃 / neon 发光 / paper 纸感",
+    )
+    val bubbleGloss = UiToken(
+        "bubbleGloss", "玻璃高光强度", TokenType.NUMBER, "0.6", 0f.toDouble(), 1.0,
+        note = "只对 frost / liquid 生效。太强会像塑料，0.5~0.7 最像玻璃",
+    )
+    val bubbleAiText = UiToken(
+        "bubbleAiText", "AI 气泡文字色", TokenType.TEXT, "",
+        note = "留空 = 跟随界面主文字色；深色玻璃气泡才需要单独指定",
+    )
+
+    // 字体。fontFamily 只能选系统自带族；想用「奶油泡泡」这种字体
+    // 得从字体商店下载 TTF，下载后把 id 写进这一项，IosTheme 会去 FontRegistry 取。
+    val fontId = UiToken(
+        "fontId", "界面字体包", TokenType.TEXT, "",
+        note = "字体商店里的字体 id（如 font-naiyou-paopao）。留空 = 用 fontFamily 指定的系统字体",
     )
     val avatarShape = UiToken(
         "avatarShape", "头像形状", TokenType.ENUM, "circle",
@@ -356,11 +438,17 @@ object UiTokens {
         glassBarLiquid, glassBarOutline, glassBarHighlight, glassBarSlotWidth,
         glassBarBottomBlur, glassBarIconOnly, glassBarLabelSize, dynamicColor, dockImpl,
         // 字体
-        fontFamily,
+        fontFamily, fontId,
         // 壁纸
         wallpaperFile, wallpaperDim, wallpaperBlur, wallpaperScale,
         // 风格
         cardStyle, cardElevation, bubbleStyle, avatarShape, bgStyle,
+        // 动效与控件形状
+        animStyle, animSpeed, pageTransition, controlStyle,
+        // 气泡材质
+        bubbleTailSize, bubbleBorderWidth, bubbleShadow,
+        bubbleUserAlt, bubbleAiAlt, bubbleUserBorder, bubbleAiText,
+        bubbleMaterial, bubbleGloss,
     )
 
     val byKey: Map<String, UiToken> = ALL.associateBy { it.key }
@@ -376,7 +464,14 @@ object UiTokens {
         dockImpl.key to setOf("liquidTabBar", "liquidDock"),
         fontFamily.key to setOf("system", "sans", "serif", "mono", "cursive"),
         cardStyle.key to setOf("flat", "glass", "gradient", "neu"),
-        bubbleStyle.key to setOf("rounded", "square", "tail"),
+        bubbleMaterial.key to setOf("solid", "gradient", "frost", "liquid", "neon", "paper"),
+        bubbleStyle.key to setOf(
+            "rounded", "square", "tail", "bubble", "capsule",
+            "cut", "note", "pixel", "blob", "comic",
+        ),
+        animStyle.key to setOf("ios", "crisp", "gentle", "none"),
+        pageTransition.key to setOf("slide", "fade", "scale", "none"),
+        controlStyle.key to setOf("rounded", "capsule", "square", "pill"),
         avatarShape.key to setOf("circle", "rounded", "square"),
         bgStyle.key to setOf("aurora", "flat", "gradient", "wallpaper"),
     )
@@ -953,6 +1048,275 @@ object UiPresets {
     )
 
     val ALL: List<Preset> = listOf(EARTH, AURORA, PAPER, NIGHT, ANIME, QQ_CLASSIC)
+
+    /**
+     * 气泡样式（聊天气泡本身）。
+     *
+     * 和上面那组"整页配色预设"分开，因为两者的心智不一样：换主题是换整个 App 的样子，
+     * 换气泡只是想让自己的话看起来不一样。所以应用气泡时是**合并**进用户覆盖，
+     * 不会把已经调好的其它令牌清掉（见 AppViewModel.applyBubblePreset）。
+     *
+     * 只用颜色 + 圆角 + 形状（rounded / square / tail）表达，不依赖任何图片素材，
+     * 因此不涉及第三方主题包授权问题。
+     */
+    val BUBBLES: List<Preset> = listOf(
+        Preset(
+            id = "bubble_blue",
+            name = "经典蓝",
+            description = "系统默认的蓝白搭配",
+            tokens = mapOf(
+                "bubbleUser" to "#0A84FF", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#FFFFFF", "bubbleAiBorder" to "#14000000",
+                "bubbleCorner" to "18", "bubbleStyle" to "rounded",
+            ),
+            darkTokens = mapOf("bubbleAi" to "#1C1C1E", "bubbleAiBorder" to "#1AFFFFFF"),
+        ),
+        Preset(
+            id = "bubble_mint",
+            name = "薄荷",
+            description = "青绿气泡，浅色磨砂背板",
+            tokens = mapOf(
+                "bubbleUser" to "#2FB344", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#F1F8F3", "bubbleAiBorder" to "#1A2FB344",
+                "bubbleCorner" to "22", "bubbleStyle" to "rounded",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#2E9E45", "bubbleAi" to "#16241A", "bubbleAiBorder" to "#332FB344",
+            ),
+        ),
+        Preset(
+            id = "bubble_sunset",
+            name = "晚霞",
+            description = "橙粉渐层感的暖色气泡",
+            tokens = mapOf(
+                "bubbleUser" to "#FF6B6B", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#FFF6F5", "bubbleAiBorder" to "#1AFF6B6B",
+                "bubbleCorner" to "20", "bubbleStyle" to "rounded",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#E85C5C", "bubbleAi" to "#26191A", "bubbleAiBorder" to "#33FF6B6B",
+            ),
+        ),
+        Preset(
+            id = "bubble_ink",
+            name = "墨黑",
+            description = "方正利落，适合极简控",
+            tokens = mapOf(
+                "bubbleUser" to "#111111", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#F5F5F7", "bubbleAiBorder" to "#1A000000",
+                "bubbleCorner" to "6", "bubbleStyle" to "square",
+            ),
+            darkTokens = mapOf("bubbleAi" to "#1C1C1E", "bubbleAiBorder" to "#1AFFFFFF"),
+        ),
+        Preset(
+            id = "bubble_candy",
+            name = "糖纸",
+            description = "大圆角紫粉，软糯一点",
+            tokens = mapOf(
+                "bubbleUser" to "#C77DFF", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#FAF5FF", "bubbleAiBorder" to "#1AC77DFF",
+                "bubbleCorner" to "28", "bubbleStyle" to "rounded",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#A96BE0", "bubbleAi" to "#221A29", "bubbleAiBorder" to "#33C77DFF",
+            ),
+        ),
+        Preset(
+            id = "bubble_tail_blue",
+            name = "气泡尾·蓝",
+            description = "带尾巴的贴纸感气泡",
+            tokens = mapOf(
+                "bubbleUser" to "#0A84FF", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#FFFFFF", "bubbleAiBorder" to "#14000000",
+                "bubbleCorner" to "22", "bubbleStyle" to "tail",
+            ),
+            darkTokens = mapOf("bubbleAi" to "#1C1C1E", "bubbleAiBorder" to "#1AFFFFFF"),
+        ),
+        Preset(
+            id = "bubble_tail_amber",
+            name = "气泡尾·琥珀",
+            description = "暖橙尾巴气泡，夜间也好看",
+            tokens = mapOf(
+                "bubbleUser" to "#E8890C", "bubbleUserText" to "#FFFFFF",
+                "bubbleAi" to "#FFF8EF", "bubbleAiBorder" to "#1AE8890C",
+                "bubbleCorner" to "24", "bubbleStyle" to "tail",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#C2730A", "bubbleAi" to "#241C12", "bubbleAiBorder" to "#33E8890C",
+            ),
+        ),
+        // ---- 以下是"形状流派"。纯改颜色做不出这些，所以每一条都带
+        //      形状 + 描边/投影/渐变中的至少一项。
+        Preset(
+            id = "bubble_jelly",
+            name = "果冻",
+            description = "大圆角 + 渐变 + 投影，软乎乎像果冻",
+            tokens = mapOf(
+                "bubbleUser" to "#7C6CFF", "bubbleUserAlt" to "#B39DFF",
+                "bubbleUserText" to "#FFFFFF", "bubbleUserBorder" to "#33FFFFFF",
+                "bubbleAi" to "#F7F5FF", "bubbleAiAlt" to "#EFEAFF",
+                "bubbleAiBorder" to "#267C6CFF",
+                "bubbleCorner" to "26", "bubbleStyle" to "blob",
+                "bubbleBorderWidth" to "1", "bubbleShadow" to "4", "bubbleTailSize" to "10",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#6B5BF0", "bubbleUserAlt" to "#8E7BFF",
+                "bubbleAi" to "#1F1B33", "bubbleAiAlt" to "#272141",
+                "bubbleUserText" to "#FFFFFF",
+            ),
+        ),
+        Preset(
+            id = "bubble_sticker",
+            name = "贴纸",
+            description = "白边描边 + 投影，QQ 贴纸那种厚度",
+            tokens = mapOf(
+                "bubbleUser" to "#FF5C8A", "bubbleUserText" to "#FFFFFF",
+                "bubbleUserBorder" to "#FFFFFFFF",
+                "bubbleAi" to "#FFFFFF", "bubbleAiBorder" to "#FFFFFFFF",
+                "bubbleCorner" to "22", "bubbleStyle" to "bubble",
+                "bubbleBorderWidth" to "2", "bubbleShadow" to "5", "bubbleTailSize" to "11",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#E64D77", "bubbleAi" to "#2A2A30", "bubbleAiBorder" to "#33FFFFFF",
+                "bubbleUserBorder" to "#33FFFFFF",
+            ),
+        ),
+        Preset(
+            id = "bubble_note",
+            name = "便签",
+            description = "右下折角纸片，配一点硬投影",
+            tokens = mapOf(
+                "bubbleUser" to "#FFE9A8", "bubbleUserText" to "#4A3510",
+                "bubbleUserBorder" to "#336B4B12",
+                "bubbleAi" to "#FFFDF2", "bubbleAiBorder" to "#266B4B12",
+                "bubbleCorner" to "8", "bubbleStyle" to "note",
+                "bubbleBorderWidth" to "1", "bubbleShadow" to "2",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#D9BE6E", "bubbleAi" to "#24221A", "bubbleAiBorder" to "#33FFE9A8",
+            ),
+        ),
+        Preset(
+            id = "bubble_pixel",
+            name = "像素",
+            description = "台阶边角，复古掌机味",
+            tokens = mapOf(
+                "bubbleUser" to "#4FA94A", "bubbleUserText" to "#FFFFFF",
+                "bubbleUserBorder" to "#FF111111",
+                "bubbleAi" to "#FFFFFF", "bubbleAiBorder" to "#FF111111",
+                "bubbleCorner" to "6", "bubbleStyle" to "pixel",
+                "bubbleBorderWidth" to "1.5", "bubbleShadow" to "0",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#3E8A3A", "bubbleAi" to "#1B1F16", "bubbleAiBorder" to "#FFEFF2E4",
+            ),
+        ),
+        Preset(
+            id = "bubble_comic",
+            name = "漫画",
+            description = "邮票齿边 + 粗描边，像漫画对话框",
+            tokens = mapOf(
+                "bubbleUser" to "#FFFFFF", "bubbleUserText" to "#111111",
+                "bubbleUserBorder" to "#FF111111",
+                "bubbleAi" to "#FFFFFF", "bubbleAiBorder" to "#FF111111",
+                "bubbleCorner" to "4", "bubbleStyle" to "comic",
+                "bubbleBorderWidth" to "1.6", "bubbleShadow" to "0",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#F5F5F0", "bubbleAi" to "#F5F5F0", "bubbleAiBorder" to "#FF111111",
+                "bubbleUserBorder" to "#FF111111",
+            ),
+        ),
+        Preset(
+            id = "bubble_cut",
+            name = "斜切",
+            description = "对角切角，冷峻一点",
+            tokens = mapOf(
+                "bubbleUser" to "#2B2B33", "bubbleUserText" to "#FFFFFF",
+                "bubbleUserBorder" to "#22FFFFFF",
+                "bubbleAi" to "#F4F4F6", "bubbleAiBorder" to "#1A000000",
+                "bubbleCorner" to "10", "bubbleStyle" to "cut",
+                "bubbleBorderWidth" to "1",
+            ),
+            darkTokens = mapOf("bubbleAi" to "#1C1C20", "bubbleAiBorder" to "#1FFFFFFF"),
+        ),
+        Preset(
+            id = "bubble_neon",
+            name = "霓虹",
+            description = "细描边 + 无填色感，赛博夜色",
+            tokens = mapOf(
+                "bubbleUser" to "#12121A", "bubbleUserText" to "#4DE1FF",
+                "bubbleUserBorder" to "#FF4DE1FF",
+                "bubbleAi" to "#12121A", "bubbleAiBorder" to "#FFFF3D8B",
+                "bubbleCorner" to "14", "bubbleStyle" to "capsule",
+                "bubbleBorderWidth" to "1.5", "bubbleShadow" to "6",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#0C0C12", "bubbleAi" to "#0C0C12",
+                "bubbleUserText" to "#6FE9FF", "bubbleAiBorder" to "#FFFF5C9C",
+            ),
+        ),
+        Preset(
+            id = "bubble_frost",
+            name = "磨砂玻璃",
+            description = "半透白 + 顶部迎光，像磨砂膜",
+            tokens = mapOf(
+                "bubbleUser" to "#FFFFFF", "bubbleUserText" to "#20242B",
+                "bubbleUserBorder" to "#66FFFFFF",
+                "bubbleAi" to "#FFFFFF", "bubbleAiBorder" to "#66FFFFFF",
+                "bubbleCorner" to "22", "bubbleStyle" to "bubble",
+                "bubbleMaterial" to "frost", "bubbleGloss" to "0.6",
+                "bubbleBorderWidth" to "1", "bubbleShadow" to "4",
+                "bubbleTailSize" to "10",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#B9C6D6", "bubbleUserText" to "#14181E",
+                "bubbleAi" to "#AEBACB", "bubbleAiBorder" to "#33FFFFFF",
+            ),
+        ),
+        Preset(
+            id = "bubble_liquid",
+            name = "液态玻璃",
+            description = "镜面高光 + 折射色散，液体玻璃",
+            tokens = mapOf(
+                "bubbleUser" to "#4FA8FF", "bubbleUserText" to "#FFFFFF",
+                "bubbleUserBorder" to "#66BFE4FF",
+                "bubbleAi" to "#BBD9FF", "bubbleAiBorder" to "#66BFE4FF",
+                "bubbleCorner" to "26", "bubbleStyle" to "bubble",
+                "bubbleMaterial" to "liquid", "bubbleGloss" to "0.7",
+                "bubbleBorderWidth" to "1.2", "bubbleShadow" to "6",
+                "bubbleTailSize" to "11", "bubbleAiText" to "#12324D",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#2E6FA8", "bubbleAi" to "#1B2C3C",
+                "bubbleAiText" to "#E4F1FF",
+            ),
+        ),
+        Preset(
+            id = "bubble_liquid_rose",
+            name = "液态玫瑰",
+            description = "粉玻璃 + 强高光，甜系液体感",
+            tokens = mapOf(
+                "bubbleUser" to "#FF9EC4", "bubbleUserText" to "#4A1026",
+                "bubbleAi" to "#FFD7E5", "bubbleAiBorder" to "#66FFB6D0",
+                "bubbleCorner" to "26", "bubbleStyle" to "blob",
+                "bubbleMaterial" to "liquid", "bubbleGloss" to "0.75",
+                "bubbleBorderWidth" to "1.2", "bubbleShadow" to "6",
+                "bubbleTailSize" to "10", "bubbleAiText" to "#5A1F33",
+            ),
+            darkTokens = mapOf(
+                "bubbleUser" to "#B85C82", "bubbleAi" to "#33202A",
+                "bubbleAiText" to "#FFE6EF",
+            ),
+        ),
+    )
+
+    /** 当前覆盖最像哪个气泡样式（用于打勾）。 */
+    fun matchBubble(overrides: Map<String, String>): Preset? = BUBBLES.firstOrNull { p ->
+        p.tokens.all { (k, v) -> overrides[k] == v }
+    }
+
+    fun bubbleById(id: String): Preset? = BUBBLES.firstOrNull { it.id == id }
 
     fun byId(id: String): Preset? = ALL.firstOrNull { it.id == id }
 

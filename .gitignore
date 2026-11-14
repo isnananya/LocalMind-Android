@@ -27,3 +27,34 @@ _research/
 *.bin
 *.onnx
 *.safetensors
+
+# 1.0.11：内置主题包从 APK 移除后暂存在这里（云端已有同样的包）
+LocalMind/_unused_builtin/
+
+# 本地工作目录：这些是"工作台"，不是代码，不该进版本库
+#  - _datarepo   独立的数据仓库（自己的 .git，清单与主题包都从这里发布）
+#  - _theme-build 生成主题包/壁纸的脚本与素材
+#  - _fontstage   字体流水线的清单缓存
+#  - _downloads   本地模型权重（4 GB+）
+#  - apk-out      打好的安装包
+#  - _build_tmp / _diag 构建与调试中间产物
+_datarepo/
+_theme-build/
+_fontstage/
+_downloads/
+_build_tmp/
+_diag/
+_analysis/
+apk-out/
+lt/
+
+# 编辑器/工具的项目级数据
+.workbuddy/
+
+# 某次脚本里 %SystemDrive% 没被展开，误把 Windows 缓存目录写进仓库（已从索引清除）
+%SystemDrive%/
+SystemDrive/
+
+# 第三方参考源码（LiquidTab 2.0 快照，保留 LICENSE/NOTICE，不参与构建）
+# 需要时从上游重新拉取
+# lt/LiquidTab-main/   ← 故意不忽略：许可证要求随仓库分发

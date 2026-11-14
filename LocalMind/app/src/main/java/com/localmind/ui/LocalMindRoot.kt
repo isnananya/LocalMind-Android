@@ -11,11 +11,22 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Icon
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -137,6 +148,8 @@ fun LocalMindRoot(
 ) {
     val ios = IosTheme.palette
     val tab by viewModel.tab.collectAsState()
+    // 朗读状态提到根层：停止按钮要覆盖所有页面（聊天页朗读、语音页试听都算）。
+    val speaking by viewModel.speaking.collectAsState()
     val showSettings by viewModel.showSettings.collectAsState()
     val showImageStudio by viewModel.showImageStudio.collectAsState()
     val showVoiceScreen by viewModel.showVoiceScreen.collectAsState()
@@ -158,6 +171,10 @@ fun LocalMindRoot(
     val scrollStates = com.localmind.ui.motion.rememberScrollStateHolder()
     val uiTheme = com.localmind.ui.theme.LocalUiTheme.current
     val uiTokens = uiTheme.tokens
+    // 动效档位要在第一帧之前生效，否则首屏沿用上一档曲线。
+    // 取**解析后**的令牌（LocalUiTokens 已合并深浅色两套），configure 幂等，
+    // 内部先比对再写，所以每帧调一次也不心疼。
+    com.localmind.ui.motion.Motion.configure(com.localmind.ui.theme.LocalUiTokens.current)
     val tabIds = uiTheme.tabs
     val startTabId = uiTheme.startTab
     val uiLayout by viewModel.uiLayout.collectAsState()
@@ -263,6 +280,25 @@ fun LocalMindRoot(
                             else -> "me"
                         },
                         transitionSpec = {
+                            // 主题可改页面切换方式（令牌 pageTransition）。
+                            // 放在 transitionSpec 内部读：切主题后这里会跟着重组。
+                            when (uiTokens["pageTransition"] ?: "slide") {
+                                "none" -> fadeIn(Motion.smooth(0)) togetherWith fadeOut(Motion.smooth(0))
+                                "fade" -> fadeIn(Motion.smooth(200)) togetherWith fadeOut(Motion.smooth(150))
+                                "scale" -> (
+                                    fadeIn(Motion.smooth(200)) +
+                                        androidx.compose.animation.scaleIn(
+                                            animationSpec = Motion.smooth(240),
+                                            initialScale = 0.94f,
+                                        )
+                                    ) togetherWith (
+                                    fadeOut(Motion.smooth(150)) +
+                                        androidx.compose.animation.scaleOut(
+                                            animationSpec = Motion.smooth(170),
+                                            targetScale = 1.02f,
+                                        )
+                                    )
+                                else -> {
                             val isSub = { s: String ->
                                 s in setOf("voice", "image", "convdetail", "plugins", "plugindocs", "debug", "status")
                             }
@@ -287,6 +323,8 @@ fun LocalMindRoot(
                                         initialOffsetY = { (it * 0.03f).toInt() },
                                     )
                                     ) togetherWith fadeOut(Motion.smooth(120))
+                            }
+                                }
                             }
                         },
                         label = "rootPage",
@@ -444,49 +482,107 @@ fun LocalMindRoot(
             )
         }
 
-        // -------------------------------------------------- 更新弹窗
+        // -------------------------------------------------- 更新弹窗（应用内下载）
         //
-        // 后台 release.json 的 versionCode 高于本机才弹；forceUpdate 时不给「稍后」。
-        val context = androidx.compose.ui.platform.LocalContext.current
+        // 1.0.11 起不再把用户甩去浏览器：这里自己下 APK、自己拉起系统安装器。
+        // 下载中给进度和速度，失败给重试；地址先过 GitHubMirror 展开加速源。
         val pendingUpdate by viewModel.pendingUpdate.collectAsState()
+        val updateChannel by viewModel.updateChannel.collectAsState()
+        val apkState by viewModel.apkUpdater.state.collectAsState()
+
+        // 下载 + 校验通过 → 直接拉起安装器。
+        // 没给「安装未知应用」权限时会跳到系统设置页，用户授权回来再点一次即可。
+        androidx.compose.runtime.LaunchedEffect(apkState) {
+            val ready = apkState as? com.localmind.service.ApkUpdater.State.Ready
+            if (ready != null) viewModel.apkUpdater.install(ready)
+        }
+
         pendingUpdate?.let { rel ->
-            AlertDialog(
-                onDismissRequest = { if (!rel.forceUpdate) viewModel.consumeUpdate() },
-                title = {
-                    Text(
-                        "发现新版本 " + rel.latestVersion,
-                        style = IosTheme.typography.headline,
-                    )
+            UpdateDialog(
+                rel = rel,
+                channel = updateChannel,
+                state = apkState,
+                onDownload = {
+                    viewModel.reportUpdateDecision("accept", rel)
+                    viewModel.apkUpdater.download(rel.latestVersion, listOf(rel.downloadUrl))
                 },
-                text = {
-                    Text(
-                        (rel.changelog.takeIf { it.isNotBlank() } ?: "暂无更新说明") +
-                            "\n\n当前版本：" + com.localmind.BuildConfig.VERSION_NAME,
-                        style = IosTheme.typography.subheadline,
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        runCatching {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(
-                                        rel.downloadUrl.takeIf { it.isNotBlank() }
-                                            ?: "https://github.com/isnananya/LocalMind-Android/releases",
-                                    ),
-                                ),
-                            )
-                        }
-                        viewModel.consumeUpdate()
-                    }) { Text("去更新", color = ios.pink) }
-                },
-                dismissButton = {
-                    if (!rel.forceUpdate) {
-                        TextButton(onClick = { viewModel.consumeUpdate() }) { Text("稍后") }
-                    }
+                onCancel = { viewModel.apkUpdater.cancel() },
+                onLater = {
+                    viewModel.apkUpdater.reset()
+                    viewModel.reportUpdateDecision("reject", rel)
+                    viewModel.consumeUpdate()
                 },
             )
+        }
+
+        // -------------------------------------------------- 崩溃上报弹窗
+        //
+        // 崩溃只落盘。是否上传由用户当场决定 —— 没有「默认帮我传」这回事。
+        val pendingCrash by viewModel.pendingCrash.collectAsState()
+        pendingCrash?.let { crash ->
+            val noteState = androidx.compose.runtime.remember(crash.at) {
+                androidx.compose.runtime.mutableStateOf("")
+            }
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissCrash() },
+                title = { Text("上次崩溃了", style = IosTheme.typography.headline) },
+                text = {
+                    androidx.compose.foundation.layout.Column {
+                        Text(
+                            "上次运行时异常退出（${crash.timeText}）。把崩溃日志发给我能帮我更快定位问题。" +
+                                "\n\n日志里只有堆栈和机型信息，不含任何个人内容。",
+                            style = IosTheme.typography.subheadline,
+                        )
+                        androidx.compose.material3.OutlinedTextField(
+                            value = noteState.value,
+                            onValueChange = { noteState.value = it },
+                            singleLine = true,
+                            label = { Text("当时在做什么？(可选)") },
+                            modifier = androidx.compose.ui.Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.submitCrash(crash, noteState.value) }) {
+                        Text("上传日志", color = ios.pink)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissCrash() }) { Text("不用了") }
+                },
+            )
+        }
+
+        // ---- 朗读中的全局停止按钮 ----
+        //
+        // 自动朗读是把整段回复拆成多句排队播的，长回复能念好几分钟，而界面上
+        // 原来**没有任何停止入口**（stopSpeaking 只在内部被调用）——
+        // 用户要么等它念完，要么杀进程。挂在根层而不是聊天页：聊天朗读、
+        // 语音页试听、外部 API 播报都能一键停，也不用每个页面各加一个。
+        if (speaking) {
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = statusBarTopPadding() + 8.dp)
+                    .shadow(10.dp, RoundedCornerShape(999.dp))
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(ios.secondaryGroupedBackground.copy(alpha = 0.97f))
+                    .border(0.5.dp, ios.separator, RoundedCornerShape(999.dp))
+                    .clickable { viewModel.stopSpeaking() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(AppIcons.Stop, null, Modifier.size(13.dp), tint = ios.red)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "停止朗读",
+                    color = ios.label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
     }
 }
@@ -525,4 +621,133 @@ private fun ToastOverlay(toast: String?, bottomPadding: androidx.compose.ui.unit
             }
         }
     }
+}
+
+/**
+ * 更新弹窗：一个弹窗走完「看说明 → 下载 → 装」。
+ *
+ * 之前点「去更新」是 `ACTION_VIEW` 跳浏览器，用户还得自己找下载按钮、等浏览器
+ * 下完、从通知栏点开。任何一步没走对就是"更新不了"。现在下载在这里做，
+ * 完成直接拉系统安装器 —— 用户只剩下最后那个「安装」确认。
+ *
+ * 下载中**不给「稍后」**：正在下 60 MB 的包，关掉弹窗却继续下载是最糟的组合。
+ * 想停就点「取消」。
+ */
+@Composable
+private fun UpdateDialog(
+    rel: com.localmind.service.RemoteDataService.ReleaseInfo,
+    channel: String,
+    state: com.localmind.service.ApkUpdater.State,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onLater: () -> Unit,
+) {
+    val ios = IosTheme.palette
+    val downloading = state as? com.localmind.service.ApkUpdater.State.Downloading
+    val failed = state as? com.localmind.service.ApkUpdater.State.Failed
+    val ready = state as? com.localmind.service.ApkUpdater.State.Ready
+    val busy = downloading != null || ready != null
+
+    AlertDialog(
+        onDismissRequest = { if (!rel.forceUpdate && !busy) onLater() },
+        title = {
+            Text(
+                (if (channel == "beta") "内测版本 " else "发现新版本 ") + rel.latestVersion,
+                style = IosTheme.typography.headline,
+            )
+        },
+        text = {
+            Column {
+                if (downloading != null) {
+                    val done = if (downloading.percent >= 0) {
+                        "已下载 ${downloading.percent}%"
+                    } else {
+                        "已下载 ${downloading.received / 1024 / 1024} MB"
+                    }
+                    Text(done, style = IosTheme.typography.subheadline, color = ios.label)
+                    Spacer(Modifier.size(8.dp))
+                    // 自己画进度条：material3 的 LinearProgressIndicator 在不同
+                    // 版本上参数名不一样（progress / progress = {}），离线构建时
+                    // 升不了库，直接用 Box 更稳。
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(ios.fillSecondary),
+                    ) {
+                        if (downloading.percent >= 0) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(downloading.percent / 100f)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(ios.blue),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        buildString {
+                            if (downloading.bytesPerSecond > 0) {
+                                append(com.localmind.service.DownloadSources.speedText(downloading.bytesPerSecond))
+                            }
+                            if (downloading.total > 0) {
+                                if (isNotEmpty()) append(" · ")
+                                append("${downloading.total / 1024 / 1024} MB")
+                            }
+                            if (downloading.sourceCount > 1) {
+                                if (isNotEmpty()) append(" · ")
+                                append("源 ${downloading.sourceIndex}/${downloading.sourceCount}")
+                            }
+                        },
+                        style = IosTheme.typography.caption1,
+                        color = ios.secondaryLabel,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        "下载完会直接打开安装器，不用再去浏览器。",
+                        style = IosTheme.typography.caption1,
+                        color = ios.tertiaryLabel,
+                    )
+                } else {
+                    Text(
+                        (if (channel == "beta") "这是测试版，可能不稳定，欢迎反馈问题。\n\n" else "") +
+                            (rel.changelog.takeIf { it.isNotBlank() } ?: "暂无更新说明") +
+                            "\n\n当前版本：" + com.localmind.BuildConfig.VERSION_NAME,
+                        style = IosTheme.typography.subheadline,
+                    )
+                    if (ready != null) {
+                        Spacer(Modifier.size(10.dp))
+                        Text(
+                            "安装包已就绪，正在打开系统安装器…",
+                            style = IosTheme.typography.caption1,
+                            color = ios.green,
+                        )
+                    }
+                    if (failed != null) {
+                        Spacer(Modifier.size(10.dp))
+                        Text(
+                            failed.message,
+                            style = IosTheme.typography.caption1,
+                            color = ios.red,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                downloading != null -> TextButton(onClick = onCancel) { Text("取消") }
+                ready != null -> TextButton(onClick = onDownload) { Text("重新下载") }
+                failed != null -> TextButton(onClick = onDownload) { Text("重试", color = ios.pink) }
+                else -> TextButton(onClick = onDownload) { Text("立即更新", color = ios.pink) }
+            }
+        },
+        dismissButton = {
+            if (!rel.forceUpdate && !busy) {
+                TextButton(onClick = onLater) { Text("稍后") }
+            }
+        },
+    )
 }

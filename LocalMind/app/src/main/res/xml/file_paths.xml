@@ -7,5 +7,8 @@
          FileProvider 授权，所以必须在白名单里，否则分享会抛
          IllegalArgumentException: Failed to find configured root。 -->
     <files-path name="chat_images" path="chat_images/" />
+    <!-- 应用内更新的安装包。必须单独列出：把 filesDir 整体共享出去
+         等于把模型、数据库一起暴露给任何拿到 Uri 的应用。 -->
+    <files-path name="updates" path="updates/" />
     <cache-path name="cache" path="." />
 </paths>

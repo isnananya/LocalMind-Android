@@ -3,13 +3,9 @@ package com.localmind.service
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -64,25 +60,43 @@ class ThemeStoreService(private val context: Context) {
         val ID_PATTERN = Regex("^[A-Za-z0-9._-]+$")
 
         /**
-         * 清单地址的回退链。
+         * 清单地址的回退链，统一由 [GitHubMirror] 决定：
          *
-         * 前三个是官方直连（最快，但国内常常被墙）：
-         *  - GitHub Pages：作者自己的域名，走 CDN
-         *  - jsDelivr：jsDelivr 会缓存 GitHub 内容
-         *  - raw：GitHub 原始地址
+         *  1. **GitHub Pages**（`isnananya.github.io/...`）—— 真机实测 0.8s，
+         *     走 Fastly CDN，国内最稳；
+         *  2. 加速源 `gh-proxy.com` / `ghproxy.net` —— 实测 0.9s / 1.7s；
+         *  3. jsDelivr 与直连 —— 当前国内连不上，留着只为"哪天恢复"。
          *
-         * 后三个是 **ghproxy 镜像**（把官方地址套一层代理）。
-         * 这不是"备用凑数"—— 实测国内网络下前三个全挂、只有镜像通，
-         * 所以镜像必须排在后面但一定要有。
+         * 别在这里另起一份列表：以前抄了三份、每份还不一样，结果就是
+         * "主题能刷、字体一片空白、更新又没反应"，用户根本分不清哪坏了。
          */
-        val BASES = listOf(
-            "https://isnananya.github.io/LocalMind-Data/data",
-            "https://cdn.jsdelivr.net/gh/isnananya/LocalMind-Data@main/data",
-            "https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
-            "https://ghproxy.net/https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
-            "https://gh-proxy.com/https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
-            "https://ghproxy.net/https://isnananya.github.io/LocalMind-Data/data",
-        )
+        val BASES = GitHubMirror.DATA_BASES
+
+        /**
+         * 单张预览图最多试几个候选地址。
+         *
+         * 第一个（Pages）实测就成功，正常只发 1 次请求；4 个是"Pages 404
+         * 且某个加速源抽风"时的余量。再多只是在全都不通时白等
+         * —— 见 [ThemeEntry.previewUrls]。
+         */
+        const val MAX_PREVIEW_URLS = 4
+
+        /**
+         * 主题包体积 1–2 MB，值得多试两个源。
+         *
+         * 下载走 [raceSources] 并发探测，多一个候选只多一次并行请求，
+         * 不会像预览图那样串行累加等待时间。
+         */
+        const val MAX_PACKAGE_URLS = 6
+
+        /**
+         * 主题包大小上限。
+         *
+         * 现在的主题包 0.3–2 MB（带壁纸的最大 1.9 MB），32 MB 是给"以后主题包
+         * 带字体、带动图壁纸"留的余量。超了直接放弃这个源 —— 不然一份错误的
+         * 几百 MB 响应能把手机存储写满。
+         */
+        const val MAX_PACKAGE_BYTES = 32L * 1024 * 1024
     }
 
     /**
@@ -119,6 +133,10 @@ class ThemeStoreService(private val context: Context) {
         val previewAsset: String = "",
         val mirrors: List<String> = emptyList(),
         val previewMirrors: List<String> = emptyList(),
+        /** 主题自带的字体 id（字体商店里的）。空 = 不带字体。 */
+        val fontId: String = "",
+        /** 主题推荐的气泡 id（气泡商店里的）。空 = 用主题自己的气泡令牌。 */
+        val bubbleId: String = "",
     ) {
         val isBuiltin: Boolean get() = builtinAsset.isNotBlank()
 
@@ -129,17 +147,28 @@ class ThemeStoreService(private val context: Context) {
 
         /** 预览图的所有候选地址（去重、已过滤协议）。 */
         val previewUrls: List<String>
-            get() = (listOf(previewUrl) + previewMirrors)
-                .flatMap { u -> listOf(u) + githubMirrorsFor(u) }
-                .filter { it.startsWith("http://") || it.startsWith("https://") }
-                .distinct()
+            get() = candidates(listOf(previewUrl) + previewMirrors, MAX_PREVIEW_URLS)
 
         /** 主题包的所有候选地址（去重、已过滤协议）。 */
         val packageUrls: List<String>
-            get() = (listOf(downloadUrl) + mirrors)
-                .flatMap { u -> listOf(u) + githubMirrorsFor(u) }
+            get() = candidates(listOf(downloadUrl) + mirrors, MAX_PACKAGE_URLS)
+
+        /**
+         * 展开候选地址：**Pages 优先、加速源次之、直连兜底**，并截断数量。
+         *
+         * 顺序统一由 [GitHubMirror.mirrors] 决定（它会把任何 raw 地址推导成
+         * 对应的 GitHub Pages 地址放在第一位 —— 真机实测 Pages 只要 0.8 秒，
+         * 而排在前面的几个公共代理当时全在国内连不上）。这里只做合并去重。
+         *
+         * 截断照样必要：以前是"原地址 + 6 个代理"再叠清单自带的 4 个镜像，
+         * 最多 28 条，全不通时一张缩略图要转好几分钟，用户看到的就是一排灰方块。
+         */
+        private fun candidates(raw: List<String>, limit: Int): List<String> =
+            raw.filter { it.isNotBlank() }
+                .flatMap { GitHubMirror.mirrors(it) }
                 .filter { it.startsWith("http://") || it.startsWith("https://") }
                 .distinct()
+                .take(limit)
     }
 
     private val client = OkHttpClient.Builder()
@@ -221,6 +250,15 @@ class ThemeStoreService(private val context: Context) {
         _themes.value = runCatching { builtinThemes() }
             .onFailure { Log.e(TAG, "内置主题清单解析失败，本次不带内置主题启动", it) }
             .getOrDefault(emptyList())
+
+        // 1.0.11 起 APK 不再内置任何主题包（都放云端，省 8 MB 安装包）。
+        // 代价是首屏没有"白送的那几个"了，所以先把上次拉到的清单缓存顶上来：
+        // 网络慢的时候商店也不该是一片空白。
+        if (_themes.value.isEmpty()) {
+            _themes.value = runCatching { readCache() ?: emptyList() }
+                .onFailure { Log.w(TAG, "主题缓存读取失败：${it.message}") }
+                .getOrDefault(emptyList())
+        }
     }
 
     private val _loading = MutableStateFlow(false)
@@ -327,33 +365,31 @@ class ThemeStoreService(private val context: Context) {
                 return@withContext copyBuiltin(entry.builtinAsset, target, onProgress, entry.name)
             }
 
-            // GitHub 直连在国内常常不通。候选 = 清单地址 + 内置代理展开，
-            // 先**并行测速**（谁先回谁排前面），再按实测顺序逐个下 ——
-            // 不再把时间浪费在"第一个源挂了才知道"上。
-            // 进度回调按「当前这个源」汇报，换源时从 0 重新开始是如实反映。
-            val urls = raceSources(entry.packageUrls)
-            if (urls.isEmpty()) {
-                Log.w(TAG, "没有合法的下载地址：${entry.id}")
-                return@withContext null
-            }
-            Log.i(TAG, "源竞速结果：${urls.joinToString("  ")}")
-            for ((index, url) in urls.withIndex()) {
-                val ok = runCatching { downloadFrom(url, target, onProgress) }
-                    .onFailure { Log.w(TAG, "源 ${index + 1} 失败：${it.message}", it) }
-                    .getOrDefault(false)
-                if (ok) {
-                    Log.i(TAG, "主题包下载成功（源 ${index + 1}/${urls.size}）：${entry.name}")
+            // GitHub 直连在国内常常不通，且**哪个加速源活着经常在变**。
+            //
+            // 1.0.11 之前的做法是"清单地址 + 写死的代理顺序，一个个试"，第一个
+            // 挂了就要白等一次连接超时。现在交给 [FastDownload]：
+            //  * 并行探测全部候选源，按**实测延迟**排序（系统自己挑，不靠猜）；
+            //  * 对最快的那个开 8 条连接分段拉（公共代理单连接吞吐常常只有
+            //    几十 KB/s，这才是"下载慢"的真正原因）；
+            //  * 这个源整体失败自动换下一个，分段失败退回单连接。
+            val ok = FastDownload.fetch(
+                client = downloadClient,
+                urls = entry.packageUrls,
+                target = target,
+                segmentRoot = packsDir,
+                maxBytes = MAX_PACKAGE_BYTES,
+                accept = { f ->
                     // 清单里声明了大小就核一遍：不合说明下到了别的东西（镜像返回
                     // 错误页、或者上游换了包），宁可报失败也不装一个坏包。
-                    if (entry.sizeBytes > 0 && target.length() != entry.sizeBytes) {
-                        Log.w(TAG, "大小不符（${target.length()} ≠ ${entry.sizeBytes}），丢弃")
-                        target.delete()
-                    } else {
-                        return@withContext target
-                    }
-                }
+                    entry.sizeBytes <= 0 || f.length() == entry.sizeBytes
+                },
+                onProgress = onProgress,
+            )
+            if (ok) {
+                Log.i(TAG, "主题包下载成功：${entry.name}（${target.length() / 1024} KB）")
+                return@withContext target
             }
-            Log.w(TAG, "所有源都失败了：${entry.name}（共 ${urls.size} 个）")
 
             // 最后一招：如果这个主题在 APK 里也附带了一份，就用本地副本。
             // 在线清单和内置清单同 id 时这很常见 —— 网络全挂也别让用户
@@ -365,124 +401,6 @@ class ThemeStoreService(private val context: Context) {
             }
             null
         }
-
-    /**
-     * 候选源竞速：**并行**对每个地址发一次 `Range: bytes=0-0` 的小探测，
-     * 按响应快慢排序 —— 最快的排最前，探测失败/超时的排最后（但还是给它们
-     * 兜底机会，万一是探测被限流而真下载没事）。
-     *
-     * 探测超时 4 秒：公共代理大多秒回，4 秒还没响应的基本就是挂了；
-     * 全部超时时保持原顺序（直连优先），行为退化为旧版。
-     */
-    private suspend fun raceSources(urls: List<String>): List<String> =
-        coroutineScope {
-            val probed = urls.map { url ->
-                async(Dispatchers.IO) {
-                    val latency = withTimeoutOrNull(4_000L) {
-                        val t0 = System.currentTimeMillis()
-                        if (MultiPartDownload.probe(downloadClient, url) != null) {
-                            System.currentTimeMillis() - t0
-                        } else null
-                    }
-                    url to (latency ?: Long.MAX_VALUE)
-                }
-            }.awaitAll()
-            probed.sortedBy { it.second }.map { it.first }
-        }
-
-    /**
-     * 从一个地址下载到 [target]。
-     *
-     * **多连接分段**：先用 `Range: bytes=0-0` 探一次（顺带拿到文件大小），
-     * 服务端支持 206 且文件够大就走 [MultiPartDownload]（2–6 条连接并行）；
-     * 不支持 Range、或者分段中途失败，退回单连接流式写。
-     *
-     * 主题包通常 1–2 MB，分段收益有限（阈值 24 MB 起，见 [MultiPartDownload.segmentsFor]），
-     * 但大主题包（带壁纸的樱雪物语 1.7 MB、极光夜航 1.9 MB，以后可能更大）
-     * 和海外源上这段逻辑是有用的；单连接那条路同时充当兜底。
-     */
-    private suspend fun downloadFrom(
-        url: String,
-        target: File,
-        onProgress: (Long, Long) -> Unit,
-    ): Boolean {
-        target.parentFile?.mkdirs()
-        target.delete()
-
-        val probe = MultiPartDownload.probe(downloadClient, url)
-        if (probe != null && probe.rangeSupported) {
-            // 段数拉满：主题包虽小，但公共代理的**单连接吞吐很可怜**
-            // （几十 KB/s 很常见），8 条连接把握手开销换来的并行度吃满。
-            // 这是用户明确的要求 —— "多线程默认拉满，越快越好"。
-            val segments = maxOf(MultiPartDownload.segmentsFor(probe.totalBytes), 8)
-            if (segments > 1) {
-                val segDir = MultiPartDownload.segmentDir(packsDir, target.name, probe.totalBytes)
-                val ok = kotlinx.coroutines.coroutineScope {
-                    MultiPartDownload.download(
-                        client = downloadClient,
-                        scope = this,
-                        url = url,
-                        target = segDir,
-                        assembleTo = target,
-                        totalBytes = probe.totalBytes,
-                        segments = segments,
-                        isCancelled = { false },
-                        onProgress = { done, total, _ -> onProgress(done, total) },
-                    )
-                }
-                if (ok) return true
-                Log.i(TAG, "分段下载未完成，退回单连接：${target.name}")
-            }
-        }
-        return downloadSingleStream(url, target, onProgress)
-    }
-
-    /** 单连接流式下载（服务端不认 Range，或分段失败时的兜底）。 */
-    private fun downloadSingleStream(
-        url: String,
-        target: File,
-        onProgress: (Long, Long) -> Unit,
-    ): Boolean {
-        val tmp = File(target.parentFile, target.name + ".part")
-        tmp.delete()
-        val ok = runCatching {
-            val req = Request.Builder().url(url).build()
-            downloadClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    Log.w(TAG, "HTTP ${resp.code}：$url")
-                    false
-                } else {
-                    val total = resp.body?.contentLength() ?: -1L
-                    resp.body?.byteStream()?.use { input ->
-                        tmp.outputStream().use { out ->
-                            val buf = ByteArray(64 * 1024)
-                            var written = 0L
-                            while (true) {
-                                val n = input.read(buf)
-                                if (n <= 0) break
-                                out.write(buf, 0, n)
-                                written += n
-                                onProgress(written, total)
-                            }
-                        }
-                    }
-                    tmp.length() > 0
-                }
-            }
-        }.getOrDefault(false)
-        if (!ok) {
-            runCatching { tmp.delete() }
-            return false
-        }
-        target.delete()
-        if (tmp.renameTo(target)) return true
-        // rename 失败（跨卷/文件被占用）：复制过去再删。
-        return runCatching {
-            tmp.copyTo(target, overwrite = true)
-            tmp.delete()
-            true
-        }.getOrDefault(false)
-    }
 
     /** 从 APK assets 复制一个主题包到缓存文件。 */
     private fun copyBuiltin(
@@ -570,6 +488,10 @@ class ThemeStoreService(private val context: Context) {
                     previewAsset = previewAsset,
                     mirrors = urlList("mirrors"),
                     previewMirrors = urlList("previewMirrors"),
+                    fontId = o.optString("fontId").trim()
+                        .takeIf { it.matches(Regex("^[A-Za-z0-9._-]{1,60}$")) }.orEmpty(),
+                    bubbleId = o.optString("bubbleId").trim()
+                        .takeIf { it.matches(Regex("^[A-Za-z0-9._-]{1,60}$")) }.orEmpty(),
                 )
             }.getOrNull() ?: continue
 
@@ -643,19 +565,15 @@ private val GH_HOSTS = listOf(
  * 做成顶层函数而不是类方法，是因为 `ThemeEntry` 是嵌套类 —— Kotlin 的
  * 嵌套类拿不到外部类实例，访问不了普通成员函数。
  */
-internal fun githubMirrorsFor(url: String): List<String> {
-    if (!url.startsWith("https://") && !url.startsWith("http://")) return emptyList()
-    val isGithub = GH_HOSTS.any { url.startsWith("https://$it/") || url.startsWith("http://$it/") }
-    if (!isGithub) return emptyList()
-    // 内置多个公共 GitHub 加速代理。哪个活着、哪个快不在这里猜 ——
-    // 下载前会全部探一轮延迟（见 ThemeStoreService.raceSources），按实测排序。
-    // 代理挂了顶多白测一次，不影响其它源。
-    val proxies = listOf(
-        "https://ghfast.top/",
-        "https://gh-proxy.com/",
-        "https://ghproxy.net/",
-        "https://gh.llkk.cc/",
-        "https://ghproxy.cc/",
-    )
-    return proxies.map { it + url }
-}
+/**
+ * 把一个 GitHub 系地址展开成国内可达的镜像。
+ *
+ * 具体源与顺序统一由 [GitHubMirror] 决定 —— 这里只保留"主题包也走同一套"
+ * 这件事本身。以前三个模块各抄一份源列表，改一处忘两处，字体预览因此
+ * 长期是空白（详见 GitHubMirror 的类注释）。
+ *
+ * 做成顶层函数而不是类方法，是因为 `ThemeEntry` 是嵌套类 —— Kotlin 的
+ * 嵌套类拿不到外部类实例，访问不了普通成员函数。
+ */
+internal fun githubMirrorsFor(url: String): List<String> =
+    if (GitHubMirror.isGitHub(url)) GitHubMirror.mirrors(url).filter { it != url } else emptyList()

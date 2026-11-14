@@ -49,6 +49,62 @@ import androidx.compose.ui.unit.dp
  */
 object Motion {
 
+    /**
+     * 主题可以改的动效档位（令牌 `animStyle`）。
+     *
+     * 为什么用全局可变量而不是 CompositionLocal：动画曲线是在
+     * `animateTo` / `tween` 的参数里**命令式**取用的，很多调用点不在
+     * Composable 作用域内（Modifier.composed 的 lambda、remember 里的协程）。
+     * 做成 CompositionLocal 就得把它们全部改写成参数传递，收益为零。
+     * 主题切换时由 UI 层调一次 [configure]，之后全局一致。
+     */
+    @Volatile
+    private var style: String = "ios"
+
+    /** 时长倍率（令牌 `animSpeed`）。0.6 = 更快，1.6 = 更慢。 */
+    @Volatile
+    private var speed: Float = 1f
+
+    /** 页面切换方式（令牌 `pageTransition`）：slide / fade / scale / none。 */
+    @Volatile
+    var pageTransition: String = "slide"
+        private set
+
+    /** 由 UI 层在令牌变化时调用。任何一项解析失败都回退默认，不影响动画照常跑。 */
+    fun configure(tokens: Map<String, String>) {
+        val s = tokens["animStyle"]?.takeIf { it.isNotBlank() } ?: "ios"
+        val sp = (tokens["animSpeed"]?.toFloatOrNull() ?: 1f).coerceIn(0.4f, 2.5f)
+        val pt = tokens["pageTransition"]?.takeIf { it.isNotBlank() } ?: "slide"
+        // 每帧都会被调一次，所以先比对再写：避免无意义地刷 volatile 字段。
+        if (s == style && sp == speed && pt == pageTransition) return
+        style = s
+        speed = sp
+        pageTransition = pt
+    }
+
+    /** 按当前档位换算真实时长。`none` 直接归零（等于硬切）。 */
+    private fun dur(baseMillis: Int): Int {
+        if (style == "none") return 0
+        val factor = when (style) {
+            "crisp" -> 0.62f
+            "gentle" -> 1.45f
+            else -> 1f
+        }
+        return (baseMillis * factor * speed).toInt().coerceIn(0, 2400)
+    }
+
+    /** 按档位给弹簧调整手感：crisp 更硬更快，gentle 更软。 */
+    private fun stiffnessOf(base: Float): Float = when (style) {
+        "crisp" -> base * 1.5f
+        "gentle" -> base * 0.68f
+        else -> base
+    }
+
+    private fun dampingOf(base: Float): Float = when (style) {
+        "crisp" -> (base + 0.12f).coerceAtMost(1f)
+        "gentle" -> base * 0.94f
+        else -> base
+    }
     /** iOS 的默认缓动近似：起步快、尾巴长。 */
     val iosEase: Easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
     /** 松手回弹用的曲线。 */
@@ -56,25 +112,31 @@ object Motion {
 
     /** 无回弹。跟手元素（滑块、开关）用它，加了回弹会显得"黏"。 */
     fun <T> smooth(durationMillis: Int = 220): FiniteAnimationSpec<T> =
-        tween(durationMillis = durationMillis, easing = iosEaseOut)
+        tween(durationMillis = dur(durationMillis), easing = iosEaseOut)
 
     /** 轻回弹。列表项、气泡、卡片出现的默认选择。 */
-    fun <T> snappy(): FiniteAnimationSpec<T> = spring(
-        dampingRatio = 0.82f,
-        stiffness = Spring.StiffnessMediumLow,
-    )
+    fun <T> snappy(): FiniteAnimationSpec<T> =
+        if (style == "none") tween(0)
+        else spring(
+            dampingRatio = dampingOf(0.82f),
+            stiffness = stiffnessOf(Spring.StiffnessMediumLow),
+        )
 
     /** 明显回弹。只给强调用。 */
-    fun <T> bouncy(): FiniteAnimationSpec<T> = spring(
-        dampingRatio = 0.55f,
-        stiffness = Spring.StiffnessMedium,
-    )
+    fun <T> bouncy(): FiniteAnimationSpec<T> =
+        if (style == "none") tween(0)
+        else spring(
+            dampingRatio = dampingOf(0.55f),
+            stiffness = stiffnessOf(Spring.StiffnessMedium),
+        )
 
     /** 慢而软。整页推入、Sheet 升起用。 */
-    fun <T> gentle(): FiniteAnimationSpec<T> = spring(
-        dampingRatio = 0.9f,
-        stiffness = Spring.StiffnessLow,
-    )
+    fun <T> gentle(): FiniteAnimationSpec<T> =
+        if (style == "none") tween(0)
+        else spring(
+            dampingRatio = dampingOf(0.9f),
+            stiffness = stiffnessOf(Spring.StiffnessLow),
+        )
 
     /** 列表项逐个出现的错峰间隔。太大会显得慢，太小看不出层次。 */
     const val STAGGER_MS = 28

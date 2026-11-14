@@ -181,6 +181,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val fontStore get() = localApp.fontStore
     /** 云端气泡目录，见 [com.localmind.service.BubbleStoreService]。 */
     val bubbleStore get() = localApp.bubbleStore
+    /** 应用内更新（自己下 APK + 拉起安装器），见 [com.localmind.service.ApkUpdater]。 */
+    val apkUpdater get() = localApp.apkUpdater
     val emoji get() = localApp.emoji
     val voiceDownloader get() = localApp.voiceDownloader
     val stt get() = localApp.stt

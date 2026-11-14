@@ -32,6 +32,11 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- 应用内更新：自己下 APK 后要拉起系统安装器。
+         没有这条权限，Android 8+ 上 startActivity(ACTION_VIEW apk) 会被直接拒掉，
+         用户只能退回浏览器下载 —— 也就是这条权限存在的全部理由。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- 没有 GPS 的设备（平板、模拟器、部分车机）也要能装：定位是可选能力 -->
     <uses-feature android:name="android.hardware.location" android:required="false" />

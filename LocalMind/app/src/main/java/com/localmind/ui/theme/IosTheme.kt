@@ -7,6 +7,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -399,9 +402,18 @@ fun LocalMindTheme(
 
     // 尺寸也要走令牌。用 data class + CompositionLocal 而不是改常量 ——
     // 那些是 `val`，运行时改不了，而主题是运行时装上的。
+    //
+    // 控件形状（controlStyle）在这里统一换算成 controlCorner：按钮、标签、
+    // 输入框、分段控件全都读这一项，所以主题写一行 "capsule" 就能把整个
+    // 界面的控件从圆角矩形变成胶囊，不用改任何一个组件。
+    val controlCornerDp = when ((tokens["controlStyle"] ?: "rounded").lowercase()) {
+        "capsule", "pill" -> 999f
+        "square" -> 2f
+        else -> tokFloat("controlCorner", 10f)
+    }
     val metrics = IosMetrics(
         cardCorner = tokFloat("cardCorner", 12f).dp,
-        controlCorner = tokFloat("controlCorner", 10f).dp,
+        controlCorner = controlCornerDp.dp,
         sheetCorner = tokFloat("sheetCorner", 16f).dp,
         bubbleCorner = tokFloat("bubbleCorner", 18f).dp,
         pagePadding = tokFloat("pagePadding", 16f).dp,
@@ -415,11 +427,21 @@ fun LocalMindTheme(
     // 之前 fontScale 传给了 MaterialTheme，但没有任何组件读它，等于没接。
     //
     // 字体族接在缩放之后：顺序无所谓，两者都是纯变换，可以叠加。
+    // 字体：优先用下载来的字体包（fontId），没有才退回系统自带族。
+    // 订阅 FontRegistry 是必须的 —— 字体是**异步解析**的，第一次组合时
+    // 往往还没加载好；不订阅就永远停在旧字体上（"换了没反应"）。
+    val fontFamilies by FontRegistry.families.collectAsState()
+    val activeFontId = tokens["fontId"].orEmpty()
+    val customFont = fontFamilies[activeFontId]
+    LaunchedEffect(activeFontId) {
+        if (activeFontId.isNotBlank()) FontRegistry.ensureLoaded(activeFontId)
+    }
+
     val typography = DefaultIosTypography.scaled(
         scale = tokFloat("fontScale", 1f),
         bodyBoost = tokFloat("bodySize", 17f),
         baseBodySize = 17f,
-    ).withFontFamily(fontFamilyFor(tokens["fontFamily"] ?: "system"))
+    ).withFontFamily(customFont ?: fontFamilyFor(tokens["fontFamily"] ?: "system"))
 
     val scheme = if (darkTheme) {
         darkColorScheme(

@@ -71,6 +71,20 @@ class RemoteDataService(private val context: Context) {
     private val _release = MutableStateFlow<ReleaseInfo?>(null)
     val release: StateFlow<ReleaseInfo?> = _release
 
+    /** 更新通道：stable（正式版，release.json）/ beta（测试版，release-beta.json）。 */
+    private val _channel = MutableStateFlow(if (prefs.getString(KEY_CHANNEL, null) == "beta") "beta" else "stable")
+    val channel: StateFlow<String> = _channel
+
+    fun setChannel(value: String) {
+        val v = if (value == "beta") "beta" else "stable"
+        if (v == _channel.value) return
+        _channel.value = v
+        prefs.edit().putString(KEY_CHANNEL, v).apply()
+    }
+
+    /** 通道对应的版本文件。 */
+    private fun releaseFile(): String = if (_channel.value == "beta") "release-beta.json" else "release.json"
+
     // ------------------------------------------------------------- 刷新
 
     /** 启动时调一次：先缓存、后网络。任何一个失败都不影响其他。 */
@@ -78,14 +92,43 @@ class RemoteDataService(private val context: Context) {
         // 1) 缓存先上屏
         if (_donors.value == null) cache("donors.json")?.let { runCatching { _donors.value = parseDonors(JSONObject(it)) } }
         if (_announcement.value == null) cache("announcement.json")?.let { runCatching { _announcement.value = parseAnnouncement(JSONObject(it)) } }
-        if (_release.value == null) cache("release.json")?.let { runCatching { _release.value = parseRelease(JSONObject(it)) } }
+        if (_release.value == null) cache(releaseFile())?.let { runCatching { _release.value = parseRelease(JSONObject(it)) } }
 
         // 2) 网络刷新
+        val rel = releaseFile()
         listOf(
             async { runCatching { fetch("donors.json")?.let { _donors.value = parseDonors(JSONObject(it)) } } },
             async { runCatching { fetch("announcement.json")?.let { _announcement.value = parseAnnouncement(JSONObject(it)) } } },
-            async { runCatching { fetch("release.json")?.let { _release.value = parseRelease(JSONObject(it)) } } },
+            async { runCatching { fetch(rel)?.let { _release.value = parseRelease(JSONObject(it)) } } },
         ).awaitAll()
+    }
+
+    /**
+     * 轻量轮询：只拉「公告」和「版本」。
+     *
+     * 捐献榜一般不动，轮询它纯属浪费；公告要"实时"，所以单独给一条
+     * 每 60 秒一次的小刷新通道。失败静默返回 false。
+     */
+    suspend fun refreshLive(): Boolean = withContext(Dispatchers.IO) {
+        var ok = false
+        runCatching {
+            fetch("announcement.json")?.let {
+                _announcement.value = parseAnnouncement(JSONObject(it))
+                ok = true
+            }
+        }
+        runCatching {
+            fetch(releaseFile())?.let {
+                _release.value = parseRelease(JSONObject(it))
+                ok = true
+            }
+        }
+        ok
+    }
+
+    /** 切换通道后重新拉一次版本信息。 */
+    suspend fun refreshRelease() = withContext(Dispatchers.IO) {
+        runCatching { fetch(releaseFile())?.let { _release.value = parseRelease(JSONObject(it)) } }
     }
 
     // ------------------------------------------------------------- 公告
@@ -171,19 +214,10 @@ class RemoteDataService(private val context: Context) {
     )
 
     private companion object {
-        // 国内网络下 raw.githubusercontent.com 常被墙，按顺序尝试多个可达源。
-        // 1) GitHub Pages（同源托管，国内通常可达）
-        // 2) jsDelivr 镜像（国内 CDN，通常可达）
-        // 3) 官方 raw（兜底，可能被墙）
-        // 4-6) ghproxy 镜像：实测墙内前三个全挂时只有这些通，所以不能省
-        val BASES = listOf(
-            "https://isnananya.github.io/LocalMind-Data/data",
-            "https://cdn.jsdelivr.net/gh/isnananya/LocalMind-Data@main/data",
-            "https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
-            "https://ghproxy.net/https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
-            "https://gh-proxy.com/https://raw.githubusercontent.com/isnananya/LocalMind-Data/main/data",
-            "https://ghproxy.net/https://isnananya.github.io/LocalMind-Data/data",
-        )
+        // 清单来源统一由 GitHubMirror 给出：加速源在前、GitHub Pages 在后。
+        // 以前这里自己抄了一份源列表，导致字体/主题/更新三处能通情况不一样。
+        val BASES = GitHubMirror.DATA_BASES
         const val KEY_ANN_READ = "ann_read_id"
+        const val KEY_CHANNEL = "update_channel"
     }
 }

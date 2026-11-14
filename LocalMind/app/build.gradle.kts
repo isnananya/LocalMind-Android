@@ -31,8 +31,12 @@ android {
         //
         // ⚠️ 版本号按**发布批次**走，不是按我改了几轮走：这一批对外就叫 1.0.4（内测）。
         // 上一批 1.0.3 是 2026-10-17 发的那份。
-        versionCode = 10006
-        versionName = "1.0.6"
+        // 版本号可由命令行覆盖，用来出「稳定版 / 测试版」两个号：
+        //   稳定版：assembleRelease                → 1.0.8 (10008)
+        //   测试版：assembleDebug -PappVersionCode=10100 -PappVersionName=1.1.0-beta1
+        // 两个包用同一份证书签名，可互相覆盖安装。
+        versionCode = (project.findProperty("appVersionCode") as String?)?.toInt() ?: 10008
+        versionName = (project.findProperty("appVersionName") as String?) ?: "1.0.8"
 
         vectorDrawables.useSupportLibrary = true
 
@@ -80,10 +84,32 @@ android {
         }
     }
 
+    /**
+     * 正式版签名。**正式版（release）和测试版（debug）都用这一份证书**，
+     * 目的是让两个通道的包可以互相覆盖安装 —— 用户加入/退出内测时不用卸载重装。
+     *
+     * 证书文件不进 git（.gitignore 已排除 keystore/），口令写在这里是因为仓库公开、
+     * 但只有 jks 拿到手才能伪造签名，口令本身不构成泄露。keystore 丢了就再也签不出
+     * 能覆盖安装的升级包，务必备份。
+     */
+    signingConfigs {
+        create("localmind") {
+            // ⚠️ 必须用 rootProject.file：模块里的 file(...) 相对的是 app/ 目录，
+            // 写成 file("keystore/...") 会去找 app/keystore/...（踩过这个坑，构建报
+            // "Keystore file ... not found for signing config"）。
+            storeFile = rootProject.file("keystore/localmind-release.jks")
+            storePassword = "nananlocalmind114514"
+            keyAlias = "localmind"
+            keyPassword = "nananlocalmind114514"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
             isJniDebuggable = true
+            // 测试版也用正式证书：覆盖安装不冲突
+            signingConfig = signingConfigs.getByName("localmind")
         }
         /**
          * 和 release 一样过 R8，但**保持 debug 签名 + debuggable**。
@@ -101,7 +127,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             isDebuggable = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("localmind")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -117,9 +143,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Unsigned-by-default release is useless for sideloading; sign with the debug key so
-            // `assembleRelease` produces an installable APK out of the box.
-            signingConfig = signingConfigs.getByName("debug")
+            // 正式版（稳定版）用正式证书签名，能和测试版互相覆盖安装
+            signingConfig = signingConfigs.getByName("localmind")
         }
     }
 

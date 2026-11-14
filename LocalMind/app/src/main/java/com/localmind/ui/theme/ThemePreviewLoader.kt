@@ -56,8 +56,11 @@ object ThemePreviewLoader {
     private const val MAX_MEMORY_ENTRIES = 16
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
+        // 预览图只是缩略图，连不上就该立刻换下一个候选源。
+        // 3.5 秒的依据：实测可用的源（Pages 0.8s / gh-proxy 0.9s / ghproxy 1.7s）
+        // 全部在 2 秒内首字节，3.5 秒还没连上的一定是挂了，继续等只是拖累列表。
+        .connectTimeout(3500, TimeUnit.MILLISECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
     private val memCache = object : LinkedHashMap<String, Bitmap>(16, 0.75f, true) {
@@ -194,6 +197,72 @@ object ThemePreviewLoader {
         if (bmp != null) put(key, bmp)
         bmp
     }
+
+    /**
+     * 通用远程图片加载（字体预览图、气泡预览图等）。
+     *
+     * 和 [load] 的区别是不绑定 `ThemeEntry` —— 字体条目是另一套数据结构，
+     * 但"多源回退 + 磁盘缓存 + 采样解码 + 挡错误页"这套逻辑完全一样，
+     * 复制一份只会让两边的 bug 各修一半。
+     */
+    suspend fun loadUrls(
+        context: Context,
+        cacheKey: String,
+        urls: List<String>,
+        targetWidth: Int,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val memKey = "$cacheKey|$targetWidth"
+        cached(memKey)?.let { return@withContext it }
+
+        val dir = File(context.cacheDir, "remote_images").apply { mkdirs() }
+        val safe = cacheKey.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80)
+        val disk = File(dir, "$safe-$targetWidth.img")
+
+        var bytes: ByteArray? = if (disk.isFile && disk.length() in 12..MAX_BYTES.toLong()) {
+            runCatching { disk.readBytes() }.getOrNull()?.takeIf { looksLikeImage(it) }
+        } else null
+
+        if (bytes == null) {
+            for (url in urls) {
+                val data = runCatching {
+                    val req = Request.Builder().url(url).build()
+                    client.newCall(req).execute().use { resp ->
+                        val body = if (resp.isSuccessful) resp.body else null
+                        if (body == null || body.contentLength() > MAX_BYTES) {
+                            null
+                        } else {
+                            val buf = java.io.ByteArrayOutputStream()
+                            var tooBig = false
+                            body.byteStream().use { input ->
+                                val tmp = ByteArray(16 * 1024)
+                                var total = 0
+                                while (true) {
+                                    val n = input.read(tmp)
+                                    if (n <= 0) break
+                                    total += n
+                                    if (total > MAX_BYTES) {
+                                        tooBig = true
+                                        break
+                                    }
+                                    buf.write(tmp, 0, n)
+                                }
+                            }
+                            if (tooBig) null else buf.toByteArray()
+                        }
+                    }
+                }.getOrNull()
+                if (data != null && looksLikeImage(data)) {
+                    bytes = data
+                    runCatching { disk.writeBytes(data) }
+                    break
+                }
+            }
+        }
+
+        val bmp = bytes?.takeIf { looksLikeImage(it) }?.let { decode(it, targetWidth) }
+        if (bmp != null) put(memKey, bmp)
+        bmp
+    }
 }
 
 /**
@@ -215,6 +284,47 @@ fun rememberThemePreview(
     }
     LaunchedEffect(entry.id, entry.previewAsset, entry.previewUrl, entry.version, targetPx) {
         state.value = ThemePreviewLoader.load(context, entry, targetPx)?.asImageBitmap()
+    }
+    return state
+}
+
+/**
+ * 在 Composable 里加载字体样张。
+ *
+ * 1.0.11 起样张**完全走云端**（清单里的 previewUrl 展开成加速源）：APK 不再背
+ * 25 张图，安装包小 800 KB，而加速源本来就能取到同一张图。拿不到时字体卡
+ * 会画渐变占位，不会留白。
+ */
+@Composable
+fun rememberFontPreview(
+    fontId: String,
+    urls: List<String>,
+    targetWidthDp: Dp,
+): State<ImageBitmap?> {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val targetPx = with(density) { targetWidthDp.toPx() }.toInt().coerceAtLeast(120)
+    val state = remember(fontId, targetPx) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(fontId, targetPx, urls.firstOrNull()) {
+        state.value = ThemePreviewLoader.loadUrls(context, fontId, urls, targetPx)?.asImageBitmap()
+    }
+    return state
+}
+
+/** 在 Composable 里加载任意一组候选 URL 的图片（气泡预览等）。 */
+@Composable
+fun rememberRemoteImage(
+    cacheKey: String,
+    urls: List<String>,
+    targetWidthDp: Dp,
+): State<ImageBitmap?> {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val targetPx = with(density) { targetWidthDp.toPx() }.toInt().coerceAtLeast(120)
+    val state = remember(cacheKey, targetPx) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(cacheKey, targetPx, urls.firstOrNull()) {
+        if (urls.isEmpty()) return@LaunchedEffect
+        state.value = ThemePreviewLoader.loadUrls(context, cacheKey, urls, targetPx)?.asImageBitmap()
     }
     return state
 }

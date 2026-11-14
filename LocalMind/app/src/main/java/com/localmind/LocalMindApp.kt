@@ -109,12 +109,38 @@ class LocalMindApp : Application() {
         private set
 
     /**
+     * 匿名使用统计（设备数 / 版本分布 / 公告已读）。
+     *
+     * 只上报"事件 +1"，不带设备号、不带账号；失败静默。
+     * 后台从计数器快照里读汇总，见 LocalMind-Data 的 stats 工作流。
+     */
+    lateinit var telemetry: com.localmind.service.TelemetryService
+        private set
+
+    /**
      * 在线主题商店。
      *
      * 和 [remoteData] 一样是 best-effort：拉不到就用本地缓存，再不济就只剩
      * 已安装的主题包。商店挂了不影响其它功能。
      */
     lateinit var themeStore: com.localmind.service.ThemeStoreService
+        private set
+
+    /** 在线字体商店。字体是单文件下载，和主题包分开管。 */
+    lateinit var fontStore: com.localmind.service.FontStoreService
+        private set
+
+    /** 云端气泡目录（纯令牌，一条 JSON）。 */
+    lateinit var bubbleStore: com.localmind.service.BubbleStoreService
+        private set
+
+    /**
+     * 应用内更新（下 APK + 拉起安装器）。
+     *
+     * 放在 Application 里而不是 ViewModel：下载要跨页面继续（用户可能一边下
+     * 一边去看主题），ViewModel 被回收不该把 60 MB 的进度一起丢掉。
+     */
+    lateinit var apkUpdater: com.localmind.service.ApkUpdater
         private set
 
     /**
@@ -199,6 +225,9 @@ class LocalMindApp : Application() {
         // 内测里最难问清楚的一类，装晚了就抓不到。
         installDiagnostics()
 
+        // 崩溃捕获：只落盘，下次启动问用户要不要上传（见 CrashReporter / 崩溃弹窗）。
+        runCatching { com.localmind.service.CrashReporter.install(this) }
+
         // ⚠️ APK **不再自带任何模型清单**（曾经有过，见下）。
         //
         // 原来这里会在首次运行时把 `assets/model-library/model-library.json`（34 条）
@@ -231,7 +260,13 @@ class LocalMindApp : Application() {
         // 外部语音引擎（Breeze TTS 2 等）：只发 HTTP 请求，不加载本机模型。
         breeze = com.localmind.service.BreezeTts(this)
         remoteData = com.localmind.service.RemoteDataService(this)
+        telemetry = com.localmind.service.TelemetryService(this)
         themeStore = com.localmind.service.ThemeStoreService(this)
+        fontStore = com.localmind.service.FontStoreService(this)
+        bubbleStore = com.localmind.service.BubbleStoreService(this)
+        apkUpdater = com.localmind.service.ApkUpdater(this)
+        // 扫描已下载的字体并预解析：否则冷启动后要等用户重新点一次才生效。
+        com.localmind.ui.theme.FontRegistry.init(this)
         voiceCatalogService = com.localmind.service.VoiceCatalogService(this)
         apiServer = ApiServer(storage, engine, tts, modelStore)
         remoteEngine = com.localmind.service.RemoteChatEngine()

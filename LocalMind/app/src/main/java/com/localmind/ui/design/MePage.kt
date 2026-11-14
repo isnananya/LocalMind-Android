@@ -51,7 +51,7 @@ import com.localmind.ui.screen.PipelineScreen
 import com.localmind.ui.screen.ThemeScreen
 import com.localmind.ui.theme.IosTheme
 
-private enum class MeRoute { THEME, THEME_STORE, API, PIPELINE, ABOUT }
+private enum class MeRoute { THEME, THEME_STORE, API, PIPELINE, ABOUT, FEEDBACK }
 
 /**
  * 「我的」—— 只放普通用户会点的东西。
@@ -68,8 +68,10 @@ fun MePage(
     val ios = IosTheme.palette
     val profile by viewModel.userProfile.collectAsState()
     val plugins by viewModel.plugins.collectAsState()
+    val channel by viewModel.updateChannel.collectAsState()
     var route by remember { mutableStateOf<MeRoute?>(null) }
     var editing by remember { mutableStateOf(false) }
+    var channelSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(route) { viewModel.setMeFullPage(route != null) }
     BackHandler(enabled = route != null) { route = null }
@@ -88,6 +90,10 @@ fun MePage(
                 )
                 MeRoute.API -> ApiScreen(viewModel, onBack = { route = null })
                 MeRoute.PIPELINE -> PipelineScreen(viewModel, onBack = { route = null })
+                MeRoute.FEEDBACK -> com.localmind.ui.screen.FeedbackScreen(
+                    viewModel = viewModel,
+                    onBack = { route = null },
+                )
                 MeRoute.ABOUT -> AboutScreen(
                     onBack = { route = null },
                     onOpenDebug = { viewModel.openDebug(true) },
@@ -101,7 +107,7 @@ fun MePage(
 
     Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(statusBarTopPadding() + 8.dp))
-        AuroraTitle(text = "我的")
+        AuroraTitle(text = "更多")
 
         LazyColumn(
             state = listState,
@@ -185,7 +191,32 @@ fun MePage(
             }
 
             item {
-                AuroraGroup(modifier = Modifier.padding(top = 24.dp)) {
+                // 「应用」：更新相关。以前检查更新只在启动时自动跑一次，
+                // 用户想主动看看有没有新版，界面里根本没有入口。
+                AuroraSectionLabel("应用")
+                AuroraGroup {
+                    AuroraRow(
+                        title = "检查更新",
+                        subtitle = "当前 v" + BuildConfig.VERSION_NAME +
+                            " · " + if (channel == "beta") "测试版通道" else "稳定版通道",
+                        leading = { AuroraIcon(AppIcons.Refresh, ios.green) },
+                        onClick = { viewModel.checkUpdateNow() },
+                    )
+                    AuroraDivider(indent = 58.dp)
+                    AuroraRow(
+                        title = "更新通道",
+                        subtitle = if (channel == "beta") "测试版 · 更早玩到新功能，可能有 bug" else "稳定版 · 只收正式发布的版本",
+                        leading = { AuroraIcon(AppIcons.Download, ios.blue) },
+                        onClick = { channelSheet = true },
+                    )
+                    AuroraDivider(indent = 58.dp)
+                    AuroraRow(
+                        title = "功能建议",
+                        subtitle = "想要什么功能？写下来，我照着改",
+                        leading = { AuroraIcon(AppIcons.ChatBubble, ios.orange) },
+                        onClick = { route = MeRoute.FEEDBACK },
+                    )
+                    AuroraDivider(indent = 58.dp)
                     AuroraRow(
                         title = "关于 LocalMind",
                         leading = { AuroraIcon(AppIcons.Info, ios.blue) },
@@ -203,6 +234,17 @@ fun MePage(
                 Spacer(Modifier.height(16.dp))
             }
         }
+    }
+
+    if (channelSheet) {
+        UpdateChannelSheet(
+            current = channel,
+            onDismiss = { channelSheet = false },
+            onPick = { picked ->
+                viewModel.setUpdateChannel(picked)
+                channelSheet = false
+            },
+        )
     }
 
     if (editing) {
@@ -424,6 +466,60 @@ private fun ProfileEditSheet(
                 onClick = { onSave(name.trim(), pickedEmoji, pickedColor, pickedPhoto) },
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UpdateChannelSheet(
+    current: String,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    val ios = IosTheme.palette
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val options = listOf(
+        Triple("stable", "稳定版", "只收正式发布的版本，最稳"),
+        Triple("beta", "测试版", "更早玩到新功能，可能不稳定"),
+    )
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = ios.secondaryGroupedBackground,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 30.dp)) {
+            Text("更新通道", style = IosTheme.typography.title2, color = ios.label)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "切换后立刻按该通道检查一次更新",
+                style = IosTheme.typography.footnote,
+                color = ios.secondaryLabel,
+            )
+            Spacer(Modifier.height(14.dp))
+            options.forEach { (id, name, desc) ->
+                val selected = current == id
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (selected) ios.blue.copy(alpha = 0.10f) else ios.fillSecondary)
+                        .clickable { onPick(id) }
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = IosTheme.typography.body, color = ios.label, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(2.dp))
+                        Text(desc, style = IosTheme.typography.caption1, color = ios.secondaryLabel)
+                    }
+                    if (selected) {
+                        Icon(AppIcons.Check, contentDescription = null, tint = ios.blue, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
         }
     }
 }

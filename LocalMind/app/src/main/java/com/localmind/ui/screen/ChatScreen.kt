@@ -51,6 +51,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -868,33 +870,22 @@ private fun MessageRow(
     val clipboard = LocalClipboardManager.current
     val entrance = if (animateIn) Modifier.appearIn(offsetY = 14) else Modifier
 
-    // 气泡形状走令牌。三种：
-    //  rounded 全圆角（iOS 默认）
-    //  square  直角
-    //  tail    带小尾巴（QQ 味）—— 用户气泡右下角、AI 气泡左下角
+    // 气泡：形状（10 种轮廓）+ 材质（纯色/渐变/磨砂玻璃/液体玻璃/发光/纸感）。
+    // 两者都由令牌驱动，聊天页和主题商店的预览共用同一个解析函数 ——
+    // 否则预览是亮面、实际是磨砂，用户会觉得被骗。
     val bubbleTokens = com.localmind.ui.theme.LocalUiTokens.current
-    val corner = bubbleTokens["bubbleCorner"]?.toFloatOrNull()?.coerceIn(0f, 32f) ?: 20f
-    val bubbleStyle = bubbleTokens["bubbleStyle"] ?: "rounded"
-    val userBubbleShape = when (bubbleStyle) {
-        "square" -> RoundedCornerShape(0.dp)
-        "tail" -> RoundedCornerShape(
-            topStart = corner.dp,
-            topEnd = corner.dp,
-            bottomEnd = 4.dp,
-            bottomStart = corner.dp,
-        )
-        else -> RoundedCornerShape(corner.dp)
+    val userLook = com.localmind.ui.theme.bubbleLookForUser(bubbleTokens, ios.bubbleUser, ios.bubbleUserText)
+    val aiLook = com.localmind.ui.theme.bubbleLookForAi(bubbleTokens, ios.bubbleAi, ios.label)
+    val userShape = remember(userLook.kind, userLook.corner, userLook.tail) {
+        com.localmind.ui.theme.BubbleShape(userLook.kind, userLook.corner, userLook.tail, true)
     }
-    val aiBubbleShape = when (bubbleStyle) {
-        "square" -> RoundedCornerShape(0.dp)
-        "tail" -> RoundedCornerShape(
-            topStart = 4.dp,
-            topEnd = corner.dp,
-            bottomEnd = corner.dp,
-            bottomStart = corner.dp,
-        )
-        else -> RoundedCornerShape(corner.dp)
+    val aiShape = remember(aiLook.kind, aiLook.corner, aiLook.tail) {
+        com.localmind.ui.theme.BubbleShape(aiLook.kind, aiLook.corner, aiLook.tail, false)
     }
+    // 尾巴占掉了一块"气泡本体"的宽度，内容得让开，否则文字会压到尾巴尖上。
+    // 让多少由形状自己说了算（BubbleKind.tailFactor），跟路径共用同一个系数。
+    val tailPad = (userLook.tail * com.localmind.ui.theme.BubbleKind.of(userLook.kind).tailFactor).dp
+    val aiTailPad = (aiLook.tail * com.localmind.ui.theme.BubbleKind.of(aiLook.kind).tailFactor).dp
 
     when (message.role) {
         Role.USER -> Row(
@@ -913,26 +904,36 @@ private fun MessageRow(
                     if (message.content.isNotBlank()) Spacer(Modifier.height(6.dp))
                 }
                 if (message.content.isNotBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .clip(userBubbleShape)
-                            .background(ios.bubbleUser)
-                            .combinedClickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {},
-                                onLongClick = {
-                                    clipboard.setText(AnnotatedString(message.content))
-                                    onCopy()
-                                },
-                            )
-                            .padding(horizontal = 15.dp, vertical = 10.dp)
+                    com.localmind.ui.theme.BubbleSurface(
+                        shape = userShape,
+                        material = userLook.material,
+                        base = userLook.base,
+                        alt = userLook.alt,
+                        borderColor = userLook.border,
+                        borderWidth = userLook.borderWidth,
+                        shadow = userLook.shadow,
+                        gloss = userLook.gloss,
+                        modifier = Modifier.combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                            onLongClick = {
+                                clipboard.setText(AnnotatedString(message.content))
+                                onCopy()
+                            },
+                        ),
+                        padding = PaddingValues(
+                            start = 15.dp,
+                            end = 15.dp + tailPad,
+                            top = 10.dp,
+                            bottom = 10.dp,
+                        ),
                     ) {
                         SelectionContainer {
                             Text(
                                 text = message.content,
                                 style = IosTheme.typography.body,
-                                color = ios.bubbleUserText,
+                                color = userLook.text,
                             )
                         }
                     }
@@ -948,20 +949,33 @@ private fun MessageRow(
                 }
                 var menu by remember { mutableStateOf(false) }
                 if (message.content.isNotBlank() || streaming) {
-                    Box(
-                        modifier = Modifier
-                            .clip(aiBubbleShape)
-                            .background(ios.bubbleAi)
-                            .border(0.5.dp, ios.bubbleAiBorder, aiBubbleShape)
-                            .combinedClickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {},
-                                onLongClick = { menu = true },
-                            )
-                            .padding(horizontal = 15.dp, vertical = 11.dp)
+                    com.localmind.ui.theme.BubbleSurface(
+                        shape = aiShape,
+                        material = aiLook.material,
+                        base = aiLook.base,
+                        alt = aiLook.alt,
+                        borderColor = aiLook.border ?: ios.bubbleAiBorder,
+                        borderWidth = aiLook.borderWidth,
+                        shadow = aiLook.shadow,
+                        gloss = aiLook.gloss,
+                        modifier = Modifier.combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                            onLongClick = { menu = true },
+                        ),
+                        padding = PaddingValues(
+                            start = 15.dp + aiTailPad,
+                            end = 15.dp,
+                            top = 11.dp,
+                            bottom = 11.dp,
+                        ),
                     ) {
-                        MarkdownText(message.content.ifEmpty { if (streaming) "..." else "" })
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.material3.LocalContentColor provides aiLook.text,
+                        ) {
+                            MarkdownText(message.content.ifEmpty { if (streaming) "..." else "" })
+                        }
                         androidx.compose.material3.DropdownMenu(
                             expanded = menu,
                             onDismissRequest = { menu = false },

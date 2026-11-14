@@ -1,5 +1,6 @@
 package com.localmind.ui.screen
 
+import android.content.Intent
 import android.media.MediaPlayer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +91,19 @@ enum class StudioTab(val label: String) { SYNTH("合成"), LIBRARY("音色库"),
 
 /** 合成区的三种产出形态：单条 / 批量（分文件）/ 有声书（合并 + 字幕）。 */
 enum class SynthMode(val label: String) { SINGLE("单条"), BATCH("批量"), AUDIOBOOK("有声书") }
+
+/**
+ * 音色库的筛选维度。
+ *
+ * 只按「下没下过」和「能不能克隆」分，不做语言/性别猜测：音色清单是云端可改的，
+ * 猜出来的分类一旦不准，用户会以为筛选坏了。搜索框能覆盖"找某个名字"的需求。
+ */
+private enum class LibFilter(val label: String) {
+    ALL("全部"),
+    INSTALLED("已下载"),
+    NOT_INSTALLED("未下载"),
+    CLONE("可克隆"),
+}
 
 @Composable
 fun VoiceStudioScreen(
@@ -200,6 +214,9 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
     val audiobookBusy by viewModel.audiobookBusy.collectAsState()
     val audiobookProgress by viewModel.audiobookProgress.collectAsState()
     val subs by viewModel.synthSubs.collectAsState()
+
+    // 分享要 startActivity，Compose 里只能从 Context 拿。
+    val ctx = LocalContext.current
 
     // 记录和预设不在 init 里读（磁盘 IO），进页面读一次就够。
     LaunchedEffect(Unit) { viewModel.refreshStudioLists() }
@@ -393,6 +410,10 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
         // ---- 参数概览（点开微调） ----
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 试听放在第一个：它是改参数之后最常做的动作，不该藏在面板里。
+                item {
+                    ParamChip(if (busy) "试听中…" else "▶ 试听这句") { viewModel.previewVoiceLine() }
+                }
                 item { ParamChip("语速 %.2fx".format(Locale.US, voice.speed)) { showParams = !showParams } }
                 item { ParamChip("音高 %.2fx".format(Locale.US, voice.pitch)) { showParams = !showParams } }
                 item { ParamChip("停顿 %.2f".format(Locale.US, voice.silenceScale)) { showParams = !showParams } }
@@ -501,6 +522,7 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
                         val where = viewModel.exportSrt()
                         viewModel.toast(if (where != null) "字幕已导出到 $where" else "没有可导出的字幕")
                     },
+                    onShare = { shareAudioFile(viewModel, ctx, f) },
                     onDelete = { viewModel.clearStudioAudio() },
                 )
             }
@@ -537,6 +559,7 @@ private fun SynthSection(viewModel: AppViewModel, onNeedLibrary: () -> Unit) {
                     val where = viewModel.exportTake(t)
                     viewModel.toast(if (where != null) "已导出到 $where" else "导出失败")
                 },
+                onShare = { shareAudioFile(viewModel, ctx, File(t.path)) },
                 onDelete = { viewModel.deleteTake(t.id) },
             )
         }
@@ -568,6 +591,35 @@ private fun LibrarySection(viewModel: AppViewModel) {
         ?: viewModel.voiceEngineState.value
     val engineReady = viewModel.voiceEngineReady
 
+    // ---- 搜索 / 筛选 ----
+    //
+    // 音色清单是「内置 + 云端 + 插件」三层合并出来的（见 VoiceCatalog），
+    // 装了几个插件之后动辄十几二十条，纯列表找不到东西。搜索匹配 label / id /
+    // description —— id 是官方模型名，用户从别处看到的就是它。
+    var query by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf(LibFilter.ALL) }
+
+    // 安装状态和占用体积都要读磁盘，以 states 为 key 一起重算：
+    // 下载完成会改 states，装完这一格才会从「未下载」跳到「已安装」。
+    val installedCount = remember(catalog, states) { catalog.count { viewModel.voiceInstalled(it) } }
+    val usedBytes = remember(catalog, states) { catalog.sumOf { viewModel.voiceInstalledBytes(it) } }
+    val shown = remember(catalog, query, filter, states) {
+        val q = query.trim()
+        catalog.filter { v ->
+            val hit = q.isEmpty() ||
+                v.label.contains(q, ignoreCase = true) ||
+                v.id.contains(q, ignoreCase = true) ||
+                v.description.contains(q, ignoreCase = true)
+            val keep = when (filter) {
+                LibFilter.ALL -> true
+                LibFilter.INSTALLED -> viewModel.voiceInstalled(v)
+                LibFilter.NOT_INSTALLED -> !viewModel.voiceInstalled(v)
+                LibFilter.CLONE -> v.clonable
+            }
+            hit && keep
+        }
+    }
+
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -580,6 +632,38 @@ private fun LibrarySection(viewModel: AppViewModel) {
             Text(
                 "下载走「设置 → 下载代理」里的代理；服务器支持分段时自动多线程拉。",
                 color = ios.secondaryLabel, fontSize = 11.sp,
+            )
+        }
+
+        // ---- 搜索 + 筛选 + 占用统计 ----
+        item {
+            StudioInput(query, { query = it }, "搜音色：名字、模型 id、说明里的字")
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(LibFilter.entries) { f ->
+                    val sel = f == filter
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (sel) ios.blue else ios.fillSecondary)
+                            .clickable { filter = f }
+                            .padding(horizontal = 11.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            f.label,
+                            color = if (sel) ios.onAccent else ios.secondaryLabel,
+                            fontSize = 11.sp,
+                            fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Text(
+                "已下载 $installedCount / ${catalog.size} 个 · 占用 ${mb(usedBytes)}",
+                color = ios.tertiaryLabel, fontSize = 11.sp,
             )
         }
 
@@ -621,10 +705,27 @@ private fun LibrarySection(viewModel: AppViewModel) {
         }
 
         item {
-            Text("音色", color = ios.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            Text(
+                "音色" + if (shown.size != catalog.size) "（${shown.size} 个结果）" else "",
+                color = ios.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+            )
         }
 
-        items(catalog) { v ->
+        if (shown.isEmpty()) {
+            item {
+                Text(
+                    when (filter) {
+                        LibFilter.NOT_INSTALLED -> "全部音色都下好了，可以直接用。"
+                        LibFilter.INSTALLED -> "还没下载任何音色。切到「全部」挑一个下载。"
+                        LibFilter.CLONE -> "没有可克隆的音色，看看「全部」里有没有「克隆」标签的。"
+                        LibFilter.ALL -> "没有匹配「$query」的音色，换个词试试。"
+                    },
+                    color = ios.tertiaryLabel, fontSize = 11.sp,
+                )
+            }
+        }
+
+        items(shown, key = { it.id }) { v ->
             val st = states[v.id]
             val installed = viewModel.voiceInstalled(v)
             val reason = viewModel.voiceUnusableReason(v)
@@ -665,6 +766,17 @@ private fun LibrarySection(viewModel: AppViewModel) {
                             fontSize = 11.sp,
                             maxLines = 2,
                         )
+                        // 说明里有授权协议、适用场景这些真正影响选择的信息
+                        // （"个人/非商用"「带 lexicon，数字多音字更准」），
+                        // 之前只存在数据里没展示，等于用户只能凭名字瞎选。
+                        if (v.description.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                v.description,
+                                color = ios.tertiaryLabel, fontSize = 10.sp, lineHeight = 14.sp,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         if (reason != null && installed) {
                             Spacer(Modifier.height(3.dp))
                             Text("⚠ " + reason, color = ios.orange, fontSize = 10.sp)
@@ -1115,6 +1227,7 @@ private fun StudioPlayer(
     subs: List<SynthSubtitle> = emptyList(),
     onExport: () -> Unit,
     onExportSrt: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
     onDelete: () -> Unit,
 ) {
     val ios = IosTheme.palette
@@ -1213,6 +1326,10 @@ private fun StudioPlayer(
                 Spacer(Modifier.width(6.dp))
             }
             SmallBtn("导出") { onExport() }
+            if (onShare != null) {
+                Spacer(Modifier.width(6.dp))
+                SmallBtn("分享") { onShare() }
+            }
             Spacer(Modifier.width(6.dp))
             SmallBtn("清除", danger = true) { onDelete() }
         }
@@ -1405,6 +1522,7 @@ private fun TakeRow(
     onPlay: () -> Unit,
     onReuse: () -> Unit,
     onExport: () -> Unit,
+    onShare: (() -> Unit)? = null,
     onDelete: () -> Unit,
 ) {
     val ios = IosTheme.palette
@@ -1439,6 +1557,7 @@ private fun TakeRow(
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SmallBtn("复用") { onReuse() }
             SmallBtn("导出") { onExport() }
+            if (onShare != null) SmallBtn("分享") { onShare() }
             Spacer(Modifier.weight(1f))
             SmallBtn("删除", danger = true) { onDelete() }
         }
@@ -1446,6 +1565,27 @@ private fun TakeRow(
 }
 
 /* ------------------------------------------------------------------ 工具 */
+
+/**
+ * 分享一条 WAV。
+ *
+ * ViewModel 负责把文件搬到 FileProvider 授权目录并拼好 Intent；
+ * 这里只做"发出去 + 失败要说人话"——`startActivity` 在没装任何能收音频的
+ * 设备上会抛 `ActivityNotFoundException`，静默失败会让用户以为按钮坏了。
+ */
+private fun shareAudioFile(
+    viewModel: AppViewModel,
+    ctx: android.content.Context,
+    file: File,
+) {
+    val send = viewModel.shareAudio(file)
+    if (send == null) {
+        viewModel.toast("分享失败：音频文件读不出来")
+        return
+    }
+    runCatching { ctx.startActivity(Intent.createChooser(send, "分享语音")) }
+        .onFailure { viewModel.toast("没有能接收音频的应用") }
+}
 
 private fun clock(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
