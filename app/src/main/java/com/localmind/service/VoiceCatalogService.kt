@@ -55,6 +55,14 @@ class VoiceCatalogService(private val context: Context) {
         const val CACHE_FILE = "voices.json"
 
         /**
+         * 音色 id 的合法性。
+         *
+         * 与 [ThemeStoreService] 同一个坑：不能放类尾部的实例属性，
+         * 否则 init / 首次 parse 时会读到 null 而 NPE。
+         */
+        val ID_PATTERN = Regex("^[A-Za-z0-9._-]+$")
+
+        /**
          * 清单地址的回退链。顺序与 [ThemeStoreService] 一致：
          * 官方直连在前（快），ghproxy 镜像在后（墙内唯一能通的路）。
          */
@@ -219,6 +227,4 @@ class VoiceCatalogService(private val context: Context) {
         }
         return null
     }
-
-    private val ID_PATTERN = Regex("^[A-Za-z0-9._-]+$")
 }

@@ -51,6 +51,15 @@ class ThemeStoreService(private val context: Context) {
         const val BUILTIN_ASSET_PREFIX = "builtin/themes/"
 
         /**
+         * 主题包 id 的合法性（字母数字、点、横线、下划线）。
+         *
+         * **必须放在 companion 里**：`init` 阶段就会调 [builtinThemes] → [parse]
+         * → [isValidThemeId]，而实例属性是按源码顺序初始化的；放在类尾部会
+         * 让 init 期间读到 null，直接 NPE 冷启动崩溃（1.0.6 真实事故）。
+         */
+        val ID_PATTERN = Regex("^[A-Za-z0-9._-]+$")
+
+        /**
          * 清单地址的回退链。
          *
          * 前三个是官方直连（最快，但国内常常被墙）：
@@ -158,7 +167,12 @@ class ThemeStoreService(private val context: Context) {
      * refresh 跑完（那可能要十几秒超时）。在线主题随后追加。
      */
     init {
-        _themes.value = builtinThemes()
+        // 兜底：内置清单读坏了不该让整个 App 起不来。
+        // 1.0.6 的冷启动崩溃就是这条链上抛了 NPE（属性初始化顺序），
+        // 应用还没画出第一帧就退出 —— 一个主题商店不值得这个代价。
+        _themes.value = runCatching { builtinThemes() }
+            .onFailure { Log.e(TAG, "内置主题清单解析失败，本次不带内置主题启动", it) }
+            .getOrDefault(emptyList())
     }
 
     private val _loading = MutableStateFlow(false)
@@ -451,8 +465,6 @@ class ThemeStoreService(private val context: Context) {
         }
         return null
     }
-
-    private val ID_PATTERN = Regex("^[A-Za-z0-9._-]+$")
 }
 
 /** 允许被套 ghproxy 的域名白名单。第三方任意地址不在此列，不会被中转。 */

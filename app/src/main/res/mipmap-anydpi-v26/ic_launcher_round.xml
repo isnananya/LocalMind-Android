@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    圆形图标（Android 8+，给 circle 遮罩的启动器用）。
+    与 ic_launcher.xml 用同一套图层：圆形遮罩由系统施加，
+    所以这里不需要再裁一次，否则会出现"圆里套圆"。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
