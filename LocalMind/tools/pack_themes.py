@@ -22,7 +22,7 @@ os.makedirs(DIST, exist_ok=True)
 
 # 目录名 -> (zip 里显示的文件名, 仓库里用的短名)
 THEMES = [
-    ("theme-nekoha", "猫羽雫主题插件.zip", "nekoha"),
+    ("theme-nekoha", "猫娘主题插件.zip", "nekoha"),
     ("theme-frost", "雾霜主题插件.zip", "frost"),
     ("theme-cyber", "赛博霓虹主题插件.zip", "cyber"),
     ("theme-cream", "奶油手账主题插件.zip", "cream"),
