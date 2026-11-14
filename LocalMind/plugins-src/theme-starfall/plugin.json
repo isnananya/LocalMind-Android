@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.starfall",
+  "name": "星夜",
+  "version": "1.0.0",
+  "author": "Wall-E-Desk (github.com/JoshuaThadi/Wall-E-Desk), MIT",
+  "description": "紫蓝流星夜城壁纸，磨砂玻璃气泡与悬浮胶囊底栏。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

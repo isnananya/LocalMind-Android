@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.comet",
+  "name": "彗星",
+  "version": "1.0.0",
+  "author": "Wall-E-Desk (github.com/JoshuaThadi/Wall-E-Desk), MIT",
+  "description": "低饱和彗星夜城壁纸，冷灰蓝玻璃质感。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

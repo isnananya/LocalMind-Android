@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.cream",
+  "name": "奶油手账",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "暖米色纸感：衬线字体、带尾巴气泡、圆形指示器。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

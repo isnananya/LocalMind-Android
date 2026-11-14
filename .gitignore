@@ -1,61 +1,29 @@
-# --- Android / Gradle ---
-*.iml
-.gradle/
+# 构建产物 / 缓存
 build/
-captures/
-.externalNativeBuild/
-.cxx/
-local.properties
-keystore.properties
-*.jks
-*.keystore
-
-# --- vendored / large sources (fetch them yourself, see BUILD.md) ---
-third_party/llama.cpp/
-third_party/stable-diffusion.cpp/
-# GitHub zip 解开的目录名（带 -master 后缀），含它下面 vendored 的 ggml 子模块
-# （leejet/ggml 分支 sd.cpp，两千多个文件）。两者都不进版本库。
-third_party/stable-diffusion.cpp-master/
-# KleidiAI 由 ggml 的 FetchContent 拉取；离线时放这里（见 BUILD.md）
-third_party/kleidiai/
-
-# --- 生图后端预编译静态库（由 :app:fetchStableDiffusion 拉取，不提交）---
-# 每个 ABI 一个，arm64 那个几十 MB。来源见 .github/workflows/prebuilt-sd.yml。
-app/src/main/jniLibs/*/libstable-diffusion.a
-
-# --- sherpa-onnx 神经语音库（由 :app:fetchSherpaOnnx 拉取，不提交）---
-# 每个 ABI 约 36 MB（onnxruntime + sherpa 三个 .so）。官方 Release 没有 AAR，
-# 所以由 Gradle 从 tar.bz2 里解出这几个 .so。来源见 docs/BLOCKERS.md。
-app/src/main/jniLibs/*/libsherpa-onnx-*.so
-app/src/main/jniLibs/*/libonnxruntime.so
-
-# --- models & generated media (never commit weights) ---
-*.gguf
-*.safetensors
-*.onnx
-*.bin
-*.part
-models/
-images/
-
-# --- IDE / OS ---
+.gradle/
+.kotlin/
 .idea/
-.vscode/
-.DS_Store
-Thumbs.db
+local.properties
 *.log
 *.hprof
 
-# --- leftovers from earlier tooling in this folder ---
-node_modules/
-.expo/
-.expo-shared/
+# 交付物与二进制（体积大，不进版本库；需要时在 dist 里重新打包）
 dist/
-.env
-.env.local
+phone/
+release/
+third_party/llama.cpp/
+third_party/stable-diffusion.cpp-master/
+app/src/main/jniLibs/
 
-# --- 生成脚本的中间产物 ---
-.tmp-wallpaper/
+# 测试截图与临时文件
+.shots/
+_backup/
+.cache/
+_research/
+.iconwork/
 
-# --- 图标扣图中间产物 ---
-.tmp-icon/
+# 模型权重
+*.gguf
+*.bin
+*.onnx
+*.safetensors

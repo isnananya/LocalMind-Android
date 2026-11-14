@@ -1,0 +1,83 @@
+# ============================================================================
+# 行尾符规范
+# ============================================================================
+#
+# 为什么需要这个文件
+# ------------------
+# 这个仓库的工作区在 Windows 上 checkout，git config core.autocrlf=false，
+# 于是**工作区是 CRLF、仓库里存的是 LF**。结果是每一次
+# `git status` 都显示几十个文件被"修改"，但 `git diff -w` 看过去又什么都没有
+# —— 全是行尾符的假差异。
+#
+# 真实踩过的坑：一次只改了底栏两个文件的提交，却带进了 34 个文件、
+# 6800 行改动，其中 1850 行是 MinimalIcons.kt 的纯行尾变化。
+# 这样的提交没法 review，也把真正的改动淹了。
+#
+# 规则
+# ----
+# * 文本文件统一以 **LF** 存进仓库（GitHub、CI、Linux 端都一致）。
+# * Windows 上 checkout 时自动转成 CRLF（`text=auto`），
+#   这样编辑器（Notepad++ / VS Code / Android Studio）不别扭。
+# * 二进制文件不碰（zip / png / aar / gguf …）。
+#
+# ⚠️ 已经 checkout 过的机器要跑一次下面这条才能生效：
+#     git rm -r --cached . && git reset --hard
+# 之后工作区会按新规则重新检出。
+
+* text=auto
+
+# ---- 明确排除二进制 ----
+*.apk    binary
+*.aar    binary
+*.aab    binary
+*.so     binary
+*.a      binary
+*.jar    binary
+*.zip    binary
+*.gz     binary
+*.tar    binary
+*.bz2    binary
+*.7z     binary
+*.onnx   binary
+*.gguf   binary
+*.bin    binary
+*.safetensors binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.ico    binary
+*.mp3    binary
+*.wav    binary
+*.ttf    binary
+*.otf    binary
+*.so     binary
+*.dex    binary
+
+# ---- 需要保持原样的 ----
+# 补丁文件必须严格 LF：git apply 对 CRLF 补丁会整片失败
+# （踩过：sd-conv-direct.patch 在 Windows 上被写成 CRLF，
+#   于是 21 个文件全部 "patch does not apply"）。
+*.patch text eol=lf
+*.diff  text eol=lf
+
+# ---- Gradle / Kotlin / C++ ----
+*.kt       text
+*.kts      text
+*.java     text
+*.cpp      text
+*.h        text
+*.c        text
+*.hpp      text
+*.gradle   text
+*.properties text
+*.toml     text
+*.yml      text
+*.yaml     text
+*.json     text
+*.md       text
+*.txt      text
+*.sh       text eol=lf
+*.bat      text eol=crlf
+*.cmd      text eol=crlf

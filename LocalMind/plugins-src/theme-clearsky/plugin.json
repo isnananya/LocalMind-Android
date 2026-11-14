@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.clearsky",
+  "name": "晴空",
+  "version": "1.0.0",
+  "author": "Wall-E-Desk (github.com/JoshuaThadi/Wall-E-Desk), MIT",
+  "description": "蓝天白云壁纸，透亮的浅色磨砂玻璃。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

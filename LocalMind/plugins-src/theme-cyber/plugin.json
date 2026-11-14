@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.cyber",
+  "name": "赛博霓虹",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "黑底霓虹：品红强调、青绿描边、等宽字体、直角底栏。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}

@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.frost",
+  "name": "霜雾",
+  "version": "1.0.0",
+  "author": "LocalMind",
+  "description": "浅色磨砂：半透明白气泡、毛玻璃卡片、圆点指示器。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}
