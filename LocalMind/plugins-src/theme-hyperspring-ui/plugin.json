@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.hyperspring.ui",
+  "name": "HyperSpring 液态玻璃",
+  "version": "1.0.0",
+  "author": "LocalMind · inspired by HyperSpring",
+  "description": "完整视觉主题：液态玻璃、浮动导航、圆润卡片与柔和弹性动效。独立于动画专用主题。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}
