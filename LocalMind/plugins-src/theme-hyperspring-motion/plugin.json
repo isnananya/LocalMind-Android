@@ -1,0 +1,13 @@
+{
+  "id": "dev.localmind.theme.hyperspring.motion",
+  "name": "HyperSpring 动效",
+  "version": "1.0.0",
+  "author": "LocalMind · inspired by HyperSpring",
+  "description": "仅调整动效速度、弹性与页面过渡；保留 LocalMind 原有布局、配色和组件。",
+  "abilities": [
+    "ui_theme"
+  ],
+  "requires": [],
+  "config": {},
+  "manifestVersion": 1
+}
