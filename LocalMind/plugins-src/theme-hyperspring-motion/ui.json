@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "packId": "dev.localmind.theme.hyperspring.motion",
+  "packName": "HyperSpring 动效",
+  "author": "LocalMind",
+  "description": "动画专用主题：不修改布局、色彩、卡片、气泡和导航，只调整统一动效语言。",
+  "license": "Apache-2.0",
+  "home": "https://github.com/olilio3/HyperSpring",
+  "tokens": {
+    "animStyle": "gentle",
+    "animSpeed": "0.88",
+    "pageTransition": "scale"
+  },
+  "darkTokens": {},
+  "tabs": [],
+  "startTab": "",
+  "appName": ""
+}
